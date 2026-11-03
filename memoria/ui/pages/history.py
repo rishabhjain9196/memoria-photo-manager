@@ -18,7 +18,8 @@ def status_label(status: str) -> tuple[str, str]:
 
 
 KIND = {"duplicates": "Duplicates", "similar": "Similar / blurry", "tidy": "Tidy up", "organize": "Organise",
-        "sync": "Compare & sync", "batch": "Photos & videos", "edit": "Editor"}
+        "sync": "Compare & sync", "batch": "Photos & videos", "edit": "Editor",
+        "albums": "Albums export"}
 OP = {"recycle": "Moved to Recovery", "move": "Moved", "copy": "Copied", "rmdir": "Removed empty folder",
       "create": "Created"}
 OP_STATUS = {"done": "Done", "undone": "Undone", "skipped": "Skipped", "failed": "Failed", "purged": "Deleted from Recovery",

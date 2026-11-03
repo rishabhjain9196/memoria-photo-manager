@@ -236,6 +236,8 @@ class AppContext(QObject):
     navigate = Signal(str)
     badges_changed = Signal(dict)     # page key → count shown in the sidebar
     checkup_requested = Signal()
+    people_changed = Signal()         # faces found / named — Photos search and Albums suggestions follow
+    albums_changed = Signal()         # albums created, edited or deleted
 
     def __init__(self, runner):
         super().__init__()

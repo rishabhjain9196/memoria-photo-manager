@@ -6,8 +6,26 @@ import sys
 from pathlib import Path
 
 
+def self_test(report: str) -> int:
+    """Check bundled models and data inside a packaged build (used by tools/verify_build.ps1)."""
+    import json
+    from ..engine import faces, places
+    out = {}
+    try:
+        sample = sorted((Path(faces.__file__).parent.parent / "sample_faces").glob("lincoln_*.jpg"))[0]
+        found = faces.detect(sample)
+        out["faces"] = len(found)
+        out["place"] = places.nearest(34.1526, 77.5771).label
+    except Exception as e:  # pragma: no cover - reported to the caller
+        out["error"] = repr(e)
+    Path(report).write_text(json.dumps(out), encoding="utf-8")
+    return 0 if out.get("faces") == 1 and out.get("place") == "Leh, Ladakh" else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv if argv is None else argv
+    if len(argv) == 3 and argv[1] == "--self-test":
+        return self_test(argv[2])
     if os.name == "nt":
         try:
             import ctypes

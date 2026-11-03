@@ -202,7 +202,7 @@ BUILD_STEPS = [
     "Adding screenshots and downloads…", "Adding an iPhone HEIC photo…", "Adding problem files…",
     "Recording videos…", "Copying a duplicate video…", "Making a compressed video copy…",
     "Making a trimmed video copy…", "Recording an unrelated video…", "Copying whole folders…",
-    "Writing the answer key…",
+    "Adding scanned portraits for People…", "Writing the answer key…",
 ]
 
 
@@ -223,7 +223,8 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True, p
     exp: dict = {"duplicate_groups": [], "bursts": [], "near_duplicates": [], "blurry": [], "junk": [],
                  "empty_files": [], "empty_folders": [], "corrupt": [], "non_media": [], "rotated": [],
                  "dates": {}, "uncertain_dates": [], "large_duplicates": [], "videos": [], "heic": [],
-                 "similar_videos": [], "duplicate_folders": []}
+                 "similar_videos": [], "duplicate_folders": [], "people": {}, "faces_hard": [],
+                 "no_face": []}
     seed = 1000
     originals: list[tuple[str, datetime]] = []
     scale = 0.5 if small else 1.0
@@ -470,6 +471,26 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True, p
         shutil.copy2(dest / r, c)
         exp["duplicate_groups"].append(sorted([r, rel(c)]))
     exp["duplicate_folders"].append({"kind": "inside", "folders": ["USB Stick", str(Path(originals[0][0]).parent)]})
+
+    # 13. People: public-domain portraits (see sample_faces/CREDITS.txt) of three people, spread over two
+    # boxes of scans under neutral names, plus one photo of two of them together. Two portraits are
+    # hard (much older; unusual lighting) and one has no detectable face.
+    step()
+    faces_dir = Path(__file__).with_name("sample_faces")
+    who = {"lincoln": "Abraham Lincoln", "twain": "Mark Twain", "tesla": "Nikola Tesla", "group": "Mark Twain"}
+    for k, f in enumerate(sorted(faces_dir.glob("*.jpg"))):
+        box = "Box 1" if k % 2 == 0 else "Box 2"
+        dt = datetime(2020, 1, 18 if box == "Box 1" else 25, 10, 0) + timedelta(minutes=4 * k)
+        dst = dest / "Scans" / box / f"scan_{1001 + k}.jpg"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        Image.open(f).save(dst, "JPEG", quality=92, exif=exif_bytes(dt, None, None))
+        set_mtime(dst, dt)
+        if f.stem in ("twain_4", "tesla_2"):
+            exp["faces_hard"].append(rel(dst))
+        elif f.stem == "tesla_4":
+            exp["no_face"].append(rel(dst))
+        else:
+            exp["people"].setdefault(who[f.stem.split("_")[0]], []).append(rel(dst))
 
     step()
     exp["duplicate_groups"].sort()

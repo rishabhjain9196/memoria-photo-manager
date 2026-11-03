@@ -20,10 +20,11 @@ from .widgets import (AppContext, Banner, ConfirmDialog, MessageDialog, Toast, b
                       glyph_label, hbox, icon_family, label, vbox)
 
 NAV = [
-    ("LIBRARY", [("overview", "Overview", "\uE80F"), ("photos", "Photos & videos", "\uE91B")]),
+    ("LIBRARY", [("overview", "Overview", "\uE80F"), ("photos", "Photos & videos", "\uE91B"),
+                 ("people", "People", "\uE716")]),
     ("CLEAN UP", [("duplicates", "Duplicates", "\uE8C8"), ("similar", "Similar & best shots", "\uE734"),
                   ("tidy", "Tidy up", "\uE74D")]),
-    ("ORGANISE", [("organize", "Organise by date", "\uE8B7")]),
+    ("ORGANISE", [("organize", "Organise by date", "\uE8B7"), ("albums", "Albums", "\uE7AA")]),
     ("CREATE", [("editor", "Editor", "\uE70F"), ("story", "Story maker", "\uE786"),
                 ("video", "Video compressor", "\uE714")]),
     ("PROTECT", [("health", "Health check", "\uEA18"), ("compare", "Compare & sync", "\uE895"),
@@ -38,6 +39,13 @@ def page_classes() -> dict:
                "duplicates": duplicates.DuplicatesPage, "similar": similar.SimilarPage,
                "tidy": tidy.TidyPage, "organize": organize.OrganizePage,
                "health": health.HealthPage, "compare": compare.ComparePage, "history": history.HistoryPage}
+    try:
+        from .pages.people import PeoplePage
+        classes["people"] = PeoplePage
+    except ImportError:
+        pass
+    from .pages.albums import AlbumsPage
+    classes["albums"] = AlbumsPage
     try:
         from .pages.editor import EditorPage
         classes["editor"] = EditorPage

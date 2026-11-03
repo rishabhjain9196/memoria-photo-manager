@@ -7,6 +7,8 @@ $py = ".\.venv\Scripts\python.exe"
 & $py -m PyInstaller --noconfirm --clean --windowed --name Memoria `
     --icon memoria\ui\assets\memoria.ico `
     --add-data "memoria\ui\assets;memoria\ui\assets" `
+    --add-data "memoria\engine\data;memoria\engine\data" `
+    --add-data "memoria\sample_faces;memoria\sample_faces" `
     --collect-binaries imageio_ffmpeg `
     --collect-data cv2 `
     --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineWidgets `

@@ -26,7 +26,7 @@ def test_every_page_runs_without_errors(pristine_library, tmp_path):
     check = Library(lib)
     batches = actions.batches(check)
     kinds = {b["kind"] for b in batches}
-    assert {"duplicates", "batch", "edit"} <= kinds              # clean-up, Photos batch action, Editor saves
+    assert {"duplicates", "batch", "edit", "albums"} <= kinds    # clean-up, Photos batch action, Editor saves, album export
     dup = next(b for b in batches if b["kind"] == "duplicates")
     removed = [o["src"] for o in actions.operations(check, dup["id"]) if o["op"] == "rmdir" and o["status"] == "undone"]
     assert any(p.endswith("Old Laptop") for p in removed)        # a whole duplicate folder was removed, then restored
@@ -46,3 +46,12 @@ def test_every_page_runs_without_errors(pristine_library, tmp_path):
     assert check.db.execute("SELECT COUNT(*) FROM parked_files").fetchone()[0] == 0
     check.close()
     assert {"photos-viewer", "dark-overview", "dark-similar", "07-editor-crop", "07-editor-video"} <= shots
+    assert {"13-people", "13-people-lookalike", "14-albums", "14-albums-make"} <= shots
+    check = Library(lib)
+    names = {r[0] for r in check.db.execute("SELECT name FROM people")}
+    assert names == {"Abraham Lincoln", "Mark Twain"}                     # named in the People page
+    saved = {r[0] for r in check.db.execute("SELECT name FROM albums")}
+    assert "Leh, Ladakh · 10–12 Jun 2023" in saved and {"Abraham Lincoln", "Mark Twain"} <= saved
+    check.close()
+    exported = tmp_path / "Album exports"
+    assert exported.is_dir() and not [p for p in exported.rglob("*") if p.is_file()]   # export undone

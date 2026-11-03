@@ -43,6 +43,8 @@ class OverviewPage(Page):
                                     "files to organise in one go. Reads only — nothing is changed.")
         for w in (self.updating, self.rescan_btn, self.check_btn):
             self.header_actions.addWidget(w)
+        ctx.people_changed.connect(self._mark_stale)
+        ctx.albums_changed.connect(self._mark_stale)
         self.t_photos, self.t_videos, self.t_size, self.t_span = Tile(text="Photos"), Tile(text="Videos"), \
             Tile(text="Library size"), Tile(text="Covers")
         tiles = hbox(self.t_photos, self.t_videos, self.t_size, self.t_span, spacing=12)
@@ -52,6 +54,7 @@ class OverviewPage(Page):
         grid.setSpacing(12)
         specs = [("\uE8C8", "Duplicates", "duplicates"), ("\uE734", "Similar & best shots", "similar"),
                  ("\uE74D", "Tidy up", "tidy"), ("\uE8B7", "Organise by date", "organize"),
+                 ("\uE7AA", "Albums", "albums"), ("\uE716", "People", "people"),
                  ("\uEA18", "Health check", "health"), ("\uE81C", "History & recovery", "history"),
                  ("\uE786", "Story maker", "story"), ("\uE714", "Video compressor", "video"),
                  ("\uE895", "Compare & sync", "compare")]
@@ -94,6 +97,16 @@ class OverviewPage(Page):
         self.cards["video"].set(f"{fmt_n(st['videos'], 'video')} in this library. Make smaller copies for sharing."
                                 if st["videos"] else "Make smaller copies of videos for sharing.")
         self.cards["compare"].set("Check a backup drive or old laptop folder against this library and copy what's missing.")
+        from ...engine import albums, faces
+        n_albums = len(albums.albums(lib))
+        self.cards["albums"].set(f"{fmt_n(n_albums, 'album')}. Make more from dates, places or people." if n_albums else
+                                 "Let Memoria suggest albums by event, trip, place or person — no files are moved.")
+        fs = faces.status(lib)
+        self.cards["people"].set(
+            f"{fmt_n(fs['people'], 'person', 'people')} named. Search for anyone to see all their photos." if fs["people"]
+            else f"{fmt_n(fs['faces'], 'face')} found — name people to find all their photos." if fs["faces"]
+            else "Find the people in your photos, name them, and see every photo of someone.",
+            bool(fs["pending"] and fs["faces"]))
         cached = {k: self.ctx.cached(k) for k in ("duplicates", "duplicate_report", "similar", "similar_videos", "tidy",
                                                 "organize")}
         self.updating.setText("Updating…")

@@ -1,0 +1,19 @@
+Public-domain photographs used to test People (face recognition) in the sample library.
+All are from Wikimedia Commons and marked public domain there; see each file page.
+
+group_twain_tesla.jpg	File:Twain in Tesla Lab.jpg	Public domain	https://commons.wikimedia.org/wiki/File:Twain_in_Tesla_Lab.jpg
+lincoln_1.jpg	File:Abraham Lincoln O-10 by Jackson, 1858.jpg	Public domain	https://commons.wikimedia.org/wiki/File:Abraham_Lincoln_O-10_by_Jackson,_1858.jpg
+lincoln_2.jpg	File:Abraham Lincoln 1863 Portrait (3x4 cropped).jpg	Public domain	https://commons.wikimedia.org/wiki/File:Abraham_Lincoln_1863_Portrait_(3x4_cropped).jpg
+lincoln_3.jpg	File:Portrait of Abraham Lincoln - DPLA - c42c9cea5a713e3e68fa92576c0e5dbc.jpg	Public domain	https://commons.wikimedia.org/wiki/File:Portrait_of_Abraham_Lincoln_-_DPLA_-_c42c9cea5a713e3e68fa92576c0e5dbc.jpg
+lincoln_4.jpg	File:Abraham Lincoln (approximately 1860) - DPLA - f6cff027284aa28dfb18019af5401599.jpg	Public domain	https://commons.wikimedia.org/wiki/File:Abraham_Lincoln_(approximately_1860)_-_DPLA_-_f6cff027284aa28dfb18019af5401599.jpg
+lincoln_5.jpg	File:Abraham Lincoln LCCN2015645458.jpg	Public domain	https://commons.wikimedia.org/wiki/File:Abraham_Lincoln_LCCN2015645458.jpg
+tesla_1.jpg	File:N.Tesla.JPG	Public domain	https://commons.wikimedia.org/wiki/File:N.Tesla.JPG
+tesla_2.jpg	File:Nikola Tesla by Sarony c1898.jpg	Public domain	https://commons.wikimedia.org/wiki/File:Nikola_Tesla_by_Sarony_c1898.jpg
+tesla_3.jpg	File:Nikola Tesla, Barraud.jpg	Public domain	https://commons.wikimedia.org/wiki/File:Nikola_Tesla,_Barraud.jpg
+tesla_4.jpg	File:Teslathinker.jpg	Public domain	https://commons.wikimedia.org/wiki/File:Teslathinker.jpg
+tesla_5.jpg	File:Nicola Tesla 1904 (cropped).jpg	Public domain	https://commons.wikimedia.org/wiki/File:Nicola_Tesla_1904_(cropped).jpg
+twain_1.jpg	File:Mark Twain by Abdullah Frères, 1867.jpg	Public domain	https://commons.wikimedia.org/wiki/File:Mark_Twain_by_Abdullah_Fr%C3%A8res,_1867.jpg
+twain_2.jpg	File:Mark Twain c1880.jpg	Public domain	https://commons.wikimedia.org/wiki/File:Mark_Twain_c1880.jpg
+twain_3.jpg	File:Mark Twain by Sarony, 1884.JPG	Public domain	https://commons.wikimedia.org/wiki/File:Mark_Twain_by_Sarony,_1884.JPG
+twain_4.jpg	File:Mark Twain c1900.jpg	Public domain	https://commons.wikimedia.org/wiki/File:Mark_Twain_c1900.jpg
+twain_5.jpg	File:Mark Twain, Brady-Handy photo portrait, Feb 7, 1871, cropped.jpg	Public domain	https://commons.wikimedia.org/wiki/File:Mark_Twain,_Brady-Handy_photo_portrait,_Feb_7,_1871,_cropped.jpg

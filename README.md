@@ -5,6 +5,8 @@ A private, offline photo and video manager for Windows, built to be easy to trus
 Memoria looks after a personal photo library:
 - finds exact duplicates — including whole duplicate folders — and look-alike shots, and picks the best photo of a burst;
 - clears junk files and files photos into date folders;
+- recognises the people in your photos — offline — so you can name them and see every photo of someone;
+- makes albums automatically from events, trips, places and people, and exports them to folders;
 - detects silent file damage and compares the library with a backup;
 - makes Instagram stories and story videos, and smaller copies of videos for sharing.
 
@@ -39,11 +41,17 @@ the rendered page).
 
 ## Highlights
 
-- **12 focused pages** replace the 20 commands of the old command-line tool, plus **Check everything**: one read-only
+- **14 focused pages** replace the 20 commands of the old command-line tool, plus **Check everything**: one read-only
   pass that runs every finder and puts count badges in the sidebar.
 - **Find → Review → Confirm → Apply → Undo** for every change, with plain-language reasons for every suggestion.
 - **Exact duplicates are proven**, not guessed: files are compared by full-content hash (xxh3-128), and the kept copy is
   verified before anything moves.
+- **People**: finds faces with two small open models (YuNet + SFace, run by OpenCV), groups the same person
+  together, and lets you name, join and correct groups, find look-alikes, and search Photos & videos by name. All
+  offline; face data stays in the library's catalogue and can be forgotten with one click.
+- **Albums** without moving files: suggested from events and trips ("Leh, Ladakh · 10–12 Jun 2023"), places (offline
+  town names from GeoNames) or named people; edit them, add from Photos & videos, and export one or all albums to
+  folders with verified, undoable copies.
 - **Similar videos**: finds compressed, resized or trimmed copies by comparing frames, and keeps the best copy.
 - **Batch actions** in Photos & videos: select many items, then move to Recovery, copy to a folder (verified), move
   within the library, compress, or send to the Story maker. All undoable.
@@ -65,7 +73,7 @@ the rendered page).
   - an SSIM quality score is reported.
 - **Health check** fingerprints every file and flags silent damage, such as bit rot or bad copies.
 - **Fast**: about 180 photos/s on first index; rescans in milliseconds; 100,000-photo similarity search in about 4 s.
-- **Tested** against a generated library with known answers: 88 automated tests, including an end-to-end UI test in both
+- **Tested** against a generated library with known answers: 141 automated tests, including an end-to-end UI test in both
   themes.
 
 ## Quick start
@@ -96,10 +104,12 @@ No library handy? On the welcome screen choose **Try it on a sample library**. I
 |---|---|---|
 | **Overview** | Totals, years covered, safety status, and what each tool would do for this library. | Nothing |
 | **Photos & videos** | Timeline (year → month), search, filters, zoom, viewer and a large preview. The preview shows the date and where it came from, camera, GPS and problems. **Batch actions** on a selection. | Nothing, unless you run a batch action |
+| **People** | Faces found offline and grouped by person. Name groups, join them, correct mistakes (*Not this person*), find look-alikes, hide strangers, make an album. Names are searchable in Photos & videos. | Nothing (catalogue only) |
 | **Duplicates** | Whole duplicate folders first (same files, or all inside a bigger folder), shown at the highest level with size, photo and video counts and sizes; then byte-identical single copies. Memoria explains which copy or folder it keeps; you can choose another or exclude any. | Moves copies or whole folders to Recovery |
 | **Similar & best shots** | Bursts, retakes and resized copies, with an explained best pick. The *Similar videos* tab finds re-encoded and trimmed copies. A *Blurry photos* tab has three sensitivities, and nothing is pre-ticked. | Moves ticked items to Recovery |
 | **Tidy up** | Thumbs.db, desktop.ini, .DS_Store, `._` files, partial downloads, empty files and folders. Unreadable media and stray documents start unticked. | Moves files to Recovery; removes empty folders (undo recreates them) |
 | **Organise by date** | Moves files into `2024\2024-07`-style folders using the camera date, then a date in the file name. Files dated only by modified time are skipped unless you opt in. | Moves files inside the library |
+| **Albums** | Albums suggested by events and trips, places or people; rename, add, remove, set cover. Export one or all albums to folders. | Nothing — export writes verified copies (undoable) |
 | **Editor** | Crop, rotate, flip, straighten, adjust, filter, resize, compress, split and join photos; trim, split, join, crop, rotate, adjust, change speed and mute videos. Live preview, batch apply. | Writes new files (never changes originals); undoable |
 | **Story maker** | Instagram stories, carousels and story videos with a live preview. | Writes new files to an output folder |
 | **Video compressor** | Smaller copies of videos for sharing, using presets or a target size, with verification and a quality score. | Writes new files to an output folder |
@@ -131,6 +141,8 @@ The [Features guide](docs/features.html) explains every option.
 | Duplicates | Similar & best shots |
 |---|---|
 | ![Duplicate folders](docs/images/duplicates-folders.png) | ![Similar](docs/images/similar.png) |
+| **People** | **Albums** |
+| ![People](docs/images/people.png) | ![Make albums](docs/images/albums-make.png) |
 | **Editor (photo)** | **Editor (video)** |
 | ![Editor photo](docs/images/editor-crop.png) | ![Editor video](docs/images/editor-video.png) |
 | **Story maker** | **Video compressor** |
@@ -180,11 +192,14 @@ memoria-photo-manager/
 │   │   ├── scanner.py          incremental scan + parallel analysis
 │   │   ├── media.py · ffmpeg.py · hashing.py · config.py · progress.py
 │   │   ├── duplicates.py · similar.py · videosim.py · organize.py · tidy.py · health.py · compare.py
+│   │   ├── faces.py · albums.py · places.py
+│   │   ├── data/               face models (YuNet, SFace) + licences · places.tsv.gz (GeoNames)
 │   │   └── batch.py · checkup.py · photoedit.py · videoedit.py · story.py · videotools.py
 │   ├── ui/                     PySide6 desktop app
 │   │   ├── app.py · main_window.py · tasks.py · widgets.py · theme.py · assets/
 │   │   └── pages/              one module per sidebar page (+ base.py)
 │   ├── samplelib.py            generator for the sample / test library (with expected.json)
+│   ├── sample_faces/           public-domain portraits used by the sample library (CREDITS.txt)
 │   └── __main__.py             python -m memoria
 ├── tests/                      pytest suite (engine ground truth, story, video, UI end-to-end)
 ├── tools/                      make_test_library · ui_screenshots · benchmark · make_reports · make_icon · verify_build
@@ -202,7 +217,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 126 tests, about 2 minutes
+.\.venv\Scripts\python -m pytest -q                       # 141 tests, about 2.5 minutes
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 ```
@@ -210,6 +225,8 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | Suite | Tests | Proves |
 |---|---|---|
 | `tests/test_engine.py` | 27 | Results match ground truth: duplicates (including files over 1.28 MB), bursts and best frame, near-duplicates, blur, dates and their sources, rotation, HEIC, video, tidy, organise. Safety: changed files are skipped, nothing is overwritten, copies are verified, undo restores an identical tree, crash reconciliation, cancellation, Empty Recovery. |
+| `tests/test_faces.py` | 8 | People: the expected people are found and grouped (no faces in landscapes), changed and deleted photos are handled, names and corrections survive regrouping, look-alike search, Undo keeps faces, forget all. |
+| `tests/test_albums.py` | 7 | Offline place names, event and trip albums, place and people albums, album edits never touch files, export + undo. |
 | `tests/test_dupfolders.py` | 6 | Duplicate folders: nested copies shown once at the top, contained and renamed folders, folder sizes and counts, clean-up and undo restore the exact tree, changed or new files keep their folder. |
 | `tests/test_photoedit.py` | 20 | Photo edits: exact rotate/flip/crop, straighten, adjustments, formats, EXIF and GPS handling, split and join, cancellation. |
 | `tests/test_videoedit.py` | 12 | Video edits: trim, speed, rotate, crop, mute, split, join, frame export, cancellation. |
@@ -224,7 +241,7 @@ The **test library** (`tools\make_test_library.py [DEST] [--small]`) is a determ
 includes camera, phone and backup folders; exact duplicates (including 6 MB files); a nested album copied whole to an old
 laptop folder and a USB stick holding some camera photos; 5-frame bursts with a known best
 frame; WhatsApp-style copies; blurry shots; EXIF-rotated portraits; HEIC; screenshots and other files dated only by file
-name; junk; empty files and folders; a truncated JPEG; documents; and videos. Its `expected.json` lists what every tool
+name; public-domain portraits of three historical figures for People; junk; empty files and folders; a truncated JPEG; documents; and videos. Its `expected.json` lists what every tool
 should find.
 
 UI screenshots for review or docs:
@@ -237,12 +254,12 @@ $env:MEMORIA_SHOT_LABEL = "<b>Photos</b><br>D:\"     # optional: hide the real l
 ## Building a standalone app
 
 ```powershell
-.\build.ps1        # → dist\Memoria\Memoria.exe (PyInstaller, windowed, about 300 MB)
+.\build.ps1        # → dist\Memoria\Memoria.exe (PyInstaller, windowed, about 340 MB including the face models)
 .\tools\verify_build.ps1    # runs the packaged exe on a generated library and checks the result
 ```
 
 The build bundles the icon, FFmpeg and OpenCV data. It then removes parts the app never loads (OpenCV's video-capture
-FFmpeg, Qt's software OpenGL, Qt Quick/QML/PDF and unused face models), which takes it from 381 MB to 299 MB. The `.exe` is unsigned, so Windows
+FFmpeg, Qt's software OpenGL, Qt Quick/QML/PDF and unused face models), which takes it from 420 MB to 338 MB. The `.exe` is unsigned, so Windows
 SmartScreen warns the first time it runs.
 
 ## Performance
@@ -258,6 +275,7 @@ SmartScreen warns the first time it runs.
 | Health check (full read of every byte) | 3.5 s — about 290 MB/s |
 | Similarity pairs, 100,000 hashes | about 4.2 s |
 | Similar-video signatures | about 0.15 s per short clip, then cached |
+| Find people (sample library, 127 photos) | about 5 s, then only new photos |
 | Story video, 1080×1920, with Ken Burns | about 96 fps |
 
 ## Troubleshooting
@@ -286,4 +304,6 @@ See also the [CHANGELOG](CHANGELOG.md).
 ## Licence
 
 Proprietary — © 2026 Rishabh Jain. All rights reserved. See [LICENSE](LICENSE). Third-party dependencies keep their own
-licences; see the [Technical document](docs/technical.html#deps).
+licences; see the [Technical document](docs/technical.html#deps). Bundled data: YuNet face detector (MIT) and SFace
+face recogniser (Apache 2.0) from the OpenCV model zoo; town names from [GeoNames](https://www.geonames.org) (CC BY 4.0);
+public-domain test portraits from Wikimedia Commons (`memoria/sample_faces/CREDITS.txt`).

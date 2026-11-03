@@ -43,7 +43,7 @@
   <h1>Design document</h1>
   <p>Why Memoria looks and behaves the way it does — the product goals, the trust model that every tool obeys,
      the information architecture, interaction patterns and the decisions behind them.</p>
-  <div class="meta"><span class="pill">Version 1.3</span><span class="pill">Windows desktop · PySide6</span>
+  <div class="meta"><span class="pill">Version 1.4</span><span class="pill">Windows desktop · PySide6</span>
     <span class="pill">Offline · no accounts · no telemetry</span></div>
 </header>
 
@@ -179,6 +179,12 @@ then simply tells the truth about those rules.</p>
     recycled with a guard on an identical copy that stays (outside every folder being removed); a folder that can't be fully
     guarded is left out; <code>rmdir</code> runs only on empty folders.</td><td>"2 folders left out: some of their files no
     longer have a copy elsewhere."</td></tr>
+  <tr><td>I16</td><td>Face data never leaves the computer</td><td>Detection and recognition run locally (bundled ONNX models);
+    signatures and names live in the library catalogue; <code>faces.forget_all</code> deletes them.</td><td>"Private by
+    design" banner on People; "Forget all face data…".</td></tr>
+  <tr><td>I17</td><td>Albums never move files</td><td>Albums are catalogue rows (<code>albums</code>, <code>album_items</code>);
+    only Export writes files — verified copies through the journaled executor.</td><td>"Albums don't move or copy
+    anything." Deleting an album: "the photos stay".</td></tr>
   <tr><td>I10</td><td>Originals of creative tools are untouched</td><td>Story and video outputs are new files in a separate
     output folder; video copies must play, match duration and be smaller or they are discarded.</td>
     <td>Video page banner and result column.</td></tr>
@@ -211,9 +217,9 @@ then simply tells the truth about those rules.</p>
 understand the library, clean it, organise it, create from it, and protect it.</p>
 <table>
   <tr><th>Group</th><th>Pages</th><th>User intent</th></tr>
-  <tr><td>LIBRARY</td><td>Overview · Photos &amp; videos</td><td>"What do I have?"</td></tr>
+  <tr><td>LIBRARY</td><td>Overview · Photos &amp; videos · People</td><td>"What do I have — and who is in it?"</td></tr>
   <tr><td>CLEAN UP</td><td>Duplicates · Similar &amp; best shots · Tidy up</td><td>"Get rid of what I don't need — safely."</td></tr>
-  <tr><td>ORGANISE</td><td>Organise by date</td><td>"Make it findable."</td></tr>
+  <tr><td>ORGANISE</td><td>Organise by date · Albums</td><td>"Make it findable — by date, event, place or person."</td></tr>
   <tr><td>CREATE</td><td>Editor · Story maker · Video compressor</td><td>"Fix it up and share it."</td></tr>
   <tr><td>PROTECT</td><td>Health check · Compare &amp; sync · History &amp; recovery</td><td>"Make sure I never lose it."</td></tr>
 </table>
@@ -295,6 +301,8 @@ returns a reason alongside its result:</p>
     backup/download/copy folder", "Newer copy of the same file".</td></tr>
   <tr><td>Which folder to keep</td><td>"Same files; looks like a backup or copy", "Every file in it is also in “DCIM\100CANON”",
     "Not ticked at first because “Phone Backup\2023” looks like a backup and “Camera Roll\2023” like the original".</td></tr>
+  <tr><td>Album names</td><td>"Leh, Ladakh · 10–12 Jun 2023" (place from GPS, then dates); "25 Dec 2019" when there is no
+    location; "Goa" when photos are between towns (the region is used).</td></tr>
   <tr><td>Best shot</td><td>"Best pick: sharpest (20.1× the softest), best exposure, 2 faces detected"; others:
     "blurrier (25% of best sharpness)", "too dark", "smaller (800×600)".</td></tr>
   <tr><td>Photo date</td><td>"Camera date", "Date in file name", "File modified date (less reliable)".</td></tr>
@@ -383,6 +391,16 @@ explain what each tool would do for this library.</figcaption></figure>
     level; "same" and "inside"</td><td>Compare names/sizes or exact tree layout; list every sub-folder</td>
     <td>Backups are often re-organised or renamed, so content is the only reliable test. Showing the top folder turns
     hundreds of file groups into one decision; files stay guarded individually.</td></tr>
+  <tr><td>Face recognition</td><td>YuNet detector + SFace 128-d signatures through OpenCV DNN, bundled, two detection
+    scales</td><td>Cloud APIs; dlib/face_recognition; InsightFace</td><td>Fully offline and permissively licensed (MIT,
+    Apache 2.0); dlib needs a compiler on Windows; popular InsightFace models are licensed for non-commercial use only.</td></tr>
+  <tr><td>Grouping faces</td><td>Leader clustering → centre merging → reassignment at cosine 0.42; corrections stored
+    (<code>face_rejects</code>)</td><td>DBSCAN/HDBSCAN; pairwise linking</td><td>Centre-based linking avoids chaining two people
+    together through one ambiguous face; one pass scales to tens of thousands of faces with NumPy.</td></tr>
+  <tr><td>Place names</td><td>Bundled GeoNames towns (15,000+ people), most populous within a few km of the nearest</td>
+    <td>Online reverse geocoding</td><td>Privacy (the old CLI leaked locations to a web service) and offline use.</td></tr>
+  <tr><td>Event albums</td><td>Time gaps, extended to 3 days while photos stay in one place</td><td>Fixed per-day albums;
+    k-means on time</td><td>Matches how people think of trips; explainable with one setting.</td></tr>
   <tr><td>Similar photos</td><td>64-bit difference hash + capture-time bursts</td><td>CLIP embeddings; pHash</td>
     <td>dHash is fast, offline and explainable; CLIP finds "same subject", which is not "same photo" (see product plan).</td></tr>
   <tr><td>Best-shot scoring</td><td>Sharpness (log-scaled), exposure, resolution, faces — measured at a fixed 512 px</td>

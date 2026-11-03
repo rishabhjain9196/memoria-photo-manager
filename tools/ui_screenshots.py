@@ -85,7 +85,7 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
         win.run_checkup()          # read-only "Check everything" → sidebar badges + cached results
         idle()
     order = ["overview", "photos", "duplicates", "similar", "tidy", "organize", "editor", "story", "video", "health",
-             "compare", "history"]
+             "compare", "history", "people", "albums"]
     for i, key in enumerate(order, 1):
         if key not in win.page_classes:
             continue
@@ -173,6 +173,59 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
             elif key == "health":
                 page.check()
                 idle()
+            elif key == "people":
+                import json
+                from memoria.engine import faces as _faces
+                page.find()
+                idle()
+                exp = Path(library) / "expected.json"
+                want = json.loads(exp.read_text()).get("people", {}) if exp.exists() else {}
+                for person in ("Abraham Lincoln", "Mark Twain"):
+                    files = set(want.get(person, []))
+                    for g in page.shown:
+                        got = {r["rel_path"] for r in _faces.photos_of(page.lib, g.key)}
+                        if not g.named and files and len(got & files) * 2 > len(got):
+                            page.list.setCurrentRow(page.shown.index(g))
+                            page.name_group(person)
+                            break
+                pump()
+                unnamed = next((r for r, g in enumerate(page.shown) if not g.named), None)
+                if unnamed is not None:
+                    page.list.setCurrentRow(unnamed)
+                    pump()
+                    page.faces.item(0).setSelected(True)
+                    page.find_similar()
+                    pump(0.5)
+                    shot(name=f"{i:02d}-{key}-lookalike")
+                page.list.setCurrentRow(0)
+                pump(0.5)
+                page.grid.setCurrentIndex(page.grid.model().index(0, 0))
+                pump(0.5)
+            elif key == "albums":
+                page.tabs.setCurrentIndex(1)
+                page.suggest("event")
+                idle()
+                trip = next((r for r, s in enumerate(page.suggestions) if "–" in s.name and "·" in s.name), 0)
+                page.s_list.setCurrentRow(trip)
+                pump(0.5)
+                shot(name=f"{i:02d}-{key}-make")
+                page.save()
+                pump()
+                page.suggest("person")
+                idle()
+                page.save()
+                pump()
+                page.tabs.setCurrentIndex(0)
+                pump()
+                row = next((r for r, a in enumerate(page.saved) if "–" in a["name"] and "·" in a["name"]), 0)
+                page.a_list.setCurrentRow(row)
+                pump(0.5)
+                page.export([page.saved[row]["id"]], str(outdir.parent / "Album exports"))
+                idle()
+                win.undo_last()      # exported copies are removed again by History's Undo
+                idle()
+                win.go(key)
+                pump()
             elif key == "compare":
                 other = Path(library).parent / "Other Backup"
                 if not other.exists():

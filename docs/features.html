@@ -23,12 +23,14 @@
   <a href="#photos">Photos &amp; videos</a>
   <a class="sub" href="#batch">Batch actions</a>
   <a class="sub" href="#viewer">Viewer</a>
+  <a href="#people">People</a>
   <a href="#duplicates">Duplicates</a>
   <a href="#similar">Similar &amp; best shots</a>
   <a class="sub" href="#videos">Similar videos</a>
   <a class="sub" href="#blurry">Blurry photos</a>
   <a href="#tidy">Tidy up</a>
   <a href="#organize">Organise by date</a>
+  <a href="#albums">Albums</a>
   <a href="#editor">Editor</a>
   <a class="sub" href="#editor-photo">Photo tools</a>
   <a class="sub" href="#editor-video">Video tools</a>
@@ -49,7 +51,7 @@
 <header class="hero">
   <h1>Features guide</h1>
   <p>Everything Memoria can do, how to use each tool, and exactly what each one will — and won't — change on your PC.</p>
-  <div class="meta"><span class="pill">Version 1.3</span><span class="pill">12 pages</span><span class="pill">Light &amp; dark</span><span class="pill">Works offline</span><span class="pill">Windows 10/11</span></div>
+  <div class="meta"><span class="pill">Version 1.4</span><span class="pill">14 pages</span><span class="pill">Light &amp; dark</span><span class="pill">Works offline</span><span class="pill">Windows 10/11</span></div>
 </header>
 
 <section id="start">
@@ -154,6 +156,39 @@ Move to Recovery and More actions. Videos show a ▶ duration tag.</figcaption><
 <p>Double-click a photo (or press Enter) to view it large. Use ← / → (or Space / Backspace) to move through the photos
 currently shown, <b>Open in default app</b>, <b>Show in folder</b>, and Esc to close. Videos open in your default player.</p>
 <figure><img src="images/viewer.png" alt="Viewer"><figcaption>The built-in viewer.</figcaption></figure>
+</section>
+
+<section id="people">
+<h2>People</h2>
+<p>Finds the faces in your photos, groups the ones that belong to the same person, and lets you name them — then you can
+see every photo of someone, search for them in Photos &amp; videos, or make an album of them.</p>
+<div class="callout ok"><b>Private by design.</b> Faces are found and recognised on this computer by two small open
+models. Face positions, their 128-number "signatures" and names are stored only in this library's catalogue. Nothing is
+uploaded, photos are never changed, and <b>More → Forget all face data…</b> deletes all of it.</div>
+<h3>How to use</h3>
+<ol>
+  <li>Click <b>Find people</b>. Every photo is checked once (a fraction of a second per photo, using all processor cores);
+      later runs only look at new or changed photos. A progress bar shows how far it has got, and Esc cancels.</li>
+  <li>The list shows each group of look-alike faces with how many photos it appears in. Select one to see its faces and
+      photos.</li>
+  <li>Click <b>Name…</b> and type a name. Choosing a name that already exists joins the two groups. New photos of a named
+      person are matched automatically from then on.</li>
+  <li>If two groups are the same person, use <b>Same person as…</b>. If a face doesn't belong, select it and click
+      <b>Not this person</b> — it is never matched to that person again.</li>
+  <li><b>Find look-alikes</b> searches the whole library for faces like the selected one, most alike first — handy for
+      finding someone the grouping missed.</li>
+  <li><b>Hide</b> puts away groups you don't care about (strangers in the background, statues). <b>More → Unhide hidden
+      groups</b> brings them back; <b>Show faces seen in only one photo</b> lists one-off faces too.</li>
+  <li><b>Make album</b> saves the photos shown as an album.</li>
+</ol>
+<p>Once people are named, type a name in the <b>Photos &amp; videos</b> search box to see all their photos, filtered by date
+and type like any other search.</p>
+<figure><img src="images/people.png" alt="People"><figcaption>Two people named; a third group waits for a name.</figcaption></figure>
+<figure><img src="images/people-lookalike.png" alt="Find look-alikes"><figcaption>Find look-alikes: photos with a face like
+the selected one, most alike first.</figcaption></figure>
+<p>Good to know: faces are found in photos, not videos. Very small faces (under about 20 pixels in a 1600-pixel view),
+profiles and faces partly covered may be missed; photos of the same person decades apart may form separate groups —
+join them with <b>Same person as…</b>.</p>
 </section>
 
 <section id="duplicates">
@@ -271,6 +306,38 @@ Undo recreates them.</p>
 (e.g. <i>IMG_20210314_101500.jpg</i>, <i>WhatsApp Image 2022-08-01 at 10.15.30.jpeg</i>, <i>Screenshot 2024-02-10 101010.png</i>).
 Names are kept; a number is added only when the destination already has a file with the same name.</p>
 <figure><img src="images/organize.png" alt="Organise by date"><figcaption>The plan before anything moves.</figcaption></figure>
+</section>
+
+<section id="albums">
+<h2>Albums</h2>
+<p>Groups photos and videos into albums <b>without moving or copying anything</b> — an album only records which items belong
+to it, so a photo can be in many albums and deleting an album never touches its photos.</p>
+<h3>Make albums automatically</h3>
+<p>On the <b>Make albums</b> tab, choose how to group, click <b>Suggest albums</b>, review, and save the ones you want:</p>
+<table>
+  <tr><th>Group by</th><th>How</th><th>Named like</th></tr>
+  <tr><td><b>Events &amp; trips</b></td><td>Photos taken close together become one album; a pause longer than the set time
+    (8 hours by default) starts a new one. A <b>trip</b> — photos in one place over several days — stays together through the
+    nights (up to 3 days between photos).</td><td>"Leh, Ladakh · 10–12 Jun 2023", "25 Dec 2019"</td></tr>
+  <tr><td><b>Places</b></td><td>One album per town or region, across all years. Only photos with a location are used.</td>
+    <td>"Delhi", "Goa"</td></tr>
+  <tr><td><b>People</b></td><td>One album per person named on the People page.</td><td>"Abraham Lincoln"</td></tr>
+</table>
+<p>Place names come from a list of world towns bundled with Memoria (GeoNames) — locations are never looked up online.
+Screenshots, damaged files and extra copies of exact duplicates are left out. Double-click a suggested name to change
+it; suggestions you have already saved are shown unticked.</p>
+<figure><img src="images/albums-make.png" alt="Make albums"><figcaption>A three-day trip in one place becomes one album, named
+after the place.</figcaption></figure>
+<h3>Your albums</h3>
+<ul>
+  <li><b>Rename…</b>, <b>Delete album…</b> (the photos stay), <b>Remove from album</b> and <b>Use as cover</b>.</li>
+  <li>Add photos from <b>Photos &amp; videos</b>: select them, then <b>More actions → Add to album…</b> (or right-click). Pick an
+      album or type a new name.</li>
+  <li><b>Export…</b> copies one album into a folder you choose; <b>Export all albums…</b> copies every album, each into its own
+      folder named after it. Copies are checked byte for byte, nothing is overwritten, and History can undo the export.
+      Exporting into the library itself is possible but warned about, because the copies would show up as duplicates.</li>
+</ul>
+<figure><img src="images/albums.png" alt="Albums"><figcaption>Saved albums with their dates, counts and contents.</figcaption></figure>
 </section>
 
 <section id="editor">
@@ -443,12 +510,12 @@ changes.</p>
 <h2>Keyboard shortcuts</h2>
 <table>
   <tr><th>Keys</th><th>Action</th></tr>
-  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">1</span> … <span class="kbd">0</span></td><td>Go to a page in sidebar order (Ctrl+1 Overview … Ctrl+7 Editor … Ctrl+0 Health check)</td></tr>
+  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">1</span> … <span class="kbd">0</span></td><td>Go to a page in sidebar order (Ctrl+1 Overview, Ctrl+3 People … Ctrl+8 Albums, Ctrl+9 Editor, Ctrl+0 Story maker)</td></tr>
   <tr><td><span class="kbd">F5</span></td><td>Rescan the library</td></tr>
   <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">O</span></td><td>Open another library</td></tr>
   <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">Z</span></td><td>Undo the last change (asks first)</td></tr>
   <tr><td><span class="kbd">Esc</span></td><td>Cancel the running task</td></tr>
-  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">F</span></td><td>Search (Photos &amp; videos)</td></tr>
+  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">F</span></td><td>Search (Photos &amp; videos) — names, folders, cameras and people</td></tr>
   <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">A</span></td><td>Select all shown items</td></tr>
   <tr><td><span class="kbd">Delete</span></td><td>Move selected items to Recovery (asks first)</td></tr>
   <tr><td><span class="kbd">Enter</span> / double-click</td><td>View photo</td></tr>
@@ -472,12 +539,14 @@ changes.</p>
 <section id="sample">
 <h2>Sample / test library</h2>
 <p>The <b>Try it on a sample library</b> button (and <code>tools\make_test_library.py</code>) creates a realistic library of
-generated photos — no real people or places beyond public city coordinates — designed so that every tool has something
-to find:</p>
+generated photos — plus a few public-domain portraits of three 19th-century figures for People; no private people or
+places — designed so that every tool has something to find:</p>
 <div class="grid">
   <div class="card"><h4>Camera &amp; phone folders</h4><p>DCIM, Camera Roll, iPhone Import with EXIF dates, cameras and GPS.</p></div>
   <div class="card"><h4>Exact duplicates</h4><p>Phone Backup copies, "(1)" downloads, triple copies, 6 MB files, a duplicated video.</p></div>
   <div class="card"><h4>Duplicate folders</h4><p>A nested family album copied whole to "Old Laptop" (with a Thumbs.db), and a USB stick holding some Christmas photos.</p></div>
+  <div class="card"><h4>People</h4><p>Public-domain portraits of Abraham Lincoln, Mark Twain and Nikola Tesla (Wikimedia Commons) spread over two "boxes of scans", including one photo of two of them, two hard cases and one with no visible face.</p></div>
+  <div class="card"><h4>Albums</h4><p>Events in Delhi, Goa and Ladakh with GPS, a three-day trip, and named people.</p></div>
   <div class="card"><h4>Look-alikes</h4><p>Five-frame bursts with one sharp frame; WhatsApp-style resized copies.</p></div>
   <div class="card"><h4>Blurry shots</h4><p>Four heavily blurred photos.</p></div>
   <div class="card"><h4>Tricky dates</h4><p>Dates only in file names; one scan with no date at all.</p></div>
@@ -490,7 +559,11 @@ to find:</p>
 <section id="faq">
 <h2>FAQ</h2>
 <h4>Does Memoria upload anything?</h4>
-<p>No. It has no account, no cloud features and no telemetry. FFmpeg and all analysis run locally.</p>
+<p>No. It has no account, no cloud features and no telemetry. FFmpeg, face recognition, place names and all analysis run
+locally.</p>
+<h4>Where is face data kept, and how do I remove it?</h4>
+<p>In the library's own catalogue (<code>.memoria</code>), next to your photos. People → More → <b>Forget all face data…</b>
+deletes every face, name and correction; your photos are not touched.</p>
 <h4>Can I delete the <code>.memoria</code> folder?</h4>
 <p>Yes, but it contains Recovery (files you removed) and History. Empty or restore Recovery first. Memoria rebuilds the
 catalogue and thumbnails next time you open the library.</p>

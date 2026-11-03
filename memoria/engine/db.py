@@ -81,10 +81,29 @@ MIGRATIONS: dict[int, list[str]] = {
         "CREATE TABLE IF NOT EXISTS parked_files (op_id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL, "
         "data TEXT NOT NULL)",
     ],
+    3: [
+        # People: faces found in photos (position, 128-number signature), named people and the user's
+        # corrections. Albums: named sets of library files. Neither changes any file.
+        "CREATE TABLE IF NOT EXISTS people (id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS faces (id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL, x REAL NOT NULL, "
+        "y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL, score REAL NOT NULL, emb BLOB NOT NULL, person_id INTEGER, "
+        "confirmed INTEGER NOT NULL DEFAULT 0, cluster INTEGER, ignored INTEGER NOT NULL DEFAULT 0)",
+        "CREATE INDEX IF NOT EXISTS ix_faces_file ON faces(file_id)",
+        "CREATE INDEX IF NOT EXISTS ix_faces_person ON faces(person_id)",
+        "CREATE TABLE IF NOT EXISTS face_scans (file_id INTEGER PRIMARY KEY, size INTEGER NOT NULL, "
+        "mtime REAL NOT NULL, faces INTEGER NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS face_rejects (face_id INTEGER NOT NULL, person_id INTEGER NOT NULL, "
+        "PRIMARY KEY (face_id, person_id))",
+        "CREATE TABLE IF NOT EXISTS albums (id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, "
+        "created_at TEXT NOT NULL, cover_id INTEGER)",
+        "CREATE TABLE IF NOT EXISTS album_items (album_id INTEGER NOT NULL, file_id INTEGER NOT NULL, "
+        "pos INTEGER NOT NULL, PRIMARY KEY (album_id, file_id))",
+    ],
 }
 SCHEMA_VERSION = max(MIGRATIONS)
 
-THUMB_SCHEMA = "CREATE TABLE IF NOT EXISTS thumbs (file_id INTEGER PRIMARY KEY, data BLOB NOT NULL);"
+THUMB_SCHEMA = """CREATE TABLE IF NOT EXISTS thumbs (file_id INTEGER PRIMARY KEY, data BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS face_thumbs (face_id INTEGER PRIMARY KEY, data BLOB NOT NULL);"""
 
 # Columns derived from file content; cleared whenever a file's size or mtime changes.
 DERIVED = ("qhash", "chash", "analyzed", "error", "width", "height", "taken_at", "date_source",

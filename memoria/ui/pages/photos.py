@@ -6,10 +6,10 @@ from pathlib import Path, PurePath
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QHeaderView, QLineEdit, QMenu, QSlider, QSplitter,
-                               QTreeWidget, QTreeWidgetItem, QWidget)
+from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QHeaderView, QInputDialog, QLineEdit, QMenu, QSlider,
+                               QSplitter, QTreeWidget, QTreeWidgetItem, QWidget)
 
-from ...engine import batch
+from ...engine import albums, batch, faces
 from ..widgets import (MessageDialog, PhotoGrid, Preview, Viewer, button, fmt_date, fmt_n, fmt_size, hbox, label,
                        open_path, show_in_explorer, vbox)
 from .base import Page, recovery_note, recycle_summary
@@ -35,7 +35,7 @@ class PhotosPage(Page):
         self.header_actions.addWidget(self.zoom)
 
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search name, folder or camera")
+        self.search.setPlaceholderText("Search name, folder, camera or person")
         self.search.setToolTip("Ctrl+F")
         self.search.setClearButtonEnabled(True)
         self.kind = QComboBox()
@@ -71,6 +71,7 @@ class PhotosPage(Page):
         self.a_edit = self.more_menu.addAction("Edit…", self._to_editor)
         self.a_story = self.more_menu.addAction("Add to Story maker", self._to_story)
         self.a_video = self.more_menu.addAction("Compress videos", self._to_video)
+        self.a_album = self.more_menu.addAction("Add to album…", lambda: self.add_to_album())
         self.more_menu.addSeparator()
         self.a_copy = self.more_menu.addAction("Copy to folder…", self.copy_selected)
         self.a_move = self.more_menu.addAction("Move to folder in this library…", self.move_selected)
@@ -108,10 +109,13 @@ class PhotosPage(Page):
                   activated=lambda: self.grid.currentIndex().isValid() and self._view(
                       self.grid.currentIndex().data(Qt.ItemDataRole.UserRole)))
         self.rows: list[dict] = []
+        self.names: dict[int, str] = {}
+        ctx.people_changed.connect(self._mark_stale)
 
     # --------------------------------------------------------------------------- data
     def refresh(self) -> None:
         self.rows = [dict(r) for r in self.lib.files("1", order="COALESCE(taken_at,'') DESC, rel_path")]
+        self.names = {k: " ".join(v).lower() for k, v in faces.names_by_file(self.lib).items()}
         problems = sum(1 for r in self.rows if r["error"] and r["kind"] != "other")
         self.kind.setItemText(3, f"Problems ({problems:,})" if problems else "Problems")
         self._build_tree()
@@ -176,7 +180,8 @@ class PhotosPage(Page):
                     continue
                 if prefix != "Unknown" and not t.startswith(prefix):
                     continue
-            if q and q not in r["rel_path"].lower() and q not in (r["camera"] or "").lower():
+            if q and q not in r["rel_path"].lower() and q not in (r["camera"] or "").lower() \
+                    and q not in self.names.get(r["id"], ""):
                 continue
             items.append({**r, "caption": fmt_date(r["taken_at"]) if r["taken_at"] else r["name"],
                           "tip": f"{r['rel_path']}\n{fmt_size(r['size'])}"})
@@ -316,6 +321,34 @@ class PhotosPage(Page):
             self.ctx.edit_selection[:] = ids
             self.ctx.navigate.emit("editor")
 
+    def add_to_album(self, name: str | None = None) -> None:
+        sel = [i for i in self.selected() if i["kind"] in ("image", "video")]
+        if not sel:
+            return
+        existing = {a["name"].lower(): a for a in albums.albums(self.lib)}
+        if name is None:
+            dlg = QInputDialog(self)
+            dlg.setWindowTitle("Add to album")
+            dlg.setLabelText(f"Add {fmt_n(len(sel), 'item')} to an album — pick one, or type a new name:")
+            dlg.setComboBoxItems([a["name"] for a in existing.values()])
+            dlg.setComboBoxEditable(True)
+            dlg.setTextValue("")
+            if not dlg.exec():
+                return
+            name = dlg.textValue()
+        name = " ".join(name.split())
+        if not name:
+            return
+        a = existing.get(name.lower())
+        if a:
+            n = albums.add(self.lib, a["id"], [i["id"] for i in sel])
+            msg = f"Added {fmt_n(n, 'item')} to “{a['name']}”." if n else f"Already in “{a['name']}”."
+        else:
+            albums.create(self.lib, name, [i["id"] for i in sel])
+            msg = f"Created the album “{name}” with {fmt_n(len(sel), 'item')}."
+        self.ctx.albums_changed.emit()
+        self.ctx.toast_requested.emit(msg + " No files were moved or copied.", "")
+
     def _to_video(self) -> None:
         paths = [str(self.lib.abspath(i["rel_path"])) for i in self.selected() if i["kind"] == "video" and not i.get("error")]
         if paths:
@@ -343,6 +376,7 @@ class PhotosPage(Page):
             m.addAction("Add to Story maker", self._to_story)
         if any(i["kind"] == "video" and not i.get("error") for i in sel):
             m.addAction("Compress video" + ("s" if len(sel) > 1 else ""), self._to_video)
+        m.addAction("Add to album…", lambda: self.add_to_album())
         m.addAction("Copy to folder…", self.copy_selected)
         m.addAction("Move to folder…", self.move_selected)
         m.addSeparator()

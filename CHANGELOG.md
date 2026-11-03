@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.4.0 — 2026-11-04
+
+### Added
+- **People.** Finds faces in photos and groups them by person, entirely offline, using two small open models run by
+  OpenCV: YuNet (MIT) to find faces and SFace (Apache 2.0) for face signatures.
+  - Name a group, join groups ("Same person as…" or by typing an existing name), and remove wrong faces ("Not this
+    person"). Corrections are remembered.
+  - "Find look-alikes" searches the whole library for faces like the selected one.
+  - Hide strangers; make an album of someone's photos.
+  - Named people can be searched in Photos & videos.
+  - Scans are incremental, parallel and cancellable, with progress.
+  - Face data is stored only in the library's catalogue; "Forget all face data" deletes it. Photos are never changed.
+- **Albums.** Albums record which photos belong to them and never move or copy files.
+  - Suggested from events and trips (a pause of 8 hours starts a new album; a trip in one place stays together for up
+    to 3 days between photos), from places, or from named people.
+  - Albums are named after the place and dates, e.g. "Leh, Ladakh · 10–12 Jun 2023". Place names come from a bundled
+    offline list of towns (GeoNames, CC BY 4.0).
+  - Rename, remove items, set a cover, delete. "Add to album…" in Photos & videos.
+  - Export one album or all albums to folders with verified copies, which History can undo.
+- Overview cards for People and Albums.
+- Test library: public-domain portraits of Abraham Lincoln, Mark Twain and Nikola Tesla from Wikimedia Commons, with
+  ground truth for People.
+- Catalogue schema v3 (people, faces, albums). Opening a library upgrades it automatically.
+- Packaged app self-test (`Memoria.exe --self-test report.json`), used by `tools\verify_build.ps1`.
+
+### Changed
+- Sidebar: People under Library; Albums under Organise. Ctrl+number shortcuts follow the new order.
+
 ## 1.3.0 — 2026-11-04
 
 ### Added

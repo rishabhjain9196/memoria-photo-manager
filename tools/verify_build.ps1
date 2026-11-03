@@ -4,6 +4,18 @@ $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot)
 $exe = "dist\Memoria\Memoria.exe"
 if (-not (Test-Path $exe)) { throw "Build first: .\build.ps1" }
+$data = "dist\Memoria\_internal\memoria"
+foreach ($f in "engine\data\face_detection_yunet_2023mar.onnx", "engine\data\face_recognition_sface_2021dec.onnx",
+               "engine\data\places.tsv.gz", "sample_faces\CREDITS.txt") {
+    if (-not (Test-Path "$data\$f")) { throw "Missing from the build: $f" }
+}
+$report = Join-Path $env:TEMP "memoria-selftest.json"
+Remove-Item $report -ErrorAction SilentlyContinue
+$st = Start-Process -FilePath $exe -ArgumentList "--self-test", "`"$report`"" -PassThru -Wait
+$result = if (Test-Path $report) { Get-Content $report -Raw } else { "no report" }
+Remove-Item $report -ErrorAction SilentlyContinue
+if ($st.ExitCode -ne 0) { throw "Packaged self-test failed: $result" }
+Write-Host "Self-test (face models, places): $result"
 $work = Join-Path $env:TEMP "memoria-verify"
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 & .\.venv\Scripts\python tools\make_test_library.py "$work\library" --small | Out-Null
