@@ -84,7 +84,7 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
     if interactive_flows:
         win.run_checkup()          # read-only "Check everything" → sidebar badges + cached results
         idle()
-    order = ["overview", "photos", "duplicates", "similar", "tidy", "organize", "story", "video", "health",
+    order = ["overview", "photos", "duplicates", "similar", "tidy", "organize", "editor", "story", "video", "health",
              "compare", "history"]
     for i, key in enumerate(order, 1):
         if key not in win.page_classes:
@@ -121,6 +121,34 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                 pump()
             elif key == "organize":
                 page.build_plan()
+                idle()
+            elif key == "editor":
+                ids = [r["id"] for r in page.lib.files("kind='image' AND error IS NULL AND rel_path LIKE 'DCIM%'",
+                                                       order="rel_path")][:2]
+                vids = [r["id"] for r in page.lib.files("kind='video' AND error IS NULL", order="rel_path")][:2]
+                win.ctx.edit_selection[:] = ids + vids
+                page._take_selection()
+                page.files.setCurrentRow(0)
+                pump(1.5)
+                page.p_sliders["brightness"].s.setValue(25)
+                page.p_sliders["saturation"].s.setValue(30)
+                page.p_aspect.setCurrentIndex(page.p_aspect.findData("4:5"))
+                pump(1.5)
+                shot(name=f"{i:02d}-{key}-crop")
+                page._toggle_crop()          # Done → show the cropped result
+                pump(1.5)
+                shot(name=f"{i:02d}-{key}-photo")
+                page.save()
+                idle()
+                page.files.setCurrentRow(2)  # first video
+                pump(2.5)
+                page.timeline.setValue(600)
+                page.v_sliders["contrast"].s.setValue(20)
+                pump(2.5)
+                page._set_trim("end")
+                pump(1.0)
+                shot(name=f"{i:02d}-{key}-video")
+                page.save()
                 idle()
             elif key == "story":
                 ids = [r["id"] for r in page.lib.files("kind='image' AND error IS NULL AND rel_path LIKE 'DCIM%'",

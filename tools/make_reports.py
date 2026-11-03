@@ -32,6 +32,8 @@ AREAS = {
     "test_safety": "Catalogue integrity — drives, locks, schema, long paths",
     "test_batch": "Batch actions and Check everything",
     "test_videosim": "Similar videos",
+    "test_photoedit": "Photo editor",
+    "test_videoedit": "Video editor",
     "test_video": "Video compressor",
     "test_story": "Story maker",
     "test_ui_smoke": "Desktop UI — end to end",

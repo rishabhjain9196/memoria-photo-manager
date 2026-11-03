@@ -7,137 +7,175 @@ td.num{text-align:right;white-space:nowrap} details summary{cursor:pointer;font-
 <div class="top"><div class="inner"><a class="brand" href="index.html"><img src="../memoria/ui/assets/memoria.png" alt="">Memoria</a>
 <nav><a href="design.html">Design</a><a href="features.html">Features</a><a href="technical.html">Technical</a><a class="active" href="report.html">Quality report</a></nav></div></div>
 <div class="layout"><aside class="toc"><b>QUALITY REPORT</b><a href="#summary">Summary</a><a href="#tests">Test results</a>
-<a class="sub" href="#test_batch">Batch actions and Check everything</a><a class="sub" href="#test_engine">Engine — ground truth, safety and undo</a><a class="sub" href="#test_safety">Catalogue integrity — drives, locks, schema, long paths</a><a class="sub" href="#test_story">Story maker</a><a class="sub" href="#test_ui_smoke">Desktop UI — end to end</a><a class="sub" href="#test_video">Video compressor</a><a class="sub" href="#test_videosim">Similar videos</a>
+<a class="sub" href="#test_batch">Batch actions and Check everything</a><a class="sub" href="#test_engine">Engine — ground truth, safety and undo</a><a class="sub" href="#test_photoedit">Photo editor</a><a class="sub" href="#test_safety">Catalogue integrity — drives, locks, schema, long paths</a><a class="sub" href="#test_story">Story maker</a><a class="sub" href="#test_ui_smoke">Desktop UI — end to end</a><a class="sub" href="#test_video">Video compressor</a><a class="sub" href="#test_videoedit">Video editor</a><a class="sub" href="#test_videosim">Similar videos</a>
 <a href="#bench">Benchmark</a><a href="#truth">Test library ground truth</a><a href="#env">Environment</a><a href="#repro">Reproduce</a></aside><main>
 <header class="hero"><h1>Quality report</h1><p>Automated test results and performance measurements for Memoria.</p>
-<div class="meta"><span class="pill">Generated 03 Nov 2026, 22:59</span><span class="pill">by tools/make_reports.py</span></div></header>
+<div class="meta"><span class="pill">Generated 03 Nov 2026, 23:39</span><span class="pill">by tools/make_reports.py</span></div></header>
 <section id="summary"><h2>Summary</h2>
 <div class="callout ok"><b>All tests passed.</b>
-88 passed, 0 failed, 0 skipped in 87 s.</div>
-<div class="grid"><div class="card"><p>Tests</p><h4 style="font-size:26px;margin:4px 0 0">88</h4></div><div class="card"><p>Passed</p><h4 style="font-size:26px;margin:4px 0 0" style="color:var(--ok)">88</h4></div>
-<div class="card"><p>Failed</p><h4 style="font-size:26px;margin:4px 0 0">0</h4></div><div class="card"><p>Time in tests</p><h4 style="font-size:26px;margin:4px 0 0">84 s</h4></div></div>
+120 passed, 0 failed, 0 skipped in 117 s.</div>
+<div class="grid"><div class="card"><p>Tests</p><h4 style="font-size:26px;margin:4px 0 0">120</h4></div><div class="card"><p>Passed</p><h4 style="font-size:26px;margin:4px 0 0" style="color:var(--ok)">120</h4></div>
+<div class="card"><p>Failed</p><h4 style="font-size:26px;margin:4px 0 0">0</h4></div><div class="card"><p>Time in tests</p><h4 style="font-size:26px;margin:4px 0 0">116 s</h4></div></div>
 <table><tr><th>Area</th><th>Tests</th><th>Passed</th><th>Time</th></tr>
-<tr><td><a href='#test_batch'>Batch actions and Check everything</a></td><td class='num'>5</td><td class='num'>5</td><td class='num'>13.9 s</td></tr>
-<tr><td><a href='#test_engine'>Engine — ground truth, safety and undo</a></td><td class='num'>27</td><td class='num'>27</td><td class='num'>11.3 s</td></tr>
+<tr><td><a href='#test_batch'>Batch actions and Check everything</a></td><td class='num'>5</td><td class='num'>5</td><td class='num'>13.3 s</td></tr>
+<tr><td><a href='#test_engine'>Engine — ground truth, safety and undo</a></td><td class='num'>27</td><td class='num'>27</td><td class='num'>11.1 s</td></tr>
+<tr><td><a href='#test_photoedit'>Photo editor</a></td><td class='num'>20</td><td class='num'>20</td><td class='num'>4.8 s</td></tr>
 <tr><td><a href='#test_safety'>Catalogue integrity — drives, locks, schema, long paths</a></td><td class='num'>11</td><td class='num'>11</td><td class='num'>3.2 s</td></tr>
-<tr><td><a href='#test_story'>Story maker</a></td><td class='num'>30</td><td class='num'>30</td><td class='num'>10.1 s</td></tr>
-<tr><td><a href='#test_ui_smoke'>Desktop UI — end to end</a></td><td class='num'>1</td><td class='num'>1</td><td class='num'>34.4 s</td></tr>
-<tr><td><a href='#test_video'>Video compressor</a></td><td class='num'>7</td><td class='num'>7</td><td class='num'>6.8 s</td></tr>
-<tr><td><a href='#test_videosim'>Similar videos</a></td><td class='num'>7</td><td class='num'>7</td><td class='num'>4.3 s</td></tr>
+<tr><td><a href='#test_story'>Story maker</a></td><td class='num'>30</td><td class='num'>30</td><td class='num'>9.6 s</td></tr>
+<tr><td><a href='#test_ui_smoke'>Desktop UI — end to end</a></td><td class='num'>1</td><td class='num'>1</td><td class='num'>48.4 s</td></tr>
+<tr><td><a href='#test_video'>Video compressor</a></td><td class='num'>7</td><td class='num'>7</td><td class='num'>6.9 s</td></tr>
+<tr><td><a href='#test_videoedit'>Video editor</a></td><td class='num'>12</td><td class='num'>12</td><td class='num'>14.5 s</td></tr>
+<tr><td><a href='#test_videosim'>Similar videos</a></td><td class='num'>7</td><td class='num'>7</td><td class='num'>4.1 s</td></tr>
 </table></section><section id='tests'><h2>Test results</h2><p>Every test name below states the behaviour it proves. Engine tests run against a generated library whose expected results are recorded in <code>expected.json</code>.</p>
 <h3 id='test_batch'>Batch actions and Check everything <span class='pill'>tests/test_batch.py</span></h3><table><tr><th>Behaviour verified</th><th>Result</th><th>Time</th></tr>
-<tr><td>Copy to folder is verified and undoable<br><small style='color:var(--muted)'><code>test_copy_to_folder_is_verified_and_undoable</code></small></td><td class='st passed'>Passed</td><td class='num'>9.95 s</td></tr>
-<tr><td>Move within library keeps rows and undoes<br><small style='color:var(--muted)'><code>test_move_within_library_keeps_rows_and_undoes</code></small></td><td class='st passed'>Passed</td><td class='num'>1.10 s</td></tr>
-<tr><td>Move outside library is refused<br><small style='color:var(--muted)'><code>test_move_outside_library_is_refused</code></small></td><td class='st passed'>Passed</td><td class='num'>0.19 s</td></tr>
-<tr><td>Batch recycle and undo<br><small style='color:var(--muted)'><code>test_batch_recycle_and_undo</code></small></td><td class='st passed'>Passed</td><td class='num'>1.08 s</td></tr>
-<tr><td>Checkup is read only and matches ground truth<br><small style='color:var(--muted)'><code>test_checkup_is_read_only_and_matches_ground_truth</code></small></td><td class='st passed'>Passed</td><td class='num'>1.61 s</td></tr>
+<tr><td>Copy to folder is verified and undoable<br><small style='color:var(--muted)'><code>test_copy_to_folder_is_verified_and_undoable</code></small></td><td class='st passed'>Passed</td><td class='num'>9.55 s</td></tr>
+<tr><td>Move within library keeps rows and undoes<br><small style='color:var(--muted)'><code>test_move_within_library_keeps_rows_and_undoes</code></small></td><td class='st passed'>Passed</td><td class='num'>1.01 s</td></tr>
+<tr><td>Move outside library is refused<br><small style='color:var(--muted)'><code>test_move_outside_library_is_refused</code></small></td><td class='st passed'>Passed</td><td class='num'>0.18 s</td></tr>
+<tr><td>Batch recycle and undo<br><small style='color:var(--muted)'><code>test_batch_recycle_and_undo</code></small></td><td class='st passed'>Passed</td><td class='num'>1.02 s</td></tr>
+<tr><td>Checkup is read only and matches ground truth<br><small style='color:var(--muted)'><code>test_checkup_is_read_only_and_matches_ground_truth</code></small></td><td class='st passed'>Passed</td><td class='num'>1.51 s</td></tr>
 </table>
 <h3 id='test_engine'>Engine — ground truth, safety and undo <span class='pill'>tests/test_engine.py</span></h3><table><tr><th>Behaviour verified</th><th>Result</th><th>Time</th></tr>
-<tr><td>Quick hash is only a prefilter<br><small style='color:var(--muted)'><code>test_quick_hash_is_only_a_prefilter</code></small></td><td class='st passed'>Passed</td><td class='num'>0.03 s</td></tr>
-<tr><td>Scan is incremental<br><small style='color:var(--muted)'><code>test_scan_is_incremental</code></small></td><td class='st passed'>Passed</td><td class='num'>0.23 s</td></tr>
+<tr><td>Quick hash is only a prefilter<br><small style='color:var(--muted)'><code>test_quick_hash_is_only_a_prefilter</code></small></td><td class='st passed'>Passed</td><td class='num'>0.04 s</td></tr>
+<tr><td>Scan is incremental<br><small style='color:var(--muted)'><code>test_scan_is_incremental</code></small></td><td class='st passed'>Passed</td><td class='num'>0.22 s</td></tr>
 <tr><td>Index counts and errors<br><small style='color:var(--muted)'><code>test_index_counts_and_errors</code></small></td><td class='st passed'>Passed</td><td class='num'>0.18 s</td></tr>
 <tr><td>Dates and sources<br><small style='color:var(--muted)'><code>test_dates_and_sources</code></small></td><td class='st passed'>Passed</td><td class='num'>0.18 s</td></tr>
 <tr><td>Rotated photos are reported upright<br><small style='color:var(--muted)'><code>test_rotated_photos_are_reported_upright</code></small></td><td class='st passed'>Passed</td><td class='num'>0.18 s</td></tr>
-<tr><td>Heic and video analysis<br><small style='color:var(--muted)'><code>test_heic_and_video_analysis</code></small></td><td class='st passed'>Passed</td><td class='num'>0.18 s</td></tr>
+<tr><td>Heic and video analysis<br><small style='color:var(--muted)'><code>test_heic_and_video_analysis</code></small></td><td class='st passed'>Passed</td><td class='num'>0.20 s</td></tr>
 <tr><td>Duplicate groups match ground truth<br><small style='color:var(--muted)'><code>test_duplicate_groups_match_ground_truth</code></small></td><td class='st passed'>Passed</td><td class='num'>0.23 s</td></tr>
-<tr><td>Files &gt; 1.28 MB were skipped by the old CLI because of a sampled/full hash mismatch.<br><small style='color:var(--muted)'><code>test_large_duplicates_are_removed_regression</code></small></td><td class='st passed'>Passed</td><td class='num'>0.24 s</td></tr>
-<tr><td>Duplicate removal and undo<br><small style='color:var(--muted)'><code>test_duplicate_removal_and_undo</code></small></td><td class='st passed'>Passed</td><td class='num'>1.35 s</td></tr>
-<tr><td>Duplicate removal skips changed files<br><small style='color:var(--muted)'><code>test_duplicate_removal_skips_changed_files</code></small></td><td class='st passed'>Passed</td><td class='num'>0.28 s</td></tr>
+<tr><td>Files &gt; 1.28 MB were skipped by the old CLI because of a sampled/full hash mismatch.<br><small style='color:var(--muted)'><code>test_large_duplicates_are_removed_regression</code></small></td><td class='st passed'>Passed</td><td class='num'>0.23 s</td></tr>
+<tr><td>Duplicate removal and undo<br><small style='color:var(--muted)'><code>test_duplicate_removal_and_undo</code></small></td><td class='st passed'>Passed</td><td class='num'>1.26 s</td></tr>
+<tr><td>Duplicate removal skips changed files<br><small style='color:var(--muted)'><code>test_duplicate_removal_skips_changed_files</code></small></td><td class='st passed'>Passed</td><td class='num'>0.29 s</td></tr>
 <tr><td>User can choose keeper and exclude<br><small style='color:var(--muted)'><code>test_user_can_choose_keeper_and_exclude</code></small></td><td class='st passed'>Passed</td><td class='num'>0.23 s</td></tr>
-<tr><td>Bursts grouped and best frame chosen<br><small style='color:var(--muted)'><code>test_bursts_grouped_and_best_frame_chosen</code></small></td><td class='st passed'>Passed</td><td class='num'>0.46 s</td></tr>
-<tr><td>Near duplicates prefer original<br><small style='color:var(--muted)'><code>test_near_duplicates_prefer_original</code></small></td><td class='st passed'>Passed</td><td class='num'>0.45 s</td></tr>
-<tr><td>Similar excludes exact copies and screenshots<br><small style='color:var(--muted)'><code>test_similar_excludes_exact_copies_and_screenshots</code></small></td><td class='st passed'>Passed</td><td class='num'>0.49 s</td></tr>
-<tr><td>Blurry detection<br><small style='color:var(--muted)'><code>test_blurry_detection</code></small></td><td class='st passed'>Passed</td><td class='num'>0.19 s</td></tr>
-<tr><td>Organize plan apply undo<br><small style='color:var(--muted)'><code>test_organize_plan_apply_undo</code></small></td><td class='st passed'>Passed</td><td class='num'>1.48 s</td></tr>
+<tr><td>Bursts grouped and best frame chosen<br><small style='color:var(--muted)'><code>test_bursts_grouped_and_best_frame_chosen</code></small></td><td class='st passed'>Passed</td><td class='num'>0.45 s</td></tr>
+<tr><td>Near duplicates prefer original<br><small style='color:var(--muted)'><code>test_near_duplicates_prefer_original</code></small></td><td class='st passed'>Passed</td><td class='num'>0.47 s</td></tr>
+<tr><td>Similar excludes exact copies and screenshots<br><small style='color:var(--muted)'><code>test_similar_excludes_exact_copies_and_screenshots</code></small></td><td class='st passed'>Passed</td><td class='num'>0.47 s</td></tr>
+<tr><td>Blurry detection<br><small style='color:var(--muted)'><code>test_blurry_detection</code></small></td><td class='st passed'>Passed</td><td class='num'>0.17 s</td></tr>
+<tr><td>Organize plan apply undo<br><small style='color:var(--muted)'><code>test_organize_plan_apply_undo</code></small></td><td class='st passed'>Passed</td><td class='num'>1.51 s</td></tr>
 <tr><td>Organize include uncertain<br><small style='color:var(--muted)'><code>test_organize_include_uncertain</code></small></td><td class='st passed'>Passed</td><td class='num'>0.18 s</td></tr>
 <tr><td>Tidy categories match<br><small style='color:var(--muted)'><code>test_tidy_categories_match</code></small></td><td class='st passed'>Passed</td><td class='num'>0.19 s</td></tr>
-<tr><td>Tidy apply and undo<br><small style='color:var(--muted)'><code>test_tidy_apply_and_undo</code></small></td><td class='st passed'>Passed</td><td class='num'>1.11 s</td></tr>
-<tr><td>Health baseline then detect damage<br><small style='color:var(--muted)'><code>test_health_baseline_then_detect_damage</code></small></td><td class='st passed'>Passed</td><td class='num'>0.75 s</td></tr>
-<tr><td>Compare and sync both ways<br><small style='color:var(--muted)'><code>test_compare_and_sync_both_ways</code></small></td><td class='st passed'>Passed</td><td class='num'>1.60 s</td></tr>
-<tr><td>Compare rejects overlapping folders<br><small style='color:var(--muted)'><code>test_compare_rejects_overlapping_folders</code></small></td><td class='st passed'>Passed</td><td class='num'>0.18 s</td></tr>
+<tr><td>Tidy apply and undo<br><small style='color:var(--muted)'><code>test_tidy_apply_and_undo</code></small></td><td class='st passed'>Passed</td><td class='num'>1.03 s</td></tr>
+<tr><td>Health baseline then detect damage<br><small style='color:var(--muted)'><code>test_health_baseline_then_detect_damage</code></small></td><td class='st passed'>Passed</td><td class='num'>0.76 s</td></tr>
+<tr><td>Compare and sync both ways<br><small style='color:var(--muted)'><code>test_compare_and_sync_both_ways</code></small></td><td class='st passed'>Passed</td><td class='num'>1.54 s</td></tr>
+<tr><td>Compare rejects overlapping folders<br><small style='color:var(--muted)'><code>test_compare_rejects_overlapping_folders</code></small></td><td class='st passed'>Passed</td><td class='num'>0.19 s</td></tr>
 <tr><td>Verified copy never leaves bad file<br><small style='color:var(--muted)'><code>test_verified_copy_never_leaves_bad_file</code></small></td><td class='st passed'>Passed</td><td class='num'>0.02 s</td></tr>
 <tr><td>Never overwrites<br><small style='color:var(--muted)'><code>test_never_overwrites</code></small></td><td class='st passed'>Passed</td><td class='num'>0.19 s</td></tr>
-<tr><td>Reconcile interrupted batch<br><small style='color:var(--muted)'><code>test_reconcile_interrupted_batch</code></small></td><td class='st passed'>Passed</td><td class='num'>0.19 s</td></tr>
-<tr><td>Cancel stops cleanly<br><small style='color:var(--muted)'><code>test_cancel_stops_cleanly</code></small></td><td class='st passed'>Passed</td><td class='num'>0.26 s</td></tr>
-<tr><td>Empty recovery is explicit<br><small style='color:var(--muted)'><code>test_empty_recovery_is_explicit</code></small></td><td class='st passed'>Passed</td><td class='num'>0.29 s</td></tr>
+<tr><td>Reconcile interrupted batch<br><small style='color:var(--muted)'><code>test_reconcile_interrupted_batch</code></small></td><td class='st passed'>Passed</td><td class='num'>0.18 s</td></tr>
+<tr><td>Cancel stops cleanly<br><small style='color:var(--muted)'><code>test_cancel_stops_cleanly</code></small></td><td class='st passed'>Passed</td><td class='num'>0.24 s</td></tr>
+<tr><td>Empty recovery is explicit<br><small style='color:var(--muted)'><code>test_empty_recovery_is_explicit</code></small></td><td class='st passed'>Passed</td><td class='num'>0.28 s</td></tr>
+</table>
+<h3 id='test_photoedit'>Photo editor <span class='pill'>tests/test_photoedit.py</span></h3><table><tr><th>Behaviour verified</th><th>Result</th><th>Time</th></tr>
+<tr><td>Identity copy and constants<br><small style='color:var(--muted)'><code>test_identity_copy_and_constants</code></small></td><td class='st passed'>Passed</td><td class='num'>0.00 s</td></tr>
+<tr><td>Rotate and flip pixel mapping<br><small style='color:var(--muted)'><code>test_rotate_and_flip_pixel_mapping</code></small></td><td class='st passed'>Passed</td><td class='num'>0.00 s</td></tr>
+<tr><td>Crop is exact pixel box<br><small style='color:var(--muted)'><code>test_crop_is_exact_pixel_box</code></small></td><td class='st passed'>Passed</td><td class='num'>0.00 s</td></tr>
+<tr><td>Crop for aspect<br><small style='color:var(--muted)'><code>test_crop_for_aspect</code></small></td><td class='st passed'>Passed</td><td class='num'>0.00 s</td></tr>
+<tr><td>Straighten auto crop has no empty corners<br><small style='color:var(--muted)'><code>test_straighten_auto_crop_has_no_empty_corners[7.5]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.04 s</td></tr>
+<tr><td>Straighten auto crop has no empty corners<br><small style='color:var(--muted)'><code>test_straighten_auto_crop_has_no_empty_corners[-12.0]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.04 s</td></tr>
+<tr><td>Straighten auto crop has no empty corners<br><small style='color:var(--muted)'><code>test_straighten_auto_crop_has_no_empty_corners[0.6]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.04 s</td></tr>
+<tr><td>Adjustments move in the right direction<br><small style='color:var(--muted)'><code>test_adjustments_move_in_the_right_direction</code></small></td><td class='st passed'>Passed</td><td class='num'>0.02 s</td></tr>
+<tr><td>Filters<br><small style='color:var(--muted)'><code>test_filters</code></small></td><td class='st passed'>Passed</td><td class='num'>0.00 s</td></tr>
+<tr><td>Resize never upscales and keeps aspect<br><small style='color:var(--muted)'><code>test_resize_never_upscales_and_keeps_aspect</code></small></td><td class='st passed'>Passed</td><td class='num'>0.00 s</td></tr>
+<tr><td>Save keeps exif date resets orientation and strips gps<br><small style='color:var(--muted)'><code>test_save_keeps_exif_date_resets_orientation_and_strips_gps</code></small></td><td class='st passed'>Passed</td><td class='num'>0.06 s</td></tr>
+<tr><td>Format and quality<br><small style='color:var(--muted)'><code>test_format_and_quality</code></small></td><td class='st passed'>Passed</td><td class='num'>0.32 s</td></tr>
+<tr><td>Png alpha is kept for png and flattened for jpeg<br><small style='color:var(--muted)'><code>test_png_alpha_is_kept_for_png_and_flattened_for_jpeg</code></small></td><td class='st passed'>Passed</td><td class='num'>0.06 s</td></tr>
+<tr><td>Heic saved as jpeg<br><small style='color:var(--muted)'><code>test_heic_saved_as_jpeg</code></small></td><td class='st passed'>Passed</td><td class='num'>0.24 s</td></tr>
+<tr><td>Split grid tiles reassemble exactly<br><small style='color:var(--muted)'><code>test_split_grid_tiles_reassemble_exactly</code></small></td><td class='st passed'>Passed</td><td class='num'>0.22 s</td></tr>
+<tr><td>Join sizes<br><small style='color:var(--muted)'><code>test_join_sizes</code></small></td><td class='st passed'>Passed</td><td class='num'>0.16 s</td></tr>
+<tr><td>Join never exceeds max side<br><small style='color:var(--muted)'><code>test_join_never_exceeds_max_side</code></small></td><td class='st passed'>Passed</td><td class='num'>0.07 s</td></tr>
+<tr><td>Estimate bytes is close for jpeg<br><small style='color:var(--muted)'><code>test_estimate_bytes_is_close_for_jpeg</code></small></td><td class='st passed'>Passed</td><td class='num'>3.39 s</td></tr>
+<tr><td>Save many reports failures<br><small style='color:var(--muted)'><code>test_save_many_reports_failures</code></small></td><td class='st passed'>Passed</td><td class='num'>0.09 s</td></tr>
+<tr><td>Cancel leaves nothing<br><small style='color:var(--muted)'><code>test_cancel_leaves_nothing</code></small></td><td class='st passed'>Passed</td><td class='num'>0.03 s</td></tr>
 </table>
 <h3 id='test_safety'>Catalogue integrity — drives, locks, schema, long paths <span class='pill'>tests/test_safety.py</span></h3><table><tr><th>Behaviour verified</th><th>Result</th><th>Time</th></tr>
-<tr><td>Unplugged drive does not wipe catalogue<br><small style='color:var(--muted)'><code>test_unplugged_drive_does_not_wipe_catalogue</code></small></td><td class='st passed'>Passed</td><td class='num'>0.18 s</td></tr>
-<tr><td>Unreadable folder keeps its rows<br><small style='color:var(--muted)'><code>test_unreadable_folder_keeps_its_rows</code></small></td><td class='st passed'>Passed</td><td class='num'>0.24 s</td></tr>
+<tr><td>Unplugged drive does not wipe catalogue<br><small style='color:var(--muted)'><code>test_unplugged_drive_does_not_wipe_catalogue</code></small></td><td class='st passed'>Passed</td><td class='num'>0.19 s</td></tr>
+<tr><td>Unreadable folder keeps its rows<br><small style='color:var(--muted)'><code>test_unreadable_folder_keeps_its_rows</code></small></td><td class='st passed'>Passed</td><td class='num'>0.20 s</td></tr>
 <tr><td>Files really deleted are still removed<br><small style='color:var(--muted)'><code>test_files_really_deleted_are_still_removed</code></small></td><td class='st passed'>Passed</td><td class='num'>0.20 s</td></tr>
 <tr><td>Recycle undo keeps ids thumbnails and fingerprints<br><small style='color:var(--muted)'><code>test_recycle_undo_keeps_ids_thumbnails_and_fingerprints</code></small></td><td class='st passed'>Passed</td><td class='num'>0.60 s</td></tr>
-<tr><td>Organize undo keeps ids<br><small style='color:var(--muted)'><code>test_organize_undo_keeps_ids</code></small></td><td class='st passed'>Passed</td><td class='num'>0.55 s</td></tr>
-<tr><td>Empty recovery drops parked rows<br><small style='color:var(--muted)'><code>test_empty_recovery_drops_parked_rows</code></small></td><td class='st passed'>Passed</td><td class='num'>0.28 s</td></tr>
-<tr><td>Library is locked against other processes<br><small style='color:var(--muted)'><code>test_library_is_locked_against_other_processes</code></small></td><td class='st passed'>Passed</td><td class='num'>0.36 s</td></tr>
-<tr><td>Lock is reentrant in process and released on close<br><small style='color:var(--muted)'><code>test_lock_is_reentrant_in_process_and_released_on_close</code></small></td><td class='st passed'>Passed</td><td class='num'>0.38 s</td></tr>
+<tr><td>Organize undo keeps ids<br><small style='color:var(--muted)'><code>test_organize_undo_keeps_ids</code></small></td><td class='st passed'>Passed</td><td class='num'>0.57 s</td></tr>
+<tr><td>Empty recovery drops parked rows<br><small style='color:var(--muted)'><code>test_empty_recovery_drops_parked_rows</code></small></td><td class='st passed'>Passed</td><td class='num'>0.29 s</td></tr>
+<tr><td>Library is locked against other processes<br><small style='color:var(--muted)'><code>test_library_is_locked_against_other_processes</code></small></td><td class='st passed'>Passed</td><td class='num'>0.37 s</td></tr>
+<tr><td>Lock is reentrant in process and released on close<br><small style='color:var(--muted)'><code>test_lock_is_reentrant_in_process_and_released_on_close</code></small></td><td class='st passed'>Passed</td><td class='num'>0.37 s</td></tr>
 <tr><td>Schema version and migration from v1<br><small style='color:var(--muted)'><code>test_schema_version_and_migration_from_v1</code></small></td><td class='st passed'>Passed</td><td class='num'>0.06 s</td></tr>
 <tr><td>Refuses catalogue from newer version<br><small style='color:var(--muted)'><code>test_refuses_catalogue_from_newer_version</code></small></td><td class='st passed'>Passed</td><td class='num'>0.05 s</td></tr>
 <tr><td>Paths longer than 260 characters<br><small style='color:var(--muted)'><code>test_paths_longer_than_260_characters</code></small></td><td class='st passed'>Passed</td><td class='num'>0.30 s</td></tr>
 </table>
 <h3 id='test_story'>Story maker <span class='pill'>tests/test_story.py</span></h3><table><tr><th>Behaviour verified</th><th>Result</th><th>Time</th></tr>
-<tr><td>Render sizes exact<br><small style='color:var(--muted)'><code>test_render_sizes_exact[size0]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.96 s</td></tr>
+<tr><td>Render sizes exact<br><small style='color:var(--muted)'><code>test_render_sizes_exact[size0]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.95 s</td></tr>
 <tr><td>Render sizes exact<br><small style='color:var(--muted)'><code>test_render_sizes_exact[size1]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.10 s</td></tr>
 <tr><td>Render sizes exact<br><small style='color:var(--muted)'><code>test_render_sizes_exact[size2]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.09 s</td></tr>
-<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[blur-single]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.16 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[blur-single]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.15 s</td></tr>
 <tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[blur-duo]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.20 s</td></tr>
 <tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[blur-trio]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.23 s</td></tr>
 <tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[blur-grid4]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.24 s</td></tr>
 <tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[blur-before_after]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.19 s</td></tr>
 <tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[blur-polaroid]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.27 s</td></tr>
-<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-single]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.10 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-single]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.09 s</td></tr>
 <tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-duo]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.12 s</td></tr>
-<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-trio]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.15 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-trio]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.14 s</td></tr>
 <tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-grid4]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.15 s</td></tr>
 <tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-before_after]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.12 s</td></tr>
-<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-polaroid]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.22 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-polaroid]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.21 s</td></tr>
 <tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-single]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.09 s</td></tr>
 <tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-duo]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.12 s</td></tr>
-<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-trio]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.15 s</td></tr>
-<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-grid4]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.17 s</td></tr>
-<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-before_after]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.13 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-trio]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.14 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-grid4]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.16 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-before_after]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.11 s</td></tr>
 <tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-polaroid]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.20 s</td></tr>
-<tr><td>Template slots and partial group<br><small style='color:var(--muted)'><code>test_template_slots_and_partial_group</code></small></td><td class='st passed'>Passed</td><td class='num'>0.16 s</td></tr>
+<tr><td>Template slots and partial group<br><small style='color:var(--muted)'><code>test_template_slots_and_partial_group</code></small></td><td class='st passed'>Passed</td><td class='num'>0.15 s</td></tr>
 <tr><td>Exif rotated photo renders upright<br><small style='color:var(--muted)'><code>test_exif_rotated_photo_renders_upright</code></small></td><td class='st passed'>Passed</td><td class='num'>0.13 s</td></tr>
-<tr><td>Heic photo renders<br><small style='color:var(--muted)'><code>test_heic_photo_renders</code></small></td><td class='st passed'>Passed</td><td class='num'>0.26 s</td></tr>
-<tr><td>Panorama split is seamless<br><small style='color:var(--muted)'><code>test_panorama_split_is_seamless</code></small></td><td class='st passed'>Passed</td><td class='num'>1.25 s</td></tr>
-<tr><td>Export stories and carousel unique names<br><small style='color:var(--muted)'><code>test_export_stories_and_carousel_unique_names</code></small></td><td class='st passed'>Passed</td><td class='num'>0.96 s</td></tr>
-<tr><td>Export cancel leaves nothing<br><small style='color:var(--muted)'><code>test_export_cancel_leaves_nothing</code></small></td><td class='st passed'>Passed</td><td class='num'>0.13 s</td></tr>
-<tr><td>Story video duration and resolution<br><small style='color:var(--muted)'><code>test_story_video_duration_and_resolution</code></small></td><td class='st passed'>Passed</td><td class='num'>1.90 s</td></tr>
-<tr><td>Story video with music and unique name<br><small style='color:var(--muted)'><code>test_story_video_with_music_and_unique_name</code></small></td><td class='st passed'>Passed</td><td class='num'>0.96 s</td></tr>
-<tr><td>Story video cancel cleans up<br><small style='color:var(--muted)'><code>test_story_video_cancel_cleans_up</code></small></td><td class='st passed'>Passed</td><td class='num'>0.19 s</td></tr>
+<tr><td>Heic photo renders<br><small style='color:var(--muted)'><code>test_heic_photo_renders</code></small></td><td class='st passed'>Passed</td><td class='num'>0.27 s</td></tr>
+<tr><td>Panorama split is seamless<br><small style='color:var(--muted)'><code>test_panorama_split_is_seamless</code></small></td><td class='st passed'>Passed</td><td class='num'>1.06 s</td></tr>
+<tr><td>Export stories and carousel unique names<br><small style='color:var(--muted)'><code>test_export_stories_and_carousel_unique_names</code></small></td><td class='st passed'>Passed</td><td class='num'>0.92 s</td></tr>
+<tr><td>Export cancel leaves nothing<br><small style='color:var(--muted)'><code>test_export_cancel_leaves_nothing</code></small></td><td class='st passed'>Passed</td><td class='num'>0.12 s</td></tr>
+<tr><td>Story video duration and resolution<br><small style='color:var(--muted)'><code>test_story_video_duration_and_resolution</code></small></td><td class='st passed'>Passed</td><td class='num'>1.75 s</td></tr>
+<tr><td>Story video with music and unique name<br><small style='color:var(--muted)'><code>test_story_video_with_music_and_unique_name</code></small></td><td class='st passed'>Passed</td><td class='num'>0.92 s</td></tr>
+<tr><td>Story video cancel cleans up<br><small style='color:var(--muted)'><code>test_story_video_cancel_cleans_up</code></small></td><td class='st passed'>Passed</td><td class='num'>0.17 s</td></tr>
 </table>
 <h3 id='test_ui_smoke'>Desktop UI — end to end <span class='pill'>tests/test_ui_smoke.py</span></h3><table><tr><th>Behaviour verified</th><th>Result</th><th>Time</th></tr>
-<tr><td>Every page runs without errors<br><small style='color:var(--muted)'><code>test_every_page_runs_without_errors</code></small></td><td class='st passed'>Passed</td><td class='num'>34.44 s</td></tr>
+<tr><td>Every page runs without errors<br><small style='color:var(--muted)'><code>test_every_page_runs_without_errors</code></small></td><td class='st passed'>Passed</td><td class='num'>48.43 s</td></tr>
 </table>
 <h3 id='test_video'>Video compressor <span class='pill'>tests/test_video.py</span></h3><table><tr><th>Behaviour verified</th><th>Result</th><th>Time</th></tr>
-<tr><td>Quality mode shrinks verifies and never overwrites<br><small style='color:var(--muted)'><code>test_quality_mode_shrinks_verifies_and_never_overwrites</code></small></td><td class='st passed'>Passed</td><td class='num'>2.89 s</td></tr>
-<tr><td>Target mode fits small target<br><small style='color:var(--muted)'><code>test_target_mode_fits_small_target</code></small></td><td class='st passed'>Passed</td><td class='num'>1.08 s</td></tr>
-<tr><td>Portrait without audio is downscaled by short side<br><small style='color:var(--muted)'><code>test_portrait_without_audio_is_downscaled_by_short_side</code></small></td><td class='st passed'>Passed</td><td class='num'>0.87 s</td></tr>
+<tr><td>Quality mode shrinks verifies and never overwrites<br><small style='color:var(--muted)'><code>test_quality_mode_shrinks_verifies_and_never_overwrites</code></small></td><td class='st passed'>Passed</td><td class='num'>2.92 s</td></tr>
+<tr><td>Target mode fits small target<br><small style='color:var(--muted)'><code>test_target_mode_fits_small_target</code></small></td><td class='st passed'>Passed</td><td class='num'>1.17 s</td></tr>
+<tr><td>Portrait without audio is downscaled by short side<br><small style='color:var(--muted)'><code>test_portrait_without_audio_is_downscaled_by_short_side</code></small></td><td class='st passed'>Passed</td><td class='num'>0.86 s</td></tr>
 <tr><td>Keeps original when not smaller<br><small style='color:var(--muted)'><code>test_keeps_original_when_not_smaller</code></small></td><td class='st passed'>Passed</td><td class='num'>0.35 s</td></tr>
 <tr><td>Cancel removes partial output<br><small style='color:var(--muted)'><code>test_cancel_removes_partial_output</code></small></td><td class='st passed'>Passed</td><td class='num'>0.53 s</td></tr>
 <tr><td>Estimate flags impossible target<br><small style='color:var(--muted)'><code>test_estimate_flags_impossible_target</code></small></td><td class='st passed'>Passed</td><td class='num'>0.08 s</td></tr>
-<tr><td>Compress many reports each file<br><small style='color:var(--muted)'><code>test_compress_many_reports_each_file</code></small></td><td class='st passed'>Passed</td><td class='num'>0.97 s</td></tr>
+<tr><td>Compress many reports each file<br><small style='color:var(--muted)'><code>test_compress_many_reports_each_file</code></small></td><td class='st passed'>Passed</td><td class='num'>1.00 s</td></tr>
+</table>
+<h3 id='test_videoedit'>Video editor <span class='pill'>tests/test_videoedit.py</span></h3><table><tr><th>Behaviour verified</th><th>Result</th><th>Time</th></tr>
+<tr><td>A phone clip stored landscape with a 90° display flag (common for phone videos).<br><small style='color:var(--muted)'><code>test_display_rotated_source_is_baked_upright</code></small></td><td class='st passed'>Passed</td><td class='num'>2.40 s</td></tr>
+<tr><td>Edit model and planning<br><small style='color:var(--muted)'><code>test_edit_model_and_planning</code></small></td><td class='st passed'>Passed</td><td class='num'>0.08 s</td></tr>
+<tr><td>Trim and never overwrite<br><small style='color:var(--muted)'><code>test_trim_and_never_overwrite</code></small></td><td class='st passed'>Passed</td><td class='num'>1.16 s</td></tr>
+<tr><td>Default output folder is source folder<br><small style='color:var(--muted)'><code>test_default_output_folder_is_source_folder</code></small></td><td class='st passed'>Passed</td><td class='num'>0.38 s</td></tr>
+<tr><td>Speed changes duration and keeps audio<br><small style='color:var(--muted)'><code>test_speed_changes_duration_and_keeps_audio[2.0-0.0-None-2.0]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.61 s</td></tr>
+<tr><td>Speed changes duration and keeps audio<br><small style='color:var(--muted)'><code>test_speed_changes_duration_and_keeps_audio[0.5-0.0-1.5-3.0]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.57 s</td></tr>
+<tr><td>Rotate crop mute and max height<br><small style='color:var(--muted)'><code>test_rotate_crop_mute_and_max_height</code></small></td><td class='st passed'>Passed</td><td class='num'>1.38 s</td></tr>
+<tr><td>Preview frame is fast and applies filters<br><small style='color:var(--muted)'><code>test_preview_frame_is_fast_and_applies_filters</code></small></td><td class='st passed'>Passed</td><td class='num'>0.96 s</td></tr>
+<tr><td>Split points and helpers<br><small style='color:var(--muted)'><code>test_split_points_and_helpers</code></small></td><td class='st passed'>Passed</td><td class='num'>4.44 s</td></tr>
+<tr><td>Join landscape and portrait<br><small style='color:var(--muted)'><code>test_join_landscape_and_portrait</code></small></td><td class='st passed'>Passed</td><td class='num'>0.94 s</td></tr>
+<tr><td>Extract frame<br><small style='color:var(--muted)'><code>test_extract_frame</code></small></td><td class='st passed'>Passed</td><td class='num'>0.45 s</td></tr>
+<tr><td>Cancelled export and split leave nothing<br><small style='color:var(--muted)'><code>test_cancelled_export_and_split_leave_nothing</code></small></td><td class='st passed'>Passed</td><td class='num'>1.12 s</td></tr>
 </table>
 <h3 id='test_videosim'>Similar videos <span class='pill'>tests/test_videosim.py</span></h3><table><tr><th>Behaviour verified</th><th>Result</th><th>Time</th></tr>
-<tr><td>Groups and best pick match ground truth<br><small style='color:var(--muted)'><code>test_groups_and_best_pick_match_ground_truth</code></small></td><td class='st passed'>Passed</td><td class='num'>0.51 s</td></tr>
-<tr><td>Byte identical copies are not a group by themselves<br><small style='color:var(--muted)'><code>test_byte_identical_copies_are_not_a_group_by_themselves</code></small></td><td class='st passed'>Passed</td><td class='num'>0.41 s</td></tr>
-<tr><td>Signatures are cached<br><small style='color:var(--muted)'><code>test_signatures_are_cached</code></small></td><td class='st passed'>Passed</td><td class='num'>0.52 s</td></tr>
-<tr><td>Cache invalidates when file changes<br><small style='color:var(--muted)'><code>test_cache_invalidates_when_file_changes</code></small></td><td class='st passed'>Passed</td><td class='num'>0.95 s</td></tr>
-<tr><td>Cancel raises cleanly<br><small style='color:var(--muted)'><code>test_cancel_raises_cleanly</code></small></td><td class='st passed'>Passed</td><td class='num'>0.54 s</td></tr>
+<tr><td>Groups and best pick match ground truth<br><small style='color:var(--muted)'><code>test_groups_and_best_pick_match_ground_truth</code></small></td><td class='st passed'>Passed</td><td class='num'>0.52 s</td></tr>
+<tr><td>Byte identical copies are not a group by themselves<br><small style='color:var(--muted)'><code>test_byte_identical_copies_are_not_a_group_by_themselves</code></small></td><td class='st passed'>Passed</td><td class='num'>0.39 s</td></tr>
+<tr><td>Signatures are cached<br><small style='color:var(--muted)'><code>test_signatures_are_cached</code></small></td><td class='st passed'>Passed</td><td class='num'>0.49 s</td></tr>
+<tr><td>Cache invalidates when file changes<br><small style='color:var(--muted)'><code>test_cache_invalidates_when_file_changes</code></small></td><td class='st passed'>Passed</td><td class='num'>0.84 s</td></tr>
+<tr><td>Cancel raises cleanly<br><small style='color:var(--muted)'><code>test_cancel_raises_cleanly</code></small></td><td class='st passed'>Passed</td><td class='num'>0.50 s</td></tr>
 <tr><td>Frame distance and duration rules<br><small style='color:var(--muted)'><code>test_frame_distance_and_duration_rules</code></small></td><td class='st passed'>Passed</td><td class='num'>0.00 s</td></tr>
-<tr><td>Recycle apply and undo round trip<br><small style='color:var(--muted)'><code>test_recycle_apply_and_undo_round_trip</code></small></td><td class='st passed'>Passed</td><td class='num'>1.32 s</td></tr>
+<tr><td>Recycle apply and undo round trip<br><small style='color:var(--muted)'><code>test_recycle_apply_and_undo_round_trip</code></small></td><td class='st passed'>Passed</td><td class='num'>1.34 s</td></tr>
 </table>
 </section><section id='bench'><h2>Benchmark</h2>
 <p>525 generated 6 MP JPEGs (5% exact copies), 0.51 GB, on 32 CPU threads. Absolute numbers depend on the machine and disk.</p><table><tr><th>Stage</th><th>Time</th><th>Result</th></tr>
-<tr><td>generate test photos</td><td class='num'>28.08 s</td><td>525 files, 0.51 GB</td></tr>
+<tr><td>generate test photos</td><td class='num'>25.08 s</td><td>525 files, 0.51 GB</td></tr>
 <tr><td>scan (walk + catalogue)</td><td class='num'>0.01 s</td><td></td></tr>
-<tr><td>analyse (EXIF, thumbs, hashes, quality)</td><td class='num'>2.77 s</td><td>189 photos/s, 184 MB/s of photos</td></tr>
+<tr><td>analyse (EXIF, thumbs, hashes, quality)</td><td class='num'>2.75 s</td><td>191 photos/s, 185 MB/s of photos</td></tr>
 <tr><td>rescan, nothing changed</td><td class='num'>0.01 s</td><td></td></tr>
 <tr><td>find duplicates (first run)</td><td class='num'>0.07 s</td><td>25 groups</td></tr>
 <tr><td>find duplicates (cached)</td><td class='num'>0.00 s</td><td></td></tr>
-<tr><td>find similar (+faces for group members)</td><td class='num'>2.83 s</td><td>23 groups</td></tr>
-<tr><td>health check (full read)</td><td class='num'>1.77 s</td><td>289 MB/s</td></tr>
-<tr><td>similarity pairs, 100,000 hashes</td><td class='num'>4.28 s</td><td>5×10⁹ pair comparisons</td></tr>
+<tr><td>find similar (+faces for group members)</td><td class='num'>2.74 s</td><td>23 groups</td></tr>
+<tr><td>health check (full read)</td><td class='num'>1.71 s</td><td>298 MB/s</td></tr>
+<tr><td>similarity pairs, 100,000 hashes</td><td class='num'>4.36 s</td><td>5×10⁹ pair comparisons</td></tr>
 </table>
 </section><section id='truth'><h2>Test library ground truth</h2>
 <p>The full test library (<code>tools/make_test_library.py</code>) contains these known cases; the test suite uses a smaller variant with the same scenarios.</p><table><tr><th>Scenario</th><th>Count</th></tr>

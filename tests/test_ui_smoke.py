@@ -26,9 +26,19 @@ def test_every_page_runs_without_errors(pristine_library, tmp_path):
     check = Library(lib)
     batches = actions.batches(check)
     kinds = {b["kind"] for b in batches}
-    assert {"duplicates", "batch"} <= kinds                      # page clean-up and Photos batch action
-    assert all(b["status"] == "undone" for b in batches)       # both undone (History button and Ctrl+Z)
+    assert {"duplicates", "batch", "edit"} <= kinds              # clean-up, Photos batch action, Editor saves
+    assert all(b["status"] == "undone" for b in batches if b["kind"] != "edit")
+    edits = [b for b in batches if b["kind"] == "edit"]
+    assert len(edits) == 2 and all(b["status"] == "applied" for b in edits)
+    created = [Path(o["dst"]) for b in edits for o in actions.operations(check, b["id"])]
+    assert created and all(p.exists() and "(edited)" in p.name for p in created)
+    before = {p: p.stat().st_size for p in lib.rglob("*") if p.is_file() and ".memoria" not in p.parts and p not in created}
+    for b in edits:
+        assert actions.undo(check, b["id"]).ok
+    assert not any(p.exists() for p in created)               # Undo removes only the edited copies
+    after = {p: p.stat().st_size for p in lib.rglob("*") if p.is_file() and ".memoria" not in p.parts}
+    assert after == before                                     # originals untouched
     assert actions.recovery_size(check) == (0, 0)
     assert check.db.execute("SELECT COUNT(*) FROM parked_files").fetchone()[0] == 0
     check.close()
-    assert {"photos-viewer", "dark-overview", "dark-similar"} <= shots
+    assert {"photos-viewer", "dark-overview", "dark-similar", "07-editor-crop", "07-editor-video"} <= shots

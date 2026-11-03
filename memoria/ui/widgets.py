@@ -244,6 +244,7 @@ class AppContext(QObject):
         self.thumbs = ThumbCache(self)
         self.story_selection: list[int] = []
         self.video_selection: list[str] = []
+        self.edit_selection: list[int] = []
         self.generation = 0
         self._results: dict = {}
         self._results_gen = -1

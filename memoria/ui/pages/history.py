@@ -18,8 +18,9 @@ def status_label(status: str) -> tuple[str, str]:
 
 
 KIND = {"duplicates": "Duplicates", "similar": "Similar / blurry", "tidy": "Tidy up", "organize": "Organise",
-        "sync": "Compare & sync", "batch": "Photos & videos"}
-OP = {"recycle": "Moved to Recovery", "move": "Moved", "copy": "Copied", "rmdir": "Removed empty folder"}
+        "sync": "Compare & sync", "batch": "Photos & videos", "edit": "Editor"}
+OP = {"recycle": "Moved to Recovery", "move": "Moved", "copy": "Copied", "rmdir": "Removed empty folder",
+      "create": "Created"}
 OP_STATUS = {"done": "Done", "undone": "Undone", "skipped": "Skipped", "failed": "Failed", "purged": "Deleted from Recovery",
              "pending": "Interrupted"}
 
@@ -80,7 +81,12 @@ class HistoryPage(Page):
         cur_id = cur.data(0, Qt.ItemDataRole.UserRole)["id"] if cur else None
         self.batches.clear()
         select = None
-        for b in actions.batches(self.lib):
+        all_batches = actions.batches(self.lib)
+        newest = all_batches[0]["id"] if all_batches else None
+        if newest != getattr(self, "_newest_id", None):
+            cur_id = None                      # a new change arrived: show it rather than an older selection
+        self._newest_id = newest
+        for b in all_batches:
             label_, color = status_label(b["status"])
             it = QTreeWidgetItem([fmt_date(b["created_at"], True), b["title"], f"{b['files']:,}",
                                   fmt_size(b["bytes"]), label_])

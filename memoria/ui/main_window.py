@@ -24,7 +24,8 @@ NAV = [
     ("CLEAN UP", [("duplicates", "Duplicates", "\uE8C8"), ("similar", "Similar & best shots", "\uE734"),
                   ("tidy", "Tidy up", "\uE74D")]),
     ("ORGANISE", [("organize", "Organise by date", "\uE8B7")]),
-    ("CREATE", [("story", "Story maker", "\uE786"), ("video", "Video compressor", "\uE714")]),
+    ("CREATE", [("editor", "Editor", "\uE70F"), ("story", "Story maker", "\uE786"),
+                ("video", "Video compressor", "\uE714")]),
     ("PROTECT", [("health", "Health check", "\uEA18"), ("compare", "Compare & sync", "\uE895"),
                  ("history", "History & recovery", "\uE81C")]),
 ]
@@ -37,6 +38,11 @@ def page_classes() -> dict:
                "duplicates": duplicates.DuplicatesPage, "similar": similar.SimilarPage,
                "tidy": tidy.TidyPage, "organize": organize.OrganizePage,
                "health": health.HealthPage, "compare": compare.ComparePage, "history": history.HistoryPage}
+    try:
+        from .pages.editor import EditorPage
+        classes["editor"] = EditorPage
+    except ImportError:
+        pass
     try:
         from .pages.story import StoryPage
         classes["story"] = StoryPage

@@ -68,6 +68,7 @@ class PhotosPage(Page):
         self.b_recycle = button("Move to Recovery", on_click=self.recycle_selected, tip="Delete key")
         self.b_more = button("More actions ▾", tip="Story maker, compress, copy, move, show in folder")
         self.more_menu = QMenu(self)
+        self.a_edit = self.more_menu.addAction("Edit…", self._to_editor)
         self.a_story = self.more_menu.addAction("Add to Story maker", self._to_story)
         self.a_video = self.more_menu.addAction("Compress videos", self._to_video)
         self.more_menu.addSeparator()
@@ -309,6 +310,12 @@ class PhotosPage(Page):
             self.ctx.story_selection.extend(ids)
             self.ctx.navigate.emit("story")
 
+    def _to_editor(self) -> None:
+        ids = [i["id"] for i in self.selected() if i["kind"] in ("image", "video") and not i.get("error")]
+        if ids:
+            self.ctx.edit_selection[:] = ids
+            self.ctx.navigate.emit("editor")
+
     def _to_video(self) -> None:
         paths = [str(self.lib.abspath(i["rel_path"])) for i in self.selected() if i["kind"] == "video" and not i.get("error")]
         if paths:
@@ -330,6 +337,8 @@ class PhotosPage(Page):
             m.addAction("Open in default app", lambda: open_path(self.lib.abspath(it["rel_path"])))
         m.addAction("Show in folder", lambda: show_in_explorer(self.lib.abspath(it["rel_path"])))
         m.addSeparator()
+        if any(i["kind"] in ("image", "video") and not i.get("error") for i in sel):
+            m.addAction("Edit…", self._to_editor)
         if any(i["kind"] == "image" and not i.get("error") for i in sel):
             m.addAction("Add to Story maker", self._to_story)
         if any(i["kind"] == "video" and not i.get("error") for i in sel):

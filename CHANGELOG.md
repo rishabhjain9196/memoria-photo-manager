@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.2.0 — 2026-11-04
+
+### Added
+- **Editor** (sidebar › Create, or *Edit…* from Photos & videos): simple editing for photos and videos. Every edit is
+  saved as a new file ("name (edited).jpg"), listed in History and removable with Undo. Originals are never changed.
+  - Photos: rotate, mirror/flip, straighten, crop with handles and aspect presets (free, original, 1:1, 4:5, 9:16, 16:9, 3:2, 4:3),
+    brightness, contrast, saturation, warmth, sharpness, auto enhance, filters, resize, format and quality with a size
+    estimate, and an option to remove GPS location. Split into a grid; join side by side or stacked.
+  - Videos: frame-accurate trim from the timeline, split at the playhead, into equal parts or every N seconds, join clips
+    of different sizes, rotate, mirror/flip, crop, brightness/contrast/saturation, speed (0.5×–2×, audio keeps its
+    pitch), mute, max resolution and quality, and save the current frame as a photo.
+  - "Apply to all" saves the same edit for every photo (or video) in the list, with progress and a per-file failure report.
+- History shows Editor changes; undoing removes the created files only if they are unchanged.
+
+### Fixed
+- History now selects the newest change when one arrives, so Undo there can't silently target an older change.
+
 ## 1.1.0 — 2026-11-03
 
 ### Added

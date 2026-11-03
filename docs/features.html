@@ -29,6 +29,9 @@
   <a class="sub" href="#blurry">Blurry photos</a>
   <a href="#tidy">Tidy up</a>
   <a href="#organize">Organise by date</a>
+  <a href="#editor">Editor</a>
+  <a class="sub" href="#editor-photo">Photo tools</a>
+  <a class="sub" href="#editor-video">Video tools</a>
   <a href="#story">Story maker</a>
   <a href="#video">Video compressor</a>
   <a href="#health">Health check</a>
@@ -46,7 +49,7 @@
 <header class="hero">
   <h1>Features guide</h1>
   <p>Everything Memoria can do, how to use each tool, and exactly what each one will — and won't — change on your PC.</p>
-  <div class="meta"><span class="pill">Version 1.1</span><span class="pill">11 pages</span><span class="pill">Light &amp; dark</span><span class="pill">Works offline</span><span class="pill">Windows 10/11</span></div>
+  <div class="meta"><span class="pill">Version 1.2</span><span class="pill">12 pages</span><span class="pill">Light &amp; dark</span><span class="pill">Works offline</span><span class="pill">Windows 10/11</span></div>
 </header>
 
 <section id="start">
@@ -256,6 +259,49 @@ Names are kept; a number is added only when the destination already has a file w
 <figure><img src="images/organize.png" alt="Organise by date"><figcaption>The plan before anything moves.</figcaption></figure>
 </section>
 
+<section id="editor">
+<h2>Editor</h2>
+<p>Simple, safe editing for photos and videos. <b>Originals are never changed</b>: every result is a new file next to the
+original (e.g. <i>IMG_1234 (edited).jpg</i>, <i>VID_0042 (part 1 of 3).mp4</i>) or in a folder you choose, existing files
+are never overwritten, and each save is listed in <b>History</b> — Undo removes the new files (only if they are unchanged).</p>
+<h3>Getting files in</h3>
+<ul>
+  <li>In <b>Photos &amp; videos</b>, select items and choose <b>More actions → Edit…</b> (or right-click → Edit…).</li>
+  <li>Or use <b>Add from library…</b> / <b>Open files…</b> (files outside the library work too).</li>
+  <li>The list on the left holds everything you are editing; each file keeps its own edits.</li>
+</ul>
+<p>The preview updates as you change settings. Tick <b>Apply to all N photos</b> (or videos) to save the same edits for
+every item of that kind in the list — handy for compressing or resizing a batch. <b>Reset edits</b> returns a file to
+its original state.</p>
+
+<h3 id="editor-photo">Photo tools</h3>
+<table>
+  <tr><th>Tool</th><th>What it does</th></tr>
+  <tr><td><b>Rotate &amp; flip</b></td><td>Rotate 90° left/right, mirror (left↔right) or flip (top↔bottom). <b>Straighten</b> tilts up to ±15° and trims the empty corners automatically.</td></tr>
+  <tr><td><b>Crop</b></td><td>Choose a shape — Free, Original, 1:1, 4:5, 9:16, 16:9, 3:2, 4:3 — then drag the corners or edges, or drag inside to move. Rule-of-thirds lines help framing. Click <b>Done</b> to see the result.</td></tr>
+  <tr><td><b>Adjust</b></td><td>Brightness, contrast, saturation, warmth and sharpness sliders (double-click a slider's name to reset it), <b>Auto enhance</b>, and filters: Black &amp; white, Sepia, Vivid, Warm, Cool, Faded.</td></tr>
+  <tr><td><b>Size &amp; compression</b></td><td>Limit the longest side (4096 … 1080 px, never enlarged), choose JPEG, WebP, PNG or the original format, set quality, and see the <b>estimated file size</b>. <b>Remove location (GPS)</b> before sharing. The capture date and camera details are kept.</td></tr>
+  <tr><td><b>Split</b></td><td>Cut a photo into a grid of rows × columns (e.g. 1 × 3 for a seamless Instagram panorama, 3 × 3 for a profile grid). Pieces fit together exactly.</td></tr>
+  <tr><td><b>Join</b></td><td>Combine every photo in the list side by side, top to bottom, or as a grid.</td></tr>
+</table>
+<figure><img src="images/editor-crop.png" alt="Cropping a photo"><figcaption>Cropping to 4:5 with adjustments applied.</figcaption></figure>
+
+<h3 id="editor-video">Video tools</h3>
+<table>
+  <tr><th>Tool</th><th>What it does</th></tr>
+  <tr><td><b>Trim</b></td><td>Drag the timeline to any moment and use <b>Set start here</b> / <b>Set end here</b>, or type the times. The resulting length is shown.</td></tr>
+  <tr><td><b>Split</b></td><td>Split at the playhead, into N equal parts, or every N seconds. Cuts are frame-accurate.</td></tr>
+  <tr><td><b>Join</b></td><td>Join every video in the list, in order, into one. Clips of different sizes or orientations are fitted to the first one (with black bars if needed); clips without sound get silence.</td></tr>
+  <tr><td><b>Rotate, flip, crop</b></td><td>Fix sideways phone videos, mirror, or crop to a shape such as 9:16 for stories.</td></tr>
+  <tr><td><b>Adjust</b></td><td>Brightness, contrast and saturation; speed 0.5× – 2× (sound follows); <b>Remove sound</b>.</td></tr>
+  <tr><td><b>Size &amp; compression</b></td><td>Resolution (1080p, 720p, 480p) and quality (High, Balanced, Small). For a target size such as 16 MB use the Video compressor.</td></tr>
+  <tr><td><b>Save frame as photo</b></td><td>Saves the frame at the playhead as a full-resolution JPEG.</td></tr>
+</table>
+<p>Every video result is checked before it is kept: it must play and have the expected length. If anything fails or you
+cancel, no partial file is left behind.</p>
+<figure><img src="images/editor-video.png" alt="Editing a video"><figcaption>Trimming a video with the timeline.</figcaption></figure>
+</section>
+
 <section id="story">
 <h2>Story maker</h2>
 <p>Turns photos into Instagram-ready images and videos on your PC.</p>
@@ -383,7 +429,7 @@ changes.</p>
 <h2>Keyboard shortcuts</h2>
 <table>
   <tr><th>Keys</th><th>Action</th></tr>
-  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">1</span> … <span class="kbd">0</span></td><td>Go to a page (in sidebar order; Ctrl+0 = Compare &amp; sync)</td></tr>
+  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">1</span> … <span class="kbd">0</span></td><td>Go to a page in sidebar order (Ctrl+1 Overview … Ctrl+7 Editor … Ctrl+0 Health check)</td></tr>
   <tr><td><span class="kbd">F5</span></td><td>Rescan the library</td></tr>
   <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">O</span></td><td>Open another library</td></tr>
   <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">Z</span></td><td>Undo the last change (asks first)</td></tr>

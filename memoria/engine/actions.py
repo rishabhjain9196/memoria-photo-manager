@@ -179,6 +179,28 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
     return res
 
 
+def record_created(lib: Library, kind: str, title: str, items: list[tuple[str, str]]) -> BatchResult:
+    """Journal files that a tool has just created (edited copies, split parts…) so History can undo them.
+
+    ``items`` are (source path, new file path). Undo removes a new file only if its content is unchanged.
+    """
+    batch_id = datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
+    res = BatchResult(batch_id)
+    db = lib.db
+    db.execute("INSERT INTO batches (id, created_at, kind, title, status) VALUES (?,?,?,?,?)",
+               (batch_id, _now(), kind, title, "applying"))
+    for seq, (src, dst) in enumerate(items):
+        size = os.path.getsize(L(dst)) if _ex(dst) else 0
+        a = Action(op="create", src=str(src), dst=str(dst), size=size, hash=full_hash(dst),
+                   reason=f"Created from {Path(src).name}")
+        _log(db, batch_id, seq, a, Path(dst), "done")
+        res.done += 1
+        res.bytes += size
+    db.execute("UPDATE batches SET status=?, files=?, bytes=? WHERE id=?",
+               ("applied" if res.done else "nothing", res.done, res.bytes, batch_id))
+    return res
+
+
 def _inside(path: Path, root: Path) -> bool:
     try:
         path.resolve().relative_to(root)
@@ -258,9 +280,9 @@ def undo(lib: Library, batch_id: str, progress: Optional[Progress] = None) -> Ba
                     res.messages.append(f"{src.name} restored as {target.name} (a file with that name exists)")
                 safe_move(dst, target)
                 _undo_catalogue(lib, op, dst, target)
-            elif op["op"] == "copy":
+            elif op["op"] in ("copy", "create"):
                 if _ex(dst):
-                    # Only remove the copy when it still matches the source content exactly.
+                    # Only remove the copy/new file when it still matches the content we wrote.
                     if op["hash"] and full_hash(dst) != op["hash"]:
                         raise OSError(f"{dst.name} was modified after copying; left in place")
                     os.remove(L(dst))

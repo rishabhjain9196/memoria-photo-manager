@@ -43,7 +43,7 @@
   <h1>Design document</h1>
   <p>Why Memoria looks and behaves the way it does — the product goals, the trust model that every tool obeys,
      the information architecture, interaction patterns and the decisions behind them.</p>
-  <div class="meta"><span class="pill">Version 1.1</span><span class="pill">Windows desktop · PySide6</span>
+  <div class="meta"><span class="pill">Version 1.2</span><span class="pill">Windows desktop · PySide6</span>
     <span class="pill">Offline · no accounts · no telemetry</span></div>
 </header>
 
@@ -172,6 +172,9 @@ then simply tells the truth about those rules.</p>
     is refused.</td><td>"This library is already open in another Memoria window."</td></tr>
   <tr><td>I13</td><td>Undo restores knowledge, not just files</td><td>Catalogue rows of recycled files are parked and
     restored on undo (thumbnails, dates, health fingerprints).</td><td>Health check stays "Intact" after an undo.</td></tr>
+  <tr><td>I14</td><td>Edits never touch originals</td><td>The Editor only writes new files (unique names, temp file →
+    verify → rename) and journals them as <code>create</code> operations.</td><td>"Saved IMG_1 (edited).jpg. The original is
+    unchanged." with Undo.</td></tr>
   <tr><td>I10</td><td>Originals of creative tools are untouched</td><td>Story and video outputs are new files in a separate
     output folder; video copies must play, match duration and be smaller or they are discarded.</td>
     <td>Video page banner and result column.</td></tr>
@@ -207,7 +210,7 @@ understand the library, clean it, organise it, create from it, and protect it.</
   <tr><td>LIBRARY</td><td>Overview · Photos &amp; videos</td><td>"What do I have?"</td></tr>
   <tr><td>CLEAN UP</td><td>Duplicates · Similar &amp; best shots · Tidy up</td><td>"Get rid of what I don't need — safely."</td></tr>
   <tr><td>ORGANISE</td><td>Organise by date</td><td>"Make it findable."</td></tr>
-  <tr><td>CREATE</td><td>Story maker · Video compressor</td><td>"Share it."</td></tr>
+  <tr><td>CREATE</td><td>Editor · Story maker · Video compressor</td><td>"Fix it up and share it."</td></tr>
   <tr><td>PROTECT</td><td>Health check · Compare &amp; sync · History &amp; recovery</td><td>"Make sure I never lose it."</td></tr>
 </table>
 <p><b>Check everything</b> (Overview) runs every read-only finder in one pass. Its results feed the pages directly
@@ -386,6 +389,11 @@ explain what each tool would do for this library.</figcaption></figure>
   <tr><td>Similar videos</td><td>8 frame dHashes + duration, median distance ≤ 12, ±1-frame alignment</td><td>Full-video
     perceptual hashing; audio fingerprints</td><td>Fast (≈0.15 s per short clip), explainable, robust to re-encoding and
     small trims; measured margin between copies (3–9) and unrelated clips (≥16).</td></tr>
+  <tr><td>Editing model</td><td>Non-destructive: per-file edit recipes, previewed live, saved as new files</td><td>In-place
+    editing with backups; sidecar edit files</td><td>Matches the "never change originals" promise with zero new concepts;
+    results are ordinary files any app can open, and Undo is the familiar History.</td></tr>
+  <tr><td>Video cuts</td><td>Re-encode (frame-accurate)</td><td>Stream copy at keyframes</td><td>Stream copy is faster but cuts at
+    the nearest keyframe, so a split could silently start seconds early — not trustworthy.</td></tr>
   <tr><td>Theme switching</td><td>Rebuild the window</td><td>Live restyling of every widget</td><td>Guarantees no stale
     colours anywhere; state that matters (library, page, geometry) is restored.</td></tr>
   <tr><td>Concurrency</td><td>One user task at a time</td><td>Parallel tasks</td><td>Prevents conflicting file operations and

@@ -39,7 +39,7 @@ the rendered page).
 
 ## Highlights
 
-- **11 focused pages** replace the 20 commands of the old command-line tool, plus **Check everything**: one read-only
+- **12 focused pages** replace the 20 commands of the old command-line tool, plus **Check everything**: one read-only
   pass that runs every finder and puts count badges in the sidebar.
 - **Find → Review → Confirm → Apply → Undo** for every change, with plain-language reasons for every suggestion.
 - **Exact duplicates are proven**, not guessed: files are compared by full-content hash (xxh3-128), and the kept copy is
@@ -51,6 +51,10 @@ the rendered page).
 - **Progress everywhere**: percentage, elapsed time and time left for every task, with Cancel (Esc).
 - **Best-shot picker** for bursts and WhatsApp-style copies. It scores sharpness, exposure, faces and resolution, and
   shows the reasoning (e.g. "sharpest (20× the softest)").
+- **Editor** for photos and videos: crop with aspect presets, rotate, mirror/flip, straighten, brightness, contrast,
+  saturation, warmth, sharpness and filters, resize, compress, change format and remove GPS. For videos: trim, split,
+  join, crop, rotate, adjust, change speed, mute and save a frame as a photo. Results are always new files, recorded
+  in History.
 - **Story maker**:
   - 1080×1920 stories in six layouts;
   - 4:5 or square carousels, including a seamless panorama split;
@@ -96,6 +100,7 @@ No library handy? On the welcome screen choose **Try it on a sample library**. I
 | **Similar & best shots** | Bursts, retakes and resized copies, with an explained best pick. The *Similar videos* tab finds re-encoded and trimmed copies. A *Blurry photos* tab has three sensitivities, and nothing is pre-ticked. | Moves ticked items to Recovery |
 | **Tidy up** | Thumbs.db, desktop.ini, .DS_Store, `._` files, partial downloads, empty files and folders. Unreadable media and stray documents start unticked. | Moves files to Recovery; removes empty folders (undo recreates them) |
 | **Organise by date** | Moves files into `2024\2024-07`-style folders using the camera date, then a date in the file name. Files dated only by modified time are skipped unless you opt in. | Moves files inside the library |
+| **Editor** | Crop, rotate, flip, straighten, adjust, filter, resize, compress, split and join photos; trim, split, join, crop, rotate, adjust, change speed and mute videos. Live preview, batch apply. | Writes new files (never changes originals); undoable |
 | **Story maker** | Instagram stories, carousels and story videos with a live preview. | Writes new files to an output folder |
 | **Video compressor** | Smaller copies of videos for sharing, using presets or a target size, with verification and a quality score. | Writes new files to an output folder |
 | **Health check** | Records a fingerprint of every file, then flags *possibly damaged*, *can't be opened* and *missing* files on later checks. | Nothing (catalogue only) |
@@ -126,6 +131,8 @@ The [Features guide](docs/features.html) explains every option.
 | Duplicates | Similar & best shots |
 |---|---|
 | ![Duplicates](docs/images/duplicates.png) | ![Similar](docs/images/similar.png) |
+| **Editor (photo)** | **Editor (video)** |
+| ![Editor photo](docs/images/editor-crop.png) | ![Editor video](docs/images/editor-video.png) |
 | **Story maker** | **Video compressor** |
 | ![Story maker](docs/images/story.png) | ![Video compressor](docs/images/video.png) |
 | **Similar videos** | **Dark theme** |
@@ -173,7 +180,7 @@ memoria-photo-manager/
 │   │   ├── scanner.py          incremental scan + parallel analysis
 │   │   ├── media.py · ffmpeg.py · hashing.py · config.py · progress.py
 │   │   ├── duplicates.py · similar.py · videosim.py · organize.py · tidy.py · health.py · compare.py
-│   │   └── batch.py · checkup.py · story.py · videotools.py
+│   │   └── batch.py · checkup.py · photoedit.py · videoedit.py · story.py · videotools.py
 │   ├── ui/                     PySide6 desktop app
 │   │   ├── app.py · main_window.py · tasks.py · widgets.py · theme.py · assets/
 │   │   └── pages/              one module per sidebar page (+ base.py)
@@ -195,7 +202,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 88 tests, about 1.5 minutes
+.\.venv\Scripts\python -m pytest -q                       # 120 tests, about 2 minutes
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 ```
