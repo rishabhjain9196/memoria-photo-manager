@@ -12,7 +12,7 @@ from typing import Optional
 
 import xxhash
 
-from .config import SAMPLE_BYTES, SAMPLE_POINTS
+from .config import SAMPLE_BYTES, SAMPLE_POINTS, longpath
 
 CHUNK = 1024 * 1024
 
@@ -20,7 +20,7 @@ CHUNK = 1024 * 1024
 def full_hash(path: str | os.PathLike) -> Optional[str]:
     h = xxhash.xxh3_128()
     try:
-        with open(path, "rb", buffering=0) as f:
+        with open(longpath(path), "rb", buffering=0) as f:
             buf = bytearray(CHUNK)
             view = memoryview(buf)
             while True:
@@ -39,7 +39,7 @@ def quick_hash(path: str | os.PathLike, size: int) -> Optional[str]:
     h = xxhash.xxh3_128()
     last = size - SAMPLE_BYTES
     try:
-        with open(path, "rb", buffering=0) as f:
+        with open(longpath(path), "rb", buffering=0) as f:
             for i in range(SAMPLE_POINTS):
                 f.seek(last * i // (SAMPLE_POINTS - 1))
                 h.update(f.read(SAMPLE_BYTES))

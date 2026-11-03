@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QCheckBox, QComboBox, QHeaderView, QStackedWidget, QTreeWidget, QTreeWidgetItem
 
 from ...engine import organize
@@ -62,12 +63,21 @@ class OrganizePage(Page):
         self.apply_btn.setEnabled(not busy and bool(self._chosen()))
 
     def refresh(self) -> None:
-        if self.plan is not None:
+        cached = self.ctx.cached("organize")
+        if cached is not None and self.pattern.currentData() == cached.pattern and not self.uncertain.isChecked():
+            self._show(cached)
+        elif self.plan is not None and not self.busy:
             self.build_plan()
 
     def build_plan(self) -> None:
-        self.plan = organize.plan_organize(self.lib, self.pattern.currentData(), self.uncertain.isChecked())
+        lib, pattern, uncertain = self.lib, self.pattern.currentData(), self.uncertain.isChecked()
+        self.run("Planning date folders",
+                 lambda p: organize.plan_organize(lib, pattern, uncertain, progress=p), self._show)
+
+    def _show(self, plan) -> None:
+        self.plan = plan
         p = self.plan
+        self.ctx.set_badge("organize", len(p.items))
         self.t_move.set(f"{len(p.items):,}")
         self.t_place.set(f"{p.already_in_place:,}")
         self.t_skip.set(f"{p.skipped_uncertain:,}", color=theme.WARN if p.skipped_uncertain else None)
@@ -92,7 +102,7 @@ class OrganizePage(Page):
                 c.setData(0, Qt.ItemDataRole.UserRole, it)
                 c.setToolTip(0, f"{it.src_rel}  →  {it.dst_rel}")
                 if it.source == "modified":
-                    c.setForeground(2, Qt.GlobalColor.darkYellow)
+                    c.setForeground(2, QColor(theme.WARN))
                 top.addChild(c)
             self.tree.addTopLevelItem(top)
         self.tree.blockSignals(False)

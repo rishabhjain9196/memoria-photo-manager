@@ -25,6 +25,10 @@ def test_every_page_runs_without_errors(pristine_library, tmp_path):
 
     check = Library(lib)
     batches = actions.batches(check)
-    assert batches and batches[0]["kind"] == "duplicates" and batches[0]["status"] == "undone"
+    kinds = {b["kind"] for b in batches}
+    assert {"duplicates", "batch"} <= kinds                      # page clean-up and Photos batch action
+    assert all(b["status"] == "undone" for b in batches)       # both undone (History button and Ctrl+Z)
     assert actions.recovery_size(check) == (0, 0)
+    assert check.db.execute("SELECT COUNT(*) FROM parked_files").fetchone()[0] == 0
     check.close()
+    assert {"photos-viewer", "dark-overview", "dark-similar"} <= shots

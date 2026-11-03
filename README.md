@@ -39,10 +39,16 @@ the rendered page).
 
 ## Highlights
 
-- **11 focused pages** replace the 20 commands of the old command-line tool.
+- **11 focused pages** replace the 20 commands of the old command-line tool, plus **Check everything**: one read-only
+  pass that runs every finder and puts count badges in the sidebar.
 - **Find → Review → Confirm → Apply → Undo** for every change, with plain-language reasons for every suggestion.
 - **Exact duplicates are proven**, not guessed: files are compared by full-content hash (xxh3-128), and the kept copy is
   verified before anything moves.
+- **Similar videos**: finds compressed, resized or trimmed copies by comparing frames, and keeps the best copy.
+- **Batch actions** in Photos & videos: select many items, then move to Recovery, copy to a folder (verified), move
+  within the library, compress, or send to the Story maker. All undoable.
+- **Light, dark or Match Windows** themes, keyboard shortcuts, a built-in viewer, and thumbnail zoom.
+- **Progress everywhere**: percentage, elapsed time and time left for every task, with Cancel (Esc).
 - **Best-shot picker** for bursts and WhatsApp-style copies. It scores sharpness, exposure, faces and resolution, and
   shows the reasoning (e.g. "sharpest (20× the softest)").
 - **Story maker**:
@@ -55,7 +61,8 @@ the rendered page).
   - an SSIM quality score is reported.
 - **Health check** fingerprints every file and flags silent damage, such as bit rot or bad copies.
 - **Fast**: about 180 photos/s on first index; rescans in milliseconds; 100,000-photo similarity search in about 4 s.
-- **Tested** against a generated library with known answers: 65 automated tests, including an end-to-end UI test.
+- **Tested** against a generated library with known answers: 88 automated tests, including an end-to-end UI test in both
+  themes.
 
 ## Quick start
 
@@ -84,9 +91,9 @@ No library handy? On the welcome screen choose **Try it on a sample library**. I
 | Page | What it does | What it changes |
 |---|---|---|
 | **Overview** | Totals, years covered, safety status, and what each tool would do for this library. | Nothing |
-| **Photos & videos** | Timeline (year → month), search, filters and a large preview. The preview shows the date and where it came from, camera, GPS and problems. Sends photos to the Story maker. | Nothing |
+| **Photos & videos** | Timeline (year → month), search, filters, zoom, viewer and a large preview. The preview shows the date and where it came from, camera, GPS and problems. **Batch actions** on a selection. | Nothing, unless you run a batch action |
 | **Duplicates** | Byte-identical copies, grouped. Memoria explains which copy it keeps; you can choose another or exclude a group. | Moves copies to Recovery |
-| **Similar & best shots** | Bursts, retakes and resized copies, with an explained best pick. A *Blurry photos* tab has three sensitivities, and nothing is pre-ticked. | Moves ticked photos to Recovery |
+| **Similar & best shots** | Bursts, retakes and resized copies, with an explained best pick. The *Similar videos* tab finds re-encoded and trimmed copies. A *Blurry photos* tab has three sensitivities, and nothing is pre-ticked. | Moves ticked items to Recovery |
 | **Tidy up** | Thumbs.db, desktop.ini, .DS_Store, `._` files, partial downloads, empty files and folders. Unreadable media and stray documents start unticked. | Moves files to Recovery; removes empty folders (undo recreates them) |
 | **Organise by date** | Moves files into `2024\2024-07`-style folders using the camera date, then a date in the file name. Files dated only by modified time are skipped unless you opt in. | Moves files inside the library |
 | **Story maker** | Instagram stories, carousels and story videos with a live preview. | Writes new files to an output folder |
@@ -108,6 +115,9 @@ The [Features guide](docs/features.html) explains every option.
 | No stale decisions | Just before acting, each file's size and modified time are re-checked. Duplicates are also re-hashed, and the kept copy is verified. Changed files are skipped and reported. |
 | Nothing is overwritten | Name clashes get a new name, such as `IMG_1234 (2).jpg`. |
 | Copies are proven | Each copy is written to a temporary name, compared byte for byte, then renamed. |
+| One window per library | A lock file prevents two Memoria windows (or processes) from changing the same library. |
+| Unplugged drives are safe | If the library drive disconnects, the scan stops and changes nothing. Folders it can't read are never treated as deleted. |
+| Undo keeps everything | Recycled files' catalogue rows (thumbnails, dates, health fingerprints) are kept and restored on undo. |
 | Crash-safe | Each operation is marked *pending* before it runs. On the next launch, unfinished operations are reconciled against the disk and remain undoable. |
 | Private | No account, no network calls, no telemetry. |
 
@@ -118,6 +128,8 @@ The [Features guide](docs/features.html) explains every option.
 | ![Duplicates](docs/images/duplicates.png) | ![Similar](docs/images/similar.png) |
 | **Story maker** | **Video compressor** |
 | ![Story maker](docs/images/story.png) | ![Video compressor](docs/images/video.png) |
+| **Similar videos** | **Dark theme** |
+| ![Similar videos](docs/images/similar-videos.png) | ![Dark theme](docs/images/dark-similar.png) |
 | **Organise by date** | **History & recovery** |
 | ![Organise](docs/images/organize.png) | ![History](docs/images/history.png) |
 
@@ -160,14 +172,15 @@ memoria-photo-manager/
 │   │   ├── db.py               Library + SQLite schema (files, batches, operations)
 │   │   ├── scanner.py          incremental scan + parallel analysis
 │   │   ├── media.py · ffmpeg.py · hashing.py · config.py · progress.py
-│   │   └── duplicates.py · similar.py · organize.py · tidy.py · health.py · compare.py · story.py · videotools.py
+│   │   ├── duplicates.py · similar.py · videosim.py · organize.py · tidy.py · health.py · compare.py
+│   │   └── batch.py · checkup.py · story.py · videotools.py
 │   ├── ui/                     PySide6 desktop app
 │   │   ├── app.py · main_window.py · tasks.py · widgets.py · theme.py · assets/
 │   │   └── pages/              one module per sidebar page (+ base.py)
 │   ├── samplelib.py            generator for the sample / test library (with expected.json)
 │   └── __main__.py             python -m memoria
 ├── tests/                      pytest suite (engine ground truth, story, video, UI end-to-end)
-├── tools/                      make_test_library · ui_screenshots · benchmark · make_reports · make_icon
+├── tools/                      make_test_library · ui_screenshots · benchmark · make_reports · make_icon · verify_build
 ├── docs/                       index · design · features · technical · report (HTML) + images/
 ├── Memoria.pyw                 windowed launcher
 ├── run.ps1 · build.ps1         start (sets up .venv) · build standalone app
@@ -182,7 +195,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 65 tests, about 1 minute
+.\.venv\Scripts\python -m pytest -q                       # 88 tests, about 1.5 minutes
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 ```
@@ -190,9 +203,12 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | Suite | Tests | Proves |
 |---|---|---|
 | `tests/test_engine.py` | 27 | Results match ground truth: duplicates (including files over 1.28 MB), bursts and best frame, near-duplicates, blur, dates and their sources, rotation, HEIC, video, tidy, organise. Safety: changed files are skipped, nothing is overwritten, copies are verified, undo restores an identical tree, crash reconciliation, cancellation, Empty Recovery. |
+| `tests/test_safety.py` | 11 | Unplugged drive and unreadable folders, undo keeps catalogue rows, library lock, schema migrations, paths over 260 characters. |
+| `tests/test_videosim.py` | 7 | Similar videos match ground truth, signature cache, cancellation, undo. |
+| `tests/test_batch.py` | 5 | Batch copy, move and recycle with undo; Check everything is read-only and correct. |
 | `tests/test_video.py` | 7 | Compression shrinks and verifies, sources are untouched, target size is met, cancel cleans up. |
 | `tests/test_story.py` | 30 | Exact output sizes, every template, panorama seams, EXIF rotation, story-video duration. |
-| `tests/test_ui_smoke.py` | 1 | Drives the real window offscreen through every page, applies a change, undoes it from History. |
+| `tests/test_ui_smoke.py` | 1 | Drives the real window offscreen through every page, runs Check everything and a batch action, applies and undoes changes, and repeats in the dark theme. |
 
 The **test library** (`tools\make_test_library.py [DEST] [--small]`) is a deterministic library of generated photos. It
 includes camera, phone and backup folders; exact duplicates (including 6 MB files); 5-frame bursts with a known best
@@ -210,10 +226,12 @@ $env:MEMORIA_SHOT_LABEL = "<b>Photos</b><br>D:\"     # optional: hide the real l
 ## Building a standalone app
 
 ```powershell
-.\build.ps1        # → dist\Memoria\Memoria.exe (PyInstaller, windowed, about 380 MB)
+.\build.ps1        # → dist\Memoria\Memoria.exe (PyInstaller, windowed, about 300 MB)
+.\tools\verify_build.ps1    # runs the packaged exe on a generated library and checks the result
 ```
 
-The build bundles the icon, FFmpeg and OpenCV data, and excludes unused Qt modules. The `.exe` is unsigned, so Windows
+The build bundles the icon, FFmpeg and OpenCV data. It then removes parts the app never loads (OpenCV's video-capture
+FFmpeg, Qt's software OpenGL, Qt Quick/QML/PDF and unused face models), which takes it from 381 MB to 299 MB. The `.exe` is unsigned, so Windows
 SmartScreen warns the first time it runs.
 
 ## Performance
@@ -228,6 +246,7 @@ SmartScreen warns the first time it runs.
 | Similar photos, including face detection for group members | 5.6 s |
 | Health check (full read of every byte) | 3.5 s — about 290 MB/s |
 | Similarity pairs, 100,000 hashes | about 4.2 s |
+| Similar-video signatures | about 0.15 s per short clip, then cached |
 | Story video, 1080×1920, with Ken Burns | about 96 fps |
 
 ## Troubleshooting
@@ -239,12 +258,14 @@ SmartScreen warns the first time it runs.
 | A sharp photo is listed as blurry | Smooth scenes (sky, fog, night) have little fine detail. Use *Only very blurry*; nothing there is ticked for you. |
 | The library has a `.memoria` folder | It holds the catalogue, thumbnails, History and Recovery. Empty or restore Recovery before deleting it. |
 | Offscreen screenshots show boxes instead of text | Set `QT_QPA_FONTDIR=C:\Windows\Fonts` (the screenshot tool does this automatically). |
+| "This library is already open" | Another Memoria window has it open. Close that window first. |
+| "The library folder can't be reached" | The drive was unplugged or the network is down. Reconnect it and press F5. Nothing was changed. |
 | OpenCV 5 is installed | Memoria needs `opencv-python-headless<5`, because OpenCV 5 removed the bundled face detector. |
 
 ## Roadmap
 
 - Tune blur and best-shot scoring on real libraries.
-- Dark theme; screen-reader names for grid items.
+- Screen-reader names for grid items.
 - Removable-drive catalogue; screenshot text search (local OCR).
 - Backup restore drill: restore a sample from a backup and prove it matches.
 - Optional Rust (PyO3) hot paths if profiling shows a need.

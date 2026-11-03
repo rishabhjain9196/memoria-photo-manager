@@ -234,6 +234,8 @@ class AppContext(QObject):
     library_modified = Signal()       # files moved/copied/indexed — pages should refresh
     toast_requested = Signal(str, str)  # message, batch_id to offer Undo ("" for none)
     navigate = Signal(str)
+    badges_changed = Signal(dict)     # page key → count shown in the sidebar
+    checkup_requested = Signal()
 
     def __init__(self, runner):
         super().__init__()
@@ -241,13 +243,48 @@ class AppContext(QObject):
         self.library: Optional[Library] = None
         self.thumbs = ThumbCache(self)
         self.story_selection: list[int] = []
+        self.video_selection: list[str] = []
+        self.generation = 0
+        self._results: dict = {}
+        self._results_gen = -1
+        self.badges: dict[str, int] = {}
+        # Connected first, so every other listener sees the new generation.
+        self.library_modified.connect(self._on_modified)
 
     def set_library(self, lib: Optional[Library]) -> None:
-        if self.library is not None:
+        if self.library is not None and self.library is not lib:
             self.library.close()
         self.library = lib
         self.thumbs.clear()
+        self._results, self._results_gen = {}, -1
+        self.generation += 1
+        self.set_badges({})
         self.library_opened.emit()
+
+    def _on_modified(self) -> None:
+        self.generation += 1
+        if self._results_gen != self.generation:
+            self._results = {}
+            if self.badges:
+                self.set_badges({})
+
+    # results of "Check everything", valid until the library changes again ---------------
+    def store_results(self, results: dict) -> None:
+        """Store results that stay valid through the library_modified signal emitted next."""
+        self._results = dict(results)
+        self._results_gen = self.generation + 1
+
+    def cached(self, key: str):
+        return self._results.get(key) if self._results_gen == self.generation else None
+
+    def set_badges(self, counts: dict) -> None:
+        self.badges = {k: v for k, v in counts.items() if v}
+        self.badges_changed.emit(self.badges)
+
+    def set_badge(self, key: str, count: int) -> None:
+        b = dict(self.badges)
+        b[key] = count
+        self.set_badges(b)
 
 
 class ThumbCache:
@@ -331,8 +368,6 @@ class PhotoModel(QAbstractListModel):
         return [it for it in self.items if it.get("checked")]
 
 
-BADGE_COLORS = {"keep": (theme.OK, "white"), "best": (theme.OK, "white"), "warn": (theme.WARN, "white"),
-                "info": (theme.ACCENT, "white"), "muted": ("#6B7280", "white")}
 
 
 class PhotoDelegate(QStyledItemDelegate):
@@ -357,7 +392,7 @@ class PhotoDelegate(QStyledItemDelegate):
         img_rect = QRect(r.left(), r.top(), r.width(), r.width())
         path = QPainterPath()
         path.addRoundedRect(QRectF(img_rect), 8, 8)
-        p.fillPath(path, QColor("#E9EBEF"))
+        p.fillPath(path, QColor(theme.PLACEHOLDER))
         pm = index.data(Qt.ItemDataRole.DecorationRole)
         dim = it.get("checked") is False and it.get("dim_unchecked")
         if pm is not None and not pm.isNull():
@@ -373,7 +408,9 @@ class PhotoDelegate(QStyledItemDelegate):
             p.drawText(img_rect, Qt.AlignmentFlag.AlignCenter,
                        "Can't preview" if it.get("error") else ("No preview" if it.get("kind") == "other" else "…"))
         if dim:
-            p.fillPath(path, QColor(255, 255, 255, 120))
+            veil = QColor(theme.CARD)
+            veil.setAlpha(140)
+            p.fillPath(path, veil)
         if it.get("kind") == "video":
             tag = f"▶ {fmt_duration(it.get('duration'))}".strip()
             fm = p.fontMetrics()
@@ -385,7 +422,7 @@ class PhotoDelegate(QStyledItemDelegate):
             p.setPen(QColor("white"))
             p.drawText(tr, Qt.AlignmentFlag.AlignCenter, tag)
         if it.get("badge"):
-            bg, fg = BADGE_COLORS.get(it.get("badge_kind", "info"), BADGE_COLORS["info"])
+            bg, fg = theme.badge_colors(it.get("badge_kind", "info"))
             f = p.font()
             f.setBold(True)
             f.setPointSizeF(8)
@@ -487,7 +524,7 @@ class Preview(QFrame):
         self.image = QLabel()
         self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image.setMinimumHeight(240)
-        self.image.setStyleSheet("background: #F0F2F5; border-radius: 8px;")
+        self.image.setStyleSheet(f"background: {theme.PREVIEW_BG}; border-radius: 8px;")
         self.title = label("", "h2", wrap=True)
         self.facts = QLabel()
         self.facts.setWordWrap(True)
@@ -557,11 +594,13 @@ class Preview(QFrame):
         if extra:
             facts.append(extra)
         self.facts.setText("<br>".join(facts))
-        self.open_btn.setEnabled(True)
+        self.open_btn.setEnabled(row.get("kind") in ("image", "video"))
+        self.open_btn.setToolTip("" if row.get("kind") in ("image", "video") else
+                                 "Only photos and videos can be opened from Memoria. Use Show in folder.")
         self.show_btn.setEnabled(True)
 
     def _open(self):
-        if self.row and self.ctx.library:
+        if self.row and self.ctx.library and self.row.get("kind") in ("image", "video"):
             open_path(self.ctx.library.abspath(self.row["rel_path"]))
 
     def _show(self):
@@ -575,13 +614,16 @@ class ConfirmDialog(QDialog):
 
     def __init__(self, parent, title: str, summary: str, details: list[str], confirm_text: str,
                  danger: bool = False, require_ack: Optional[str] = None, note: Optional[str] = None,
-                 note_kind: str = "trust"):
+                 note_kind: str = "trust", thumbs: Optional["ThumbCache"] = None,
+                 file_ids: Optional[list[int]] = None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(500)
         t = label(title, "h2")
         s = label(summary, wrap=True)
         lay = vbox(t, s, spacing=12, margins=(22, 20, 22, 18))
+        if thumbs is not None and file_ids:
+            lay.addLayout(self._strip(thumbs, file_ids))
         if details:
             d = QLabel("<ul style='margin-left:-20px'>" + "".join(f"<li>{x}</li>" for x in details) + "</ul>")
             d.setTextFormat(Qt.TextFormat.RichText)
@@ -601,9 +643,122 @@ class ConfirmDialog(QDialog):
         self.setLayout(lay)
         cancel.setFocus()
 
+    @staticmethod
+    def _strip(thumbs: "ThumbCache", file_ids: list[int], limit: int = 8) -> QHBoxLayout:
+        """A row of thumbnails of the affected files, so the user sees exactly what is about to move."""
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        for fid in file_ids[:limit]:
+            pm = thumbs.get(fid)
+            cell = QLabel()
+            cell.setFixedSize(56, 56)
+            canvas = QPixmap(56, 56)
+            canvas.fill(Qt.GlobalColor.transparent)
+            p = QPainter(canvas)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(0, 0, 56, 56), 8, 8)
+            p.fillPath(path, QColor(theme.PLACEHOLDER))
+            if pm is not None and not pm.isNull():
+                img = pm.scaled(56, 56, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                Qt.TransformationMode.SmoothTransformation)
+                p.setClipPath(path)
+                p.drawPixmap((56 - img.width()) // 2, (56 - img.height()) // 2, img)
+            p.end()
+            cell.setPixmap(canvas)
+            row.addWidget(cell)
+        if len(file_ids) > limit:
+            row.addWidget(label(f"+{len(file_ids) - limit:,} more", "muted"))
+        row.addStretch(1)
+        return row
+
 
 def confirm(parent, title, summary, details, confirm_text, **kw) -> bool:
     return ConfirmDialog(parent, title, summary, details, confirm_text, **kw).exec() == QDialog.DialogCode.Accepted
+
+
+class Viewer(QDialog):
+    """Full-size viewer with ← / → navigation through a list of library items."""
+
+    def __init__(self, parent, ctx: "AppContext", items: list[dict], index: int):
+        super().__init__(parent)
+        self.ctx, self.items, self.index = ctx, [i for i in items if i.get("rel_path")], 0
+        self.setWindowTitle("Memoria — viewer")
+        self.setStyleSheet("QDialog { background: #111214; } QLabel { color: #E6E8EB; }")
+        self.image = QLabel()
+        self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.caption = QLabel()
+        self.caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        prev_b = button("‹  Previous", on_click=lambda: self.step(-1), tip="Left arrow")
+        next_b = button("Next  ›", on_click=lambda: self.step(1), tip="Right arrow")
+        open_b = button("Open in default app", on_click=self._open_external)
+        show_b = button("Show in folder", on_click=lambda: self.current and show_in_explorer(
+            self.ctx.library.abspath(self.current["rel_path"])))
+        close_b = button("Close", on_click=self.close, tip="Esc")
+        lay = vbox(self.image, self.caption, hbox(prev_b, next_b, None, open_b, show_b, close_b),
+                   spacing=10, margins=(16, 16, 16, 14))
+        lay.setStretch(0, 1)
+        self.setLayout(lay)
+        self._pixmap = QPixmap()
+        if self.items:
+            target = items[index] if 0 <= index < len(items) else None
+            self.index = next((n for n, it in enumerate(self.items) if it is target), 0)
+        self.resize(parent.window().size() * 0.92 if parent else QSize(1200, 800))
+        self._load()
+
+    @property
+    def current(self) -> Optional[dict]:
+        return self.items[self.index] if self.items else None
+
+    def step(self, delta: int) -> None:
+        if self.items:
+            self.index = (self.index + delta) % len(self.items)
+            self._load()
+
+    def _load(self) -> None:
+        it = self.current
+        if it is None:
+            return
+        pm = None
+        if it.get("kind") == "image" and not it.get("error"):
+            try:
+                from ..engine.media import load_for_display
+                screen = max(self.width(), self.height(), 1600)
+                img = load_for_display(self.ctx.library.abspath(it["rel_path"]), screen)
+                q = QImage(img.tobytes(), img.width, img.height, img.width * 3, QImage.Format.Format_RGB888)
+                pm = QPixmap.fromImage(q.copy())
+            except Exception:
+                pm = None
+        if pm is None:
+            pm = self.ctx.thumbs.get(it["id"]) or QPixmap()
+        self._pixmap = pm
+        self._fit()
+        when = fmt_date(it.get("taken_at"), True) if it.get("taken_at") else ""
+        extra = "  ·  ▶ video — use “Open in default app” to play" if it.get("kind") == "video" else ""
+        self.caption.setText(f"<b>{it.get('name', '')}</b>   {when}   "
+                             f"<span style='color:#A1A7B0'>{self.index + 1} of {len(self.items)}{extra}</span>")
+
+    def _fit(self) -> None:
+        if not self._pixmap.isNull():
+            self.image.setPixmap(self._pixmap.scaled(self.image.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                                     Qt.TransformationMode.SmoothTransformation))
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self._fit()
+
+    def keyPressEvent(self, e) -> None:
+        if e.key() in (Qt.Key.Key_Right, Qt.Key.Key_Down, Qt.Key.Key_PageDown, Qt.Key.Key_Space):
+            self.step(1)
+        elif e.key() in (Qt.Key.Key_Left, Qt.Key.Key_Up, Qt.Key.Key_PageUp, Qt.Key.Key_Backspace):
+            self.step(-1)
+        else:
+            super().keyPressEvent(e)
+
+    def _open_external(self) -> None:
+        if self.current and self.current.get("kind") in ("image", "video"):
+            open_path(self.ctx.library.abspath(self.current["rel_path"]))
 
 
 class MessageDialog(QDialog):

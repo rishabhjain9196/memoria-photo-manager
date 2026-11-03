@@ -8,6 +8,7 @@ from pathlib import Path
 from . import config
 from .actions import Action
 from .db import Library
+from .progress import Progress
 from .scanner import walk_dirs
 
 CATEGORIES = {
@@ -35,7 +36,9 @@ def is_junk(name: str) -> bool:
     return n in config.JUNK_NAMES or os.path.splitext(n)[1] in config.JUNK_EXT or n.startswith(config.JUNK_PREFIXES)
 
 
-def find_tidy(lib: Library) -> TidyReport:
+def find_tidy(lib: Library, progress: Progress | None = None) -> TidyReport:
+    progress = progress or Progress()
+    progress.update(0, 2, "Looking for leftovers…")
     rep = TidyReport({k: [] for k in CATEGORIES})
     for r in lib.files():
         r = dict(r)
@@ -47,8 +50,10 @@ def find_tidy(lib: Library) -> TidyReport:
             rep.items["unreadable"].append(r)
         elif r["kind"] == "other":
             rep.items["other"].append(r)
+    progress.update(1, 2, "Looking for empty folders…")
     rep.items["folders"] = empty_folders(lib, {r["rel_path"].lower() for c in ("junk", "empty")
                                                 for r in rep.items[c]})
+    progress.update(2, 2, "Done", force=True)
     return rep
 
 

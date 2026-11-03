@@ -11,10 +11,14 @@ from ..widgets import (Banner, Card, ConfirmDialog, button, fmt_date, fmt_n, fmt
                        show_in_explorer, vbox)
 from .base import Page
 
-STATUS = {"applied": ("Done", theme.OK), "partial": ("Partly done", theme.WARN), "undone": ("Undone", theme.MUTED),
-          "emptied": ("Done · Recovery emptied", theme.MUTED), "applying": ("In progress", theme.WARN)}
+def status_label(status: str) -> tuple[str, str]:
+    return {"applied": ("Done", theme.OK), "partial": ("Partly done", theme.WARN), "undone": ("Undone", theme.MUTED),
+            "emptied": ("Done · Recovery emptied", theme.MUTED),
+            "applying": ("In progress", theme.WARN)}.get(status, (status, theme.TEXT))
+
+
 KIND = {"duplicates": "Duplicates", "similar": "Similar / blurry", "tidy": "Tidy up", "organize": "Organise",
-        "sync": "Compare & sync"}
+        "sync": "Compare & sync", "batch": "Photos & videos"}
 OP = {"recycle": "Moved to Recovery", "move": "Moved", "copy": "Copied", "rmdir": "Removed empty folder"}
 OP_STATUS = {"done": "Done", "undone": "Undone", "skipped": "Skipped", "failed": "Failed", "purged": "Deleted from Recovery",
              "pending": "Interrupted"}
@@ -77,7 +81,7 @@ class HistoryPage(Page):
         self.batches.clear()
         select = None
         for b in actions.batches(self.lib):
-            label_, color = STATUS.get(b["status"], (b["status"], theme.TEXT))
+            label_, color = status_label(b["status"])
             it = QTreeWidgetItem([fmt_date(b["created_at"], True), b["title"], f"{b['files']:,}",
                                   fmt_size(b["bytes"]), label_])
             it.setForeground(4, QColor(color))
@@ -169,4 +173,4 @@ class HistoryPage(Page):
             self.ctx.library_modified.emit()
             self.ctx.toast_requested.emit(f"Recovery emptied: {fmt_n(n, 'file')} deleted.", "")
 
-        self.run("Emptying Recovery", lambda p: actions.empty_recovery(lib), done)
+        self.run("Emptying Recovery", lambda p: actions.empty_recovery(lib, progress=p), done)

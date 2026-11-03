@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("MEMORIA_PROFILE", "Memoria-Tools")  # never touch the user's real settings
 if os.name == "nt":
     os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
 
@@ -37,6 +38,8 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
 
     app = QApplication.instance() or QApplication([])
     app.setStyle("Fusion")
+    theme.use("light")
+    app.setPalette(theme.qpalette())
     app.setStyleSheet(theme.QSS)
     outdir = Path(out)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -78,18 +81,33 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
     shot(name="00-welcome")
     win.open_library(library)
     idle()
+    if interactive_flows:
+        win.run_checkup()          # read-only "Check everything" → sidebar badges + cached results
+        idle()
     order = ["overview", "photos", "duplicates", "similar", "tidy", "organize", "story", "video", "health",
              "compare", "history"]
     for i, key in enumerate(order, 1):
-        if key not in win.pages:
+        if key not in win.page_classes:
             continue
         win.go(key)
         pump()
         idle()
-        page = win.pages[key]
+        page = win.page(key)
         if interactive_flows:
             if key == "photos":
                 page.grid.setCurrentIndex(page.grid.model().index(3, 0))
+                pump()
+                items = [it for it in page.grid.items() if it.get("kind") == "image"]
+                v = widgets.Viewer(page, win.ctx, items, 2)
+                v.resize(1200, 800)
+                v.show()
+                pump(0.6)
+                shot(v, "photos-viewer")
+                v.close()
+                sel = page.grid.selectionModel()
+                from PySide6.QtCore import QItemSelectionModel
+                for r in (3, 4, 5):
+                    sel.select(page.grid.model().index(r, 0), QItemSelectionModel.SelectionFlag.Select)
                 pump()
             elif key == "duplicates":
                 page.find()
@@ -103,7 +121,7 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                 pump()
             elif key == "organize":
                 page.build_plan()
-                pump()
+                idle()
             elif key == "story":
                 ids = [r["id"] for r in page.lib.files("kind='image' AND error IS NULL AND rel_path LIKE 'DCIM%'",
                                                        order="rel_path")][:4]
@@ -134,30 +152,83 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                 idle()
         shot(name=f"{i:02d}-{key}")
         if key == "similar":
-            page.tabs.setCurrentIndex(1)
-            pump()
-            shot(name=f"{i:02d}-{key}-blurry")
+            for t in range(1, page.tabs.count()):
+                page.tabs.setCurrentIndex(t)
+                pump()
+                if page.videos is not None and page.tabs.currentWidget() is page.videos and interactive_flows:
+                    page.videos.grid.setCurrentIndex(page.videos.grid.model().index(0, 0))
+                    pump()
+                name = "videos" if page.tabs.currentWidget() is page.videos else "blurry"
+                shot(name=f"{i:02d}-{key}-{name}")
             page.tabs.setCurrentIndex(0)
 
     if interactive_flows:
         # Apply a real change end-to-end, then undo it from History.
+        # Batch action from Photos & videos (move 3 selected items to Recovery), then Ctrl+Z.
+        win.go("photos")
+        pump()
+        idle()
+        ph = win.page("photos")
+        from PySide6.QtCore import QItemSelectionModel
+        ph.grid.clearSelection()
+        for r in (0, 1, 2):
+            ph.grid.selectionModel().select(ph.grid.model().index(r, 0), QItemSelectionModel.SelectionFlag.Select)
+        pump()
+        ph.recycle_selected()
+        idle()
+        win.undo_last()
+        idle()
         win.go("duplicates")
         pump()
         idle()
-        page = win.pages["duplicates"]
+        page = win.page("duplicates")
         page.apply()
         idle()
         shot(name="20-after-apply-toast", keep_toast=True)
         win.go("history")
         pump()
         shot(name="21-history-after-apply")
-        hist = win.pages["history"]
+        hist = win.page("history")
         hist.undo()
         idle()
         shot(name="22-history-after-undo")
         win.go("overview")
         pump()
         shot(name="23-overview-final")
+
+        # Dark theme: rebuild the window the way the app does when the theme changes.
+        from memoria.ui import theme as th
+        from memoria.ui.main_window import MainWindow
+        win.close()
+        pump()
+        th.use("dark")
+        app.setPalette(th.qpalette())
+        app.setStyleSheet(th.QSS)
+        win = MainWindow()
+        win.resize(1440, 900)
+        win.show()
+        win.open_library(library)
+        idle()
+        for key in ("overview", "photos", "duplicates", "similar", "history"):
+            win.go(key)
+            pump()
+            idle()
+            pg = win.page(key)
+            if key == "duplicates":
+                pg.find()
+                idle()
+            elif key == "similar":
+                pg.find()
+                idle()
+                pg.grid.setCurrentIndex(pg.grid.model().index(0, 0))
+                pump()
+            elif key == "photos":
+                pg.grid.setCurrentIndex(pg.grid.model().index(3, 0))
+                pump()
+            shot(name=f"dark-{key}")
+        th.use("light")
+        app.setPalette(th.qpalette())
+        app.setStyleSheet(th.QSS)
 
     win.close()
     pump()

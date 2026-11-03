@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -6,6 +7,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+os.environ["MEMORIA_PROFILE"] = "Memoria-Tests"   # keep UI tests out of the user's real settings
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 

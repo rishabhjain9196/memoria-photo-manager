@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from .config import longpath as L
 from .db import Library
 from .hashing import full_hash
 from .progress import Cancelled, Progress
@@ -52,13 +53,17 @@ class BatchResult:
         return self.failed == 0
 
 
+def _ex(p) -> bool:
+    return os.path.exists(L(p))
+
+
 def _unique(path: Path) -> Path:
-    if not path.exists():
+    if not _ex(path):
         return path
     stem, suffix = path.stem, path.suffix
     for i in range(2, 10_000):
         cand = path.with_name(f"{stem} ({i}){suffix}")
-        if not cand.exists():
+        if not _ex(cand):
             return cand
     raise FileExistsError(str(path))
 
@@ -72,31 +77,31 @@ def verified_copy(src: Path, dst: Path, expected: Optional[str] = None) -> str:
     expected = expected or full_hash(src)
     if expected is None:
         raise OSError(f"Cannot read {src}")
-    dst.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(L(dst.parent), exist_ok=True)
     tmp = dst.with_name(dst.name + ".memoria-tmp")
     try:
-        shutil.copy2(src, tmp)
+        shutil.copy2(L(src), L(tmp))
         got = full_hash(tmp)
         if got != expected:
             raise OSError(f"Verification failed copying {src.name} (content mismatch)")
-        if dst.exists():
+        if _ex(dst):
             raise FileExistsError(str(dst))
-        os.rename(tmp, dst)
+        os.rename(L(tmp), L(dst))
     finally:
-        if tmp.exists():
-            tmp.unlink()
+        if _ex(tmp):
+            os.remove(L(tmp))
     return expected
 
 
 def safe_move(src: Path, dst: Path) -> None:
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    if dst.exists():
+    os.makedirs(L(dst.parent), exist_ok=True)
+    if _ex(dst):
         raise FileExistsError(str(dst))
     if _same_volume(src, dst.parent):
-        os.rename(src, dst)
+        os.rename(L(src), L(dst))
     else:
         verified_copy(src, dst)
-        os.remove(src)
+        os.remove(L(src))
 
 
 def _now() -> str:
@@ -113,7 +118,7 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
                (batch_id, _now(), kind, title, "applying"))
     recycle_root = lib.recovery / batch_id
     total = len(actions)
-    remove_ids: list[int] = []
+    parked: list[tuple[int, int]] = []
     moved_rows: list[tuple[str, str, str, int]] = []
     verified: set = set()
     try:
@@ -143,13 +148,13 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
                 elif a.op == "copy":
                     verified_copy(src, dst, a.hash)
                 elif a.op == "rmdir":
-                    os.rmdir(src)
+                    os.rmdir(L(src))
                 db.execute("UPDATE operations SET status='done' WHERE id=?", (op_id,))
                 res.done += 1
                 res.bytes += a.size
                 if a.file_id is not None:
                     if a.op == "recycle":
-                        remove_ids.append(a.file_id)
+                        parked.append((op_id, a.file_id))
                     elif a.op == "move" and _inside(dst, lib.root):
                         rel = str(dst.relative_to(lib.root))
                         folder, name = os.path.split(rel)
@@ -161,7 +166,7 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
     except Cancelled:
         res.cancelled = True
     finally:
-        lib.remove_rows(remove_ids)
+        lib.park_rows(parked)
         if moved_rows:
             with lib.transaction() as tx:
                 tx.executemany("UPDATE files SET rel_path=?, folder=?, name=? WHERE id=?", moved_rows)
@@ -187,20 +192,20 @@ def _preflight(a: Action, src: Path, verified: Optional[set] = None) -> Optional
     for gpath, ghash in a.guards:
         if (gpath, ghash) in verified:
             continue
-        if not os.path.exists(gpath):
+        if not _ex(gpath):
             return f"the copy being kept ({Path(gpath).name}) is missing"
         if full_hash(gpath) != ghash:
             return f"the copy being kept ({Path(gpath).name}) has changed"
         verified.add((gpath, ghash))
     if a.op == "rmdir":
-        if not src.is_dir():
+        if not os.path.isdir(L(src)):
             return "folder no longer exists"
-        if any(src.iterdir()):
+        if os.listdir(L(src)):
             return "folder is no longer empty"
         return None
-    if not src.exists():
+    if not _ex(src):
         return "file no longer exists"
-    st = src.stat()
+    st = os.stat(L(src))
     if a.size and st.st_size != a.size:
         return "file size changed since review"
     if a.mtime is not None and abs(st.st_mtime - a.mtime) > 0.001:
@@ -246,20 +251,25 @@ def undo(lib: Library, batch_id: str, progress: Optional[Progress] = None) -> Ba
         src, dst = Path(op["src"]), Path(op["dst"]) if op["dst"] else None
         try:
             if op["op"] in ("recycle", "move"):
-                if not dst.exists():
+                if not _ex(dst):
                     raise FileNotFoundError(f"{dst.name} is no longer in its moved location")
-                target = src if not src.exists() else _unique(src)
+                target = src if not _ex(src) else _unique(src)
                 if target != src:
                     res.messages.append(f"{src.name} restored as {target.name} (a file with that name exists)")
                 safe_move(dst, target)
+                _undo_catalogue(lib, op, dst, target)
             elif op["op"] == "copy":
-                if dst.exists():
+                if _ex(dst):
                     # Only remove the copy when it still matches the source content exactly.
                     if op["hash"] and full_hash(dst) != op["hash"]:
                         raise OSError(f"{dst.name} was modified after copying; left in place")
-                    os.remove(dst)
+                    os.remove(L(dst))
+                    if _inside(dst, lib.root):
+                        row = lib.file_by_rel(str(dst.relative_to(lib.root)))
+                        if row is not None:
+                            lib.remove_rows([row["id"]])
             elif op["op"] == "rmdir":
-                src.mkdir(parents=True, exist_ok=True)
+                os.makedirs(L(src), exist_ok=True)
             lib.db.execute("UPDATE operations SET status='undone' WHERE id=?", (op["id"],))
             res.done += 1
             res.bytes += op["size"] or 0
@@ -275,20 +285,35 @@ def undo(lib: Library, batch_id: str, progress: Optional[Progress] = None) -> Ba
     return res
 
 
+def _undo_catalogue(lib: Library, op, dst: Path, target: Path) -> None:
+    """Keep catalogue rows (analysis, thumbnails, health fingerprints) in step with an undone move."""
+    if not _inside(target, lib.root):
+        return
+    rel_target = str(target.relative_to(lib.root))
+    if op["op"] == "recycle":
+        lib.restore_parked(op["id"], rel_target)
+    elif _inside(dst, lib.root):
+        folder, name = os.path.split(rel_target)
+        with lib.transaction() as tx:
+            if not tx.execute("SELECT 1 FROM files WHERE rel_path=?", (rel_target,)).fetchone():
+                tx.execute("UPDATE files SET rel_path=?, folder=?, name=? WHERE rel_path=?",
+                           (rel_target, folder, name, str(dst.relative_to(lib.root))))
+
+
 def _prune_empty(folder: Path) -> None:
-    if not folder.is_dir():
+    if not os.path.isdir(L(folder)):
         return
     for dirpath, dirnames, filenames in os.walk(folder, topdown=False):
         if not os.listdir(dirpath):
             try:
-                os.rmdir(dirpath)
+                os.rmdir(L(dirpath))
             except OSError:
                 pass
 
 
 def recovery_size(lib: Library) -> tuple[int, int]:
     files = size = 0
-    if lib.recovery.exists():
+    if _ex(lib.recovery):
         for dirpath, _, filenames in os.walk(lib.recovery):
             for f in filenames:
                 files += 1
@@ -299,20 +324,27 @@ def recovery_size(lib: Library) -> tuple[int, int]:
     return files, size
 
 
-def empty_recovery(lib: Library, batch_ids: Optional[list[str]] = None) -> int:
+def empty_recovery(lib: Library, batch_ids: Optional[list[str]] = None,
+                   progress: Optional[Progress] = None) -> int:
     """Permanently delete files in Recovery. The only destructive operation in Memoria."""
+    progress = progress or Progress()
     removed = 0
     targets = [lib.recovery / b for b in batch_ids] if batch_ids else (
-        list(lib.recovery.iterdir()) if lib.recovery.exists() else [])
-    for t in targets:
-        if t.is_dir():
+        list(lib.recovery.iterdir()) if _ex(lib.recovery) else [])
+    for i, t in enumerate(targets):
+        progress.update(i, len(targets), f"Deleting from Recovery… {i:,} of {len(targets):,} changes")
+        if os.path.isdir(L(t)):
             for _, _, fs in os.walk(t):
                 removed += len(fs)
-            shutil.rmtree(t, ignore_errors=True)
-            lib.db.execute("UPDATE batches SET status='emptied' WHERE id=? AND kind IN "
-                           "('duplicates','similar','tidy')", (t.name,))
+            shutil.rmtree(L(t), ignore_errors=True)
+            ops = [r[0] for r in lib.db.execute("SELECT id FROM operations WHERE batch_id=? AND op='recycle' "
+                                                "AND status='done'", (t.name,))]
+            lib.db.execute("UPDATE batches SET status='emptied' WHERE id=? AND status IN ('applied','partial')",
+                           (t.name,))
             lib.db.execute("UPDATE operations SET status='purged' WHERE batch_id=? AND op='recycle' "
                            "AND status='done'", (t.name,))
+            lib.drop_parked(ops)
+    progress.update(len(targets), len(targets), "Recovery emptied", force=True)
     return removed
 
 
@@ -320,15 +352,15 @@ def reconcile(lib: Library) -> int:
     """Repair the journal after a crash: resolve operations left in ``pending`` state."""
     fixed = 0
     for op in lib.db.execute("SELECT * FROM operations WHERE status='pending'").fetchall():
-        src_exists = os.path.exists(op["src"])
-        dst_exists = bool(op["dst"]) and os.path.exists(op["dst"])
+        src_exists = _ex(op["src"])
+        dst_exists = bool(op["dst"]) and _ex(op["dst"])
         if op["op"] in ("recycle", "move"):
             status = "done" if dst_exists and not src_exists else "failed"
         elif op["op"] == "copy":
             status = "done" if dst_exists and full_hash(op["dst"]) == op["hash"] else "failed"
             tmp = Path(str(op["dst"]) + ".memoria-tmp") if op["dst"] else None
-            if tmp and tmp.exists():
-                tmp.unlink()
+            if tmp and _ex(tmp):
+                os.remove(L(tmp))
         else:
             status = "done" if not src_exists else "failed"
         lib.db.execute("UPDATE operations SET status=?, error=COALESCE(error,'interrupted') WHERE id=?",

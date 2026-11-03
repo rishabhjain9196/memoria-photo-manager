@@ -18,10 +18,14 @@
   <b>FEATURES GUIDE</b>
   <a href="#start">Getting started</a>
   <a href="#safety">Your files are safe</a>
+  <a href="#checkup">Check everything</a>
   <a href="#overview">Overview</a>
   <a href="#photos">Photos &amp; videos</a>
+  <a class="sub" href="#batch">Batch actions</a>
+  <a class="sub" href="#viewer">Viewer</a>
   <a href="#duplicates">Duplicates</a>
   <a href="#similar">Similar &amp; best shots</a>
+  <a class="sub" href="#videos">Similar videos</a>
   <a class="sub" href="#blurry">Blurry photos</a>
   <a href="#tidy">Tidy up</a>
   <a href="#organize">Organise by date</a>
@@ -30,6 +34,9 @@
   <a href="#health">Health check</a>
   <a href="#compare">Compare &amp; sync</a>
   <a href="#history">History &amp; recovery</a>
+  <a href="#progress">Progress &amp; cancelling</a>
+  <a href="#themes">Themes</a>
+  <a href="#shortcuts">Keyboard shortcuts</a>
   <a href="#formats">Supported files</a>
   <a href="#sample">Sample / test library</a>
   <a href="#faq">FAQ</a>
@@ -39,7 +46,7 @@
 <header class="hero">
   <h1>Features guide</h1>
   <p>Everything Memoria can do, how to use each tool, and exactly what each one will — and won't — change on your PC.</p>
-  <div class="meta"><span class="pill">11 pages</span><span class="pill">Works offline</span><span class="pill">Windows 10/11</span></div>
+  <div class="meta"><span class="pill">Version 1.1</span><span class="pill">11 pages</span><span class="pill">Light &amp; dark</span><span class="pill">Works offline</span><span class="pill">Windows 10/11</span></div>
 </header>
 
 <section id="start">
@@ -51,8 +58,10 @@
       backup drive). Or click <b>Try it on a sample library</b> to explore safely with generated photos.</li>
   <li>Memoria reads the library in the background: it notes every file, reads photo dates and camera details, and makes
       thumbnails. The first time takes a few minutes for a large library; afterwards it only looks at new or changed files.</li>
-  <li>Start from <b>Overview</b> — each card tells you what that tool would do for this library.</li>
+  <li>Start from <b>Overview</b> — each card tells you what that tool would do for this library. Click
+      <b>Check everything</b> to run every finder in one go (it only reads).</li>
 </ol>
+<p>You can also <b>drag a folder</b> onto the window to open it as a library.</p>
 <figure><img src="images/welcome.png" alt="Welcome screen"><figcaption>The welcome screen explains the safety promises
 before you choose a folder.</figcaption></figure>
 <p>Memoria remembers the last library and page and reopens them next time. Recent libraries are listed on the welcome
@@ -71,7 +80,26 @@ folder, every change is listed in History, and every change can be undone.</div>
   <li><b>Nothing is overwritten.</b> If a name is already taken, the moved or copied file gets a number, e.g. <i>IMG_1234 (2).jpg</i>.</li>
   <li><b>Where Memoria writes:</b> a hidden <code>.memoria</code> folder inside your library (catalogue, thumbnails,
       History and Recovery), and the output folders you choose for stories and compressed videos.</li>
+  <li><b>One window per library.</b> A library can only be open in one Memoria window at a time, so two windows can
+      never change the same files at once.</li>
+  <li><b>Unplugged drives are safe.</b> If the library's drive disconnects, Memoria stops and changes nothing. Folders
+      it can't read are left as they were in the catalogue — never treated as deleted.</li>
+  <li><b>Undo keeps everything.</b> Undoing a change restores files together with their thumbnails, dates and health
+      fingerprints.</li>
   <li><b>Nothing leaves your PC.</b> No account, no upload, no tracking.</li>
+</ul>
+</section>
+
+<section id="checkup">
+<h2>Check everything</h2>
+<p>One button on Overview runs every finder in sequence — reading the library, exact duplicates, similar photos,
+similar videos, blurry photos, leftovers and the date-folder plan — with a single progress bar
+("Step 3 of 6 · Finding similar photos").</p>
+<ul>
+  <li>It <b>only reads</b>; nothing in your library changes.</li>
+  <li>The sidebar then shows a <b>count badge</b> on each tool with something to review (e.g. Duplicates 14).</li>
+  <li>The results are reused: opening Duplicates, Similar, Tidy up or Organise shows them instantly — until anything
+      in the library changes, after which the page looks again.</li>
 </ul>
 </section>
 
@@ -101,7 +129,28 @@ folder, every change is listed in History, and every change can be undone.</div>
   <li>Double-click to open in your default viewer; right-click for <b>Open</b>, <b>Show in folder</b> and <b>Add to Story maker</b>.</li>
   <li>Select several photos (Ctrl/Shift-click) and press <b>Add N to Story maker</b>.</li>
 </ul>
-<figure><img src="images/photos.png" alt="Photos and videos"><figcaption>Timeline, grid and preview. Videos show a ▶ duration tag.</figcaption></figure>
+<ul>
+  <li><b>Thumbnail size:</b> the Size slider, or Ctrl + mouse wheel over the grid.</li>
+  <li>The <b>Problems</b> filter shows how many photos and videos can't be opened.</li>
+</ul>
+<h3 id="batch">Batch actions</h3>
+<p>Select several items (Ctrl/Shift-click, or Ctrl+A for everything shown) and a selection bar appears with the count
+and total size:</p>
+<table>
+  <tr><th>Action</th><th>What happens</th><th>Undo</th></tr>
+  <tr><td><b>Move to Recovery</b> (or Delete key)</td><td>Selected items move to Recovery after a confirmation that shows their thumbnails.</td><td>Yes</td></tr>
+  <tr><td><b>Copy to folder…</b></td><td>Verified copies into any folder (e.g. a USB stick). Name clashes get a number; nothing is overwritten.</td><td>Removes the copies, if unchanged</td></tr>
+  <tr><td><b>Move to folder in this library…</b></td><td>Moves files to another folder of the same library; dates, thumbnails and fingerprints move with them.</td><td>Yes</td></tr>
+  <tr><td><b>Add to Story maker</b></td><td>Sends the selected photos to the Story maker, in order.</td><td>—</td></tr>
+  <tr><td><b>Compress videos</b></td><td>Opens the Video compressor with the selected videos ticked.</td><td>—</td></tr>
+  <tr><td><b>Show in folder</b></td><td>Opens Explorer at the first selected item.</td><td>—</td></tr>
+</table>
+<figure><img src="images/photos.png" alt="Photos and videos"><figcaption>Three photos selected: the selection bar offers
+Move to Recovery and More actions. Videos show a ▶ duration tag.</figcaption></figure>
+<h3 id="viewer">Viewer</h3>
+<p>Double-click a photo (or press Enter) to view it large. Use ← / → (or Space / Backspace) to move through the photos
+currently shown, <b>Open in default app</b>, <b>Show in folder</b>, and Esc to close. Videos open in your default player.</p>
+<figure><img src="images/viewer.png" alt="Viewer"><figcaption>The built-in viewer.</figcaption></figure>
 </section>
 
 <section id="duplicates">
@@ -151,6 +200,14 @@ WhatsApp forwards — and picks the best one.</p>
 <p>Exact copies are not repeated here (they belong to Duplicates), and screenshots taken a second apart are not mistaken
 for bursts — bursts require real camera timestamps.</p>
 <figure><img src="images/similar.png" alt="Similar and best shots"><figcaption>A five-frame burst; the sharp frame is the best pick.</figcaption></figure>
+
+<h3 id="videos">Similar videos</h3>
+<p>The <b>Similar videos</b> tab finds copies of the same video whose bytes differ — compressed or resized copies
+(WhatsApp forwards, exports) and slightly trimmed copies. Memoria compares eight frames spread across each video and
+the video lengths. The best copy is picked by resolution, then quality (bitrate), then length, with the reason shown
+("highest resolution (1280×720), highest quality (0.8 Mb/s)"). The first search reads a few frames from each video;
+results are remembered, so later searches are quick.</p>
+<figure><img src="images/similar-videos.png" alt="Similar videos"><figcaption>An original and its WhatsApp-sized copy.</figcaption></figure>
 
 <h3 id="blurry">Blurry photos</h3>
 <p>The second tab lists photos with little fine detail. Choose a sensitivity — <b>Only very blurry</b>, <b>Blurry
@@ -305,6 +362,42 @@ current location.</figcaption></figure>
 library it checks which steps finished and records them in History, so the change can still be undone.</div>
 </section>
 
+<section id="progress">
+<h2>Progress &amp; cancelling</h2>
+<p>Everything that takes time runs in the background with a bar at the bottom of the window showing what is happening,
+the <b>percentage</b>, the time elapsed and an estimate of the <b>time left</b>. Multi-step work (Check everything, Undo,
+copying into the library) shows the step it is on. <b>Cancel</b> (or Esc) stops cleanly between files; anything already
+done is recorded in History and can be undone. The window never freezes, and only one task runs at a time so changes
+can't collide.</p>
+</section>
+
+<section id="themes">
+<h2>Themes</h2>
+<p>Choose <b>Match Windows</b>, <b>Light</b> or <b>Dark</b> at the bottom of the sidebar. Match Windows follows your
+Windows setting and switches automatically when it changes. Memoria keeps your library and page open when the theme
+changes.</p>
+<figure><img src="images/dark-similar.png" alt="Dark theme"><figcaption>Dark theme.</figcaption></figure>
+</section>
+
+<section id="shortcuts">
+<h2>Keyboard shortcuts</h2>
+<table>
+  <tr><th>Keys</th><th>Action</th></tr>
+  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">1</span> … <span class="kbd">0</span></td><td>Go to a page (in sidebar order; Ctrl+0 = Compare &amp; sync)</td></tr>
+  <tr><td><span class="kbd">F5</span></td><td>Rescan the library</td></tr>
+  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">O</span></td><td>Open another library</td></tr>
+  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">Z</span></td><td>Undo the last change (asks first)</td></tr>
+  <tr><td><span class="kbd">Esc</span></td><td>Cancel the running task</td></tr>
+  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">F</span></td><td>Search (Photos &amp; videos)</td></tr>
+  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">A</span></td><td>Select all shown items</td></tr>
+  <tr><td><span class="kbd">Delete</span></td><td>Move selected items to Recovery (asks first)</td></tr>
+  <tr><td><span class="kbd">Enter</span> / double-click</td><td>View photo</td></tr>
+  <tr><td><span class="kbd">←</span> <span class="kbd">→</span></td><td>Previous / next in the viewer</td></tr>
+  <tr><td><span class="kbd">Space</span></td><td>Tick / untick the selected photo in review grids</td></tr>
+  <tr><td><span class="kbd">Ctrl</span> + mouse wheel</td><td>Thumbnail size</td></tr>
+</table>
+</section>
+
 <section id="formats">
 <h2>Supported files</h2>
 <table>
@@ -352,7 +445,10 @@ for you — try the "Only very blurry" sensitivity.</p>
 <h4>How do I get space back permanently?</h4>
 <p>After you're happy with a clean-up, use History &amp; recovery → <b>Empty Recovery…</b>.</p>
 <h4>Can I use Memoria on an external drive?</h4>
-<p>Yes. The catalogue and Recovery live on that drive, so they travel with it.</p>
+<p>Yes. The catalogue and Recovery live on that drive, so they travel with it. If the drive is unplugged while
+Memoria is reading it, Memoria stops and changes nothing — reconnect it and press F5.</p>
+<h4>Why does it say the library is already open?</h4>
+<p>Another Memoria window is using it. Only one window may work on a library at a time so changes can never collide.</p>
 </section>
 
 <footer>Memoria features guide · see also <a href="design.html">Design</a> and <a href="technical.html">Technical</a></footer>

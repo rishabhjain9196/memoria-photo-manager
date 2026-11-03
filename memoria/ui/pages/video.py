@@ -356,6 +356,22 @@ class VideoPage(Page):
         keys = {r["key"] for r in rows}
         self._external = [e for e in self._external if e["key"] not in keys]
         self._fill(rows + self._external)
+        self._take_selection()
+
+    def _take_selection(self) -> None:
+        """Pick up videos sent from Photos & videos (ticked, ready to compress)."""
+        if self.ctx.video_selection and self._rows:
+            paths = [Path(p) for p in self.ctx.video_selection]
+            self.ctx.video_selection.clear()
+            self._checked = set()
+            self.add_external_files(paths)
+            self._fill(self._rows)
+            self._settings_changed()
+
+    def showEvent(self, e) -> None:  # noqa: N802
+        super().showEvent(e)
+        if not self.stale:
+            self._take_selection()
 
     def _fill(self, rows: list[dict]) -> None:
         self._filling = True

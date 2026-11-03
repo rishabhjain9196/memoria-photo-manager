@@ -40,7 +40,8 @@ class HealthReport:
 def _decode_ok(path) -> Optional[str]:
     from PIL import Image
     try:
-        with Image.open(path) as im:
+        from .config import longpath
+        with Image.open(longpath(path)) as im:
             if im.format == "JPEG":
                 im.draft("RGB", (256, 256))
             im.load()

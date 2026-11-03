@@ -5,7 +5,8 @@ Usage:
 
 The library imitates a messy real collection: camera folders, phone backups, WhatsApp copies,
 downloads, bursts, blurry shots, screenshots, junk files, a corrupt photo, rotated photos,
-HEIC, and videos. ``expected.json`` in the library root records what each tool should find.
+HEIC, and videos (including a WhatsApp-compressed copy and a trimmed copy that the similar-videos
+tool must find). ``expected.json`` in the library root records what each tool should find.
 """
 from __future__ import annotations
 
@@ -182,17 +183,46 @@ def make_video(path: Path, source: str, size: str, seconds: float, created: date
     return True
 
 
+def reencode_video(src: Path, dst: Path, args: list[str], mtime: datetime, start: float = 0.0) -> None:
+    """Re-encode ``src`` into ``dst`` (e.g. a messenger-compressed or trimmed copy)."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [_ffmpeg(), "-y", "-hide_banner", "-loglevel", "error", *(["-ss", f"{start:.2f}"] if start else []),
+           "-i", str(src), *args, "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+           "-c:a", "aac", str(dst)]
+    subprocess.run(cmd, check=True, creationflags=CREATE_NO_WINDOW)
+    set_mtime(dst, mtime)
+
+
 # --------------------------------------------------------------------------------------
 # Library builder
 # --------------------------------------------------------------------------------------
-def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True) -> dict:
+BUILD_STEPS = [
+    "Creating camera photos…", "Creating large photos and their backups…", "Copying exact duplicates…",
+    "Making WhatsApp-style photo copies…", "Shooting bursts…", "Adding blurry shots…",
+    "Adding screenshots and downloads…", "Adding an iPhone HEIC photo…", "Adding problem files…",
+    "Recording videos…", "Copying a duplicate video…", "Making a compressed video copy…",
+    "Making a trimmed video copy…", "Recording an unrelated video…", "Writing the answer key…",
+]
+
+
+def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True, progress=None) -> dict:
+    """Generate the library at ``dest``. ``progress`` is an optional ``(done, total, message)`` callable."""
+    step_no = 0
+
+    def step() -> None:
+        nonlocal step_no
+        if progress is not None:
+            progress(step_no, len(BUILD_STEPS), BUILD_STEPS[step_no])
+        step_no += 1
+
     dest = Path(dest)
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
     exp: dict = {"duplicate_groups": [], "bursts": [], "near_duplicates": [], "blurry": [], "junk": [],
                  "empty_files": [], "empty_folders": [], "corrupt": [], "non_media": [], "rotated": [],
-                 "dates": {}, "uncertain_dates": [], "large_duplicates": [], "videos": [], "heic": []}
+                 "dates": {}, "uncertain_dates": [], "large_duplicates": [], "videos": [], "heic": [],
+                 "similar_videos": []}
     seed = 1000
     originals: list[tuple[str, datetime]] = []
     scale = 0.5 if small else 1.0
@@ -202,6 +232,7 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True) -
         return str(p.relative_to(dest))
 
     # 1. Events from cameras / phones
+    step()
     for date_s, name, count, cam, place, folder in EVENTS:
         count = max(2, count // 2) if small else count
         t0 = datetime.fromisoformat(date_s)
@@ -222,6 +253,7 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True) -
             originals.append((rel(p), dt))
             exp["dates"][rel(p)] = {"date": dt.isoformat(sep=" "), "source": "exif"}
 
+    step()
     # 2. Large (>1.28 MB) originals + exact copies — regression for the sampled-hash bug
     big_n = 2 if small else 4
     for i in range(big_n):
@@ -240,6 +272,7 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True) -
         exp["large_duplicates"].append(rel(p))
         exp["dates"][rel(p)] = {"date": dt.isoformat(sep=" "), "source": "exif"}
 
+    step()
     # 3. Exact duplicates of normal photos: backups, "(1)" downloads, a triple copy
     picks = originals[2::5][: (3 if small else 6)]
     for j, (r, dt) in enumerate(picks):
@@ -257,6 +290,7 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True) -
             group.append(rel(c2))
         exp["duplicate_groups"].append(sorted(group))
 
+    step()
     # 4. Near-duplicates: WhatsApp-style resized, recompressed copies with EXIF stripped
     for j, (r, dt) in enumerate(originals[4::7][: (2 if small else 4)]):
         src = ImageOps.exif_transpose(Image.open(dest / r))
@@ -266,6 +300,7 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True) -
         exp["near_duplicates"].append({"files": sorted([r, rel(wa)]), "best": r})
         exp["dates"][rel(wa)] = {"date": f"{dt:%Y-%m-%d} 00:00:00", "source": "filename"}
 
+    step()
     # 5. Bursts: 5 frames 1 s apart, slight camera shake, varying blur/exposure. Frame 2 is best.
     bursts = 2 if small else 3
     blur_radius = [2.2, 3.5, 0.0, 1.4, 5.0]
@@ -285,6 +320,7 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True) -
             frames.append(rel(p))
         exp["bursts"].append({"files": frames, "best": frames[2]})
 
+    step()
     # 6. Blurry single shots
     for k in range(2 if small else 4):
         seed += 1
@@ -294,6 +330,7 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True) -
         exp["blurry"].append(rel(p))
         exp["dates"][rel(p)] = {"date": dt.isoformat(sep=" "), "source": "exif"}
 
+    step()
     # 7. Screenshots and other files dated only by name
     for k in range(2 if small else 4):
         dt = datetime(2024, 2, 10, 10, 10, 10 + k)
@@ -313,6 +350,7 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True) -
     save_jpeg(scene(seed, W, H), p, None, mtime=datetime(2020, 5, 5, 12, 0))
     exp["uncertain_dates"].append(rel(p))
 
+    step()
     # 8. HEIC from an iPhone
     try:
         import pillow_heif
@@ -327,6 +365,7 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True) -
     except Exception as e:  # pragma: no cover
         print("HEIC skipped:", e)
 
+    step()
     # 9. Problems: corrupt photo, junk, empty files/folders, non-media
     seed += 1
     full = dest / "Camera Roll" / "2021" / "IMG_9999.jpg"
@@ -353,8 +392,10 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True) -
         (dest / r).write_text(text)
         exp["non_media"].append(r)
 
+    step()
     # 10. Videos (+ one exact duplicate)
-    if videos and _ffmpeg():
+    have_ffmpeg = videos and bool(_ffmpeg())
+    if have_ffmpeg:
         specs = [("Camera Roll\\2023\\VID_20230610_090000.mp4", "testsrc2", "640x360", 3, datetime(2023, 6, 10, 9), "800k"),
                  ("iPhone Import\\IMG_5001.MOV", "smptebars", "720x1280", 3, datetime(2025, 10, 20, 20, 30), "1M"),
                  ("Camera Roll\\2024\\VID_20240210_163000.mp4", "testsrc", "1280x720", 4 if small else 6,
@@ -363,16 +404,48 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True) -
             if make_video(dest / r, src, size, secs, created, br):
                 exp["videos"].append(r)
                 exp["dates"][r] = {"date": created.isoformat(sep=" "), "source": "metadata"}
+    step()
+    if have_ffmpeg:
         vdup = dest / "Phone Backup" / "2023" / "VID_20230610_090000.mp4"
         shutil.copy2(dest / specs[0][0], vdup)
         exp["duplicate_groups"].append(sorted([specs[0][0], rel(vdup)]))
 
+    # 11. Similar videos: a messenger-compressed, downscaled copy and a slightly trimmed copy.
+    # The exact duplicate above joins the trimmed group but must be collapsed away.
+    step()
+    if have_ffmpeg:
+        orig = specs[2][0]
+        wa = dest / "WhatsApp Video" / "VID-20240210-WA0001.mp4"
+        reencode_video(dest / orig, wa, ["-vf", "scale=640:360", "-b:v", "300k", "-b:a", "64k",
+                                         "-map_metadata", "-1"], datetime(2024, 2, 12, 9, 0))
+        exp["videos"].append(rel(wa))
+        exp["similar_videos"].append({"files": sorted([orig, rel(wa)]), "best": orig})
+    step()
+    if have_ffmpeg:
+        orig = specs[0][0]
+        trimmed = dest / "Videos" / "Edited" / "VID_20230610_090000_trim.mp4"
+        reencode_video(dest / orig, trimmed, ["-b:v", "400k", "-b:a", "64k"], datetime(2023, 6, 15, 18, 0),
+                       start=0.3)
+        exp["videos"].append(rel(trimmed))
+        exp["similar_videos"].append({"files": sorted([orig, rel(trimmed)]), "best": orig})
+    # An unrelated clip as long as the testsrc video; it must not match anything.
+    step()
+    if have_ffmpeg:
+        r, created = "Camera Roll\\2024\\VID_20240211_101500.mp4", datetime(2024, 2, 11, 10, 15)
+        if make_video(dest / r, "mandelbrot", "640x360", 4 if small else 6, created, "1M"):
+            exp["videos"].append(r)
+            exp["dates"][r] = {"date": created.isoformat(sep=" "), "source": "metadata"}
+    exp["similar_videos"].sort(key=lambda g: g["files"])
+
+    step()
     exp["duplicate_groups"].sort()
     exp["non_media"].append("expected.json")
     files = [p for p in dest.rglob("*") if p.is_file()]
     exp["total_files"] = len(files) + 1  # + expected.json itself
     exp["total_bytes"] = sum(p.stat().st_size for p in files)
     (dest / "expected.json").write_text(json.dumps(exp, indent=2))
+    if progress is not None:
+        progress(len(BUILD_STEPS), len(BUILD_STEPS), "Sample library ready")
     return exp
 
 

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QFrame, QGridLayout, QWidget
 
 from ...engine import actions, health, organize, similar, tidy
 from .. import theme
+from ..tasks import BackgroundCall
 from ..widgets import Banner, Tile, button, fmt_date, fmt_n, fmt_size, glyph_label, hbox, label, scroll, vbox
 from .base import Page
 
@@ -34,9 +35,14 @@ class OverviewPage(Page):
 
     def __init__(self, ctx):
         super().__init__(ctx)
+        self.updating = label("", "small")
         self.rescan_btn = button("Rescan library", on_click=lambda: self.window().index_library(),
-                                 tip="Look for new, changed or removed files (only reads files)")
-        self.header_actions.addWidget(self.rescan_btn)
+                                 tip="Look for new, changed or removed files (only reads files) — F5")
+        self.check_btn = button("Check everything", "primary", lambda: self.ctx.checkup_requested.emit(),
+                                tip="Find duplicates, similar photos and videos, blurry photos, leftovers and "
+                                    "files to organise in one go. Reads only — nothing is changed.")
+        for w in (self.updating, self.rescan_btn, self.check_btn):
+            self.header_actions.addWidget(w)
         self.t_photos, self.t_videos, self.t_size, self.t_span = Tile(text="Photos"), Tile(text="Videos"), \
             Tile(text="Library size"), Tile(text="Covers")
         tiles = hbox(self.t_photos, self.t_videos, self.t_size, self.t_span, spacing=12)
@@ -58,9 +64,16 @@ class OverviewPage(Page):
         content.setLayout(vbox(tiles, self.pending, self.trust, 4, label("What Memoria can do for this library", "h2"),
                                grid, None, spacing=12))
         self.body.addWidget(scroll(content))
+        self.bg = BackgroundCall(self)
+        self.bg.result.connect(self._insights)
+        self.bg.failed.connect(lambda e: self.updating.setText(""))
 
     def on_busy_changed(self, busy: bool) -> None:
         self.rescan_btn.setEnabled(not busy)
+        self.check_btn.setEnabled(not busy)
+
+    def shutdown(self) -> None:
+        self.bg.wait()
 
     def refresh(self) -> None:
         lib = self.lib
@@ -77,39 +90,74 @@ class OverviewPage(Page):
         self.pending.setVisible(bool(st["pending"]))
         self.pending.setText(f"Memoria is still reading {fmt_n(st['pending'], 'file')}. Results below will "
                              "fill in as it goes.")
-        rf, rs = actions.recovery_size(lib)
-        self.trust.setText(
-            f"<b>Your files are safe.</b> Memoria has only read this library unless you approved a change. "
-            f"Recovery holds {fmt_n(rf, 'file')} ({fmt_size(rs)}); every change is listed in History and can be undone.")
-
-        blurry = len(similar.find_blurry(lib))
-        maybe_dupes = lib.db.execute(
-            "SELECT COUNT(*) FROM files WHERE kind!='other' AND size>0 AND size IN "
-            "(SELECT size FROM files WHERE kind!='other' AND size>0 GROUP BY size HAVING COUNT(*)>1)").fetchone()[0]
-        self.cards["duplicates"].set(
-            f"{fmt_n(maybe_dupes, 'file')} might have exact copies. Check to be sure — files are compared byte by byte."
-            if maybe_dupes else "No exact copies possible: every file has a unique size.", bool(maybe_dupes))
-        self.cards["similar"].set(
-            f"Find bursts and near-identical shots and keep the best one. {fmt_n(blurry, 'photo')} look blurry."
-            if blurry else "Find bursts and near-identical shots and keep the best one.", bool(blurry))
-        rep = tidy.find_tidy(lib)
-        n_tidy = rep.count("junk") + rep.count("empty") + rep.count("folders")
-        self.cards["tidy"].set(
-            f"{fmt_n(rep.count('junk'), 'leftover file')}, {fmt_n(rep.count('empty'), 'empty file')} and "
-            f"{fmt_n(rep.count('folders'), 'empty folder')} can be tidied away." if n_tidy
-            else "Nothing to tidy — no junk files or empty folders.", bool(n_tidy))
-        plan = organize.plan_organize(lib)
-        self.cards["organize"].set(
-            f"{fmt_n(len(plan.items), 'file')} could be filed into year/month folders. You'll see every move first."
-            if plan.items else "Everything with a reliable date is already in date folders.")
-        last_chk = health.last_checked(lib)
-        self.cards["health"].set(f"Last checked {fmt_date(last_chk, True)}." if last_chk else
-                                 "Never checked. Record fingerprints now so future damage can be spotted.",
-                                 not last_chk)
-        n_batches = len(actions.batches(lib))
-        self.cards["history"].set(f"{fmt_n(n_batches, 'change')} recorded. Undo any of them." if n_batches
-                                  else "No changes made yet.")
         self.cards["story"].set("Make Instagram stories, carousels and story videos from your photos.")
         self.cards["video"].set(f"{fmt_n(st['videos'], 'video')} in this library. Make smaller copies for sharing."
                                 if st["videos"] else "Make smaller copies of videos for sharing.")
         self.cards["compare"].set("Check a backup drive or old laptop folder against this library and copy what's missing.")
+        cached = {k: self.ctx.cached(k) for k in ("duplicates", "similar", "similar_videos", "tidy", "organize")}
+        self.updating.setText("Updating…")
+        self.bg.call(lambda: _insights(lib, cached))
+
+    def _insights(self, d: dict) -> None:
+        self.updating.setText("")
+        rf, rs = d["recovery"]
+        self.trust.setText(
+            f"<b>Your files are safe.</b> Memoria has only read this library unless you approved a change. "
+            f"Recovery holds {fmt_n(rf, 'file')} ({fmt_size(rs)}); every change is listed in History and can be undone.")
+        if d["dup_groups"] is not None:
+            n = d["dup_copies"]
+            self.cards["duplicates"].set(f"{fmt_n(n, 'extra copy', 'extra copies')} found in {fmt_n(d['dup_groups'], 'group')}."
+                                         if n else "No exact copies — every file is unique.", bool(n))
+        else:
+            m = d["maybe_dupes"]
+            self.cards["duplicates"].set(
+                f"{fmt_n(m, 'file')} might have exact copies. Check to be sure — files are compared byte by byte."
+                if m else "No exact copies possible: every file has a unique size.", bool(m))
+        blurry = d["blurry"]
+        if d["similar_groups"] is not None:
+            g = d["similar_groups"]
+            self.cards["similar"].set(f"{fmt_n(g, 'group')} of similar photos or videos to review"
+                                      + (f"; {fmt_n(blurry, 'photo')} look blurry." if blurry else "."), bool(g or blurry))
+        else:
+            self.cards["similar"].set(
+                f"Find bursts, look-alike photos and similar videos, and keep the best. {fmt_n(blurry, 'photo')} look blurry."
+                if blurry else "Find bursts, look-alike photos and similar videos, and keep the best.", bool(blurry))
+        t = d["tidy"]
+        n_tidy = t["junk"] + t["empty"] + t["folders"]
+        self.cards["tidy"].set(
+            f"{fmt_n(t['junk'], 'leftover file')}, {fmt_n(t['empty'], 'empty file')} and "
+            f"{fmt_n(t['folders'], 'empty folder')} can be tidied away." if n_tidy
+            else "Nothing to tidy — no junk files or empty folders.", bool(n_tidy))
+        o = d["organize"]
+        self.cards["organize"].set(
+            f"{fmt_n(o, 'file')} could be filed into year/month folders. You'll see every move first."
+            if o else "Everything with a reliable date is already in date folders.")
+        last_chk = d["health"]
+        self.cards["health"].set(f"Last checked {fmt_date(last_chk, True)}." if last_chk else
+                                 "Never checked. Record fingerprints now so future damage can be spotted.",
+                                 not last_chk)
+        n_batches = d["batches"]
+        self.cards["history"].set(f"{fmt_n(n_batches, 'change')} recorded. Undo any of them." if n_batches
+                                  else "No changes made yet.")
+
+
+def _insights(lib, cached: dict) -> dict:
+    """Read-only summary for the tool cards (runs on a background thread)."""
+    try:
+        d = {"recovery": actions.recovery_size(lib), "blurry": len(similar.find_blurry(lib)),
+             "health": health.last_checked(lib), "batches": len(actions.batches(lib))}
+        d["maybe_dupes"] = lib.db.execute(
+            "SELECT COUNT(*) FROM files WHERE kind!='other' AND size>0 AND size IN "
+            "(SELECT size FROM files WHERE kind!='other' AND size>0 GROUP BY size HAVING COUNT(*)>1)").fetchone()[0]
+        dups = cached.get("duplicates")
+        d["dup_groups"] = len(dups) if dups is not None else None
+        d["dup_copies"] = sum(len(g.files) - 1 for g in dups) if dups is not None else None
+        sims = cached.get("similar")
+        d["similar_groups"] = (len(sims) + len(cached.get("similar_videos") or [])) if sims is not None else None
+        rep = cached.get("tidy") or tidy.find_tidy(lib)
+        d["tidy"] = {k: rep.count(k) for k in ("junk", "empty", "folders")}
+        plan = cached.get("organize") or organize.plan_organize(lib)
+        d["organize"] = len(plan.items)
+        return d
+    finally:
+        lib.close_thread()

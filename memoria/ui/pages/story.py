@@ -30,11 +30,11 @@ class Segmented(QFrame):
         super().__init__(parent)
         self.setObjectName("segmented")
         self.setStyleSheet(
-            f"#segmented {{ background: #EBEDF0; border-radius: 8px; }}"
+            f"#segmented {{ background: {theme.SEGMENT_BG}; border-radius: 8px; }}"
             f"#segmented QPushButton {{ background: transparent; border: 1px solid transparent; border-radius: 6px;"
             f" padding: 5px 10px; color: {theme.MUTED}; }}"
             f"#segmented QPushButton:hover {{ color: {theme.TEXT}; }}"
-            f"#segmented QPushButton:checked {{ background: {theme.CARD}; border: 1px solid #D5D9DF;"
+            f"#segmented QPushButton:checked {{ background: {theme.CARD}; border: 1px solid {theme.SEGMENT_BORDER};"
             f" color: {theme.TEXT}; font-weight: 600; }}")
         self.group = QButtonGroup(self)
         self.group.setExclusive(True)
@@ -228,7 +228,7 @@ class _PreviewLabel(QLabel):
         self.setMinimumSize(170, 302)
         self.setMaximumSize(PREVIEW_W, PREVIEW_H)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self._message_style = f"background: #ECEEF1; border-radius: 10px; color: {theme.MUTED}; padding: 12px;"
+        self._message_style = f"background: {theme.SUBTLE}; border-radius: 10px; color: {theme.MUTED}; padding: 12px;"
         self.setStyleSheet(self._message_style)
 
     def has_image(self) -> bool:
@@ -270,7 +270,7 @@ class _PreviewLabel(QLabel):
         p.setClipPath(path)
         p.drawImage(0, 0, img)
         p.setClipping(False)
-        p.setPen(QPen(QColor("#CDD2D8"), dpr))
+        p.setPen(QPen(QColor(theme.INPUT_BORDER), dpr))
         p.drawPath(path)
         p.end()
         pm.setDevicePixelRatio(dpr)

@@ -11,7 +11,7 @@ from typing import Optional
 import numpy as np
 from PIL import Image, ImageOps
 
-from .config import ANALYSIS_SIZE, THUMB_SIZE
+from .config import ANALYSIS_SIZE, THUMB_SIZE, longpath
 
 try:
     import pillow_heif
@@ -116,7 +116,7 @@ def open_oriented(path: str | Path, target: int = ANALYSIS_SIZE) -> tuple[Image.
 
     Returns (image, original_size, exif_info). Raises on unreadable files.
     """
-    img = Image.open(path)
+    img = Image.open(longpath(path))
     original = img.size
     info = read_exif(img)
     if img.format == "JPEG":

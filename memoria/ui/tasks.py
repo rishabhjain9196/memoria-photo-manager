@@ -106,3 +106,60 @@ class TaskRunner(QObject):
     def wait(self) -> None:
         if self._worker is not None:
             self._worker.wait()
+
+
+class _CallThread(QThread):
+    done = Signal(int, object, object)
+
+    def __init__(self, token: int, fn: Callable[[], Any]):
+        super().__init__()
+        self.token, self.fn = token, fn
+
+    def run(self) -> None:
+        try:
+            self.done.emit(self.token, self.fn(), None)
+        except Exception as e:  # reported to the caller
+            self.done.emit(self.token, None, e)
+
+
+class BackgroundCall(QObject):
+    """Run small read-only computations off the UI thread; only the latest call's result is delivered.
+
+    Used for page insights. Never use it for anything that changes files — those go through TaskRunner.
+    """
+    result = Signal(object)
+    failed = Signal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._token = 0
+        self._threads: list[_CallThread] = []
+
+    @property
+    def running(self) -> bool:
+        return any(t.isRunning() for t in self._threads)
+
+    def call(self, fn: Callable[[], Any]) -> None:
+        self._token += 1
+        t = _CallThread(self._token, fn)
+        t.done.connect(self._done)
+        t.finished.connect(lambda t=t: self._reap(t))
+        self._threads.append(t)
+        t.start()
+
+    def _done(self, token: int, value, error) -> None:
+        if token != self._token:
+            return
+        if error is not None:
+            self.failed.emit(error)
+        else:
+            self.result.emit(value)
+
+    def _reap(self, t: _CallThread) -> None:
+        if t in self._threads:
+            self._threads.remove(t)
+        t.deleteLater()
+
+    def wait(self) -> None:
+        for t in list(self._threads):
+            t.wait()

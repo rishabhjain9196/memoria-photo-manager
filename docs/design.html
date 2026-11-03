@@ -43,7 +43,7 @@
   <h1>Design document</h1>
   <p>Why Memoria looks and behaves the way it does — the product goals, the trust model that every tool obeys,
      the information architecture, interaction patterns and the decisions behind them.</p>
-  <div class="meta"><span class="pill">Version 1.0</span><span class="pill">Windows desktop · PySide6</span>
+  <div class="meta"><span class="pill">Version 1.1</span><span class="pill">Windows desktop · PySide6</span>
     <span class="pill">Offline · no accounts · no telemetry</span></div>
 </header>
 
@@ -166,6 +166,12 @@ then simply tells the truth about those rules.</p>
     against the disk.</td><td>"Memoria was interrupted last time… recorded in History, where you can undo them."</td></tr>
   <tr><td>I9</td><td>Identity means identical bytes</td><td>Exact-duplicate decisions require equal xxh3-128 hashes of the
     whole file; sampled hashes are only used to rule files out.</td><td>"Proven by comparing every byte."</td></tr>
+  <tr><td>I11</td><td>Unreadable is not deleted</td><td>A scan aborts if the library root is unreachable; files under
+    folders that can't be read keep their catalogue rows.</td><td>"2 folders couldn't be read (kept as they were)".</td></tr>
+  <tr><td>I12</td><td>One writer per library</td><td>A cross-process lock file in <code>.memoria</code>; a second window
+    is refused.</td><td>"This library is already open in another Memoria window."</td></tr>
+  <tr><td>I13</td><td>Undo restores knowledge, not just files</td><td>Catalogue rows of recycled files are parked and
+    restored on undo (thumbnails, dates, health fingerprints).</td><td>Health check stays "Intact" after an undo.</td></tr>
   <tr><td>I10</td><td>Originals of creative tools are untouched</td><td>Story and video outputs are new files in a separate
     output folder; video copies must play, match duration and be smaller or they are discarded.</td>
     <td>Video page banner and result column.</td></tr>
@@ -183,6 +189,10 @@ then simply tells the truth about those rules.</p>
       unticked; a group can never be emptied completely.</td></tr>
   <tr><td>File modified date is wrong (common for copies)</td><td>Organise skips files dated only by modified time unless
       the user opts in; date source is shown for every file.</td></tr>
+  <tr><td>Library drive unplugged during a scan</td><td>Scan stops with a clear message; nothing in the catalogue is
+      removed.</td></tr>
+  <tr><td>Two Memoria windows on one library</td><td>The second is refused by the library lock.</td></tr>
+  <tr><td>Catalogue from a newer Memoria version</td><td>Refused with "please update" instead of being misread.</td></tr>
   <tr><td>Two operations at once</td><td>Single task runner; start buttons disable while busy; a second request shows
       "Please wait for … to finish first."</td></tr>
 </table>
@@ -200,6 +210,9 @@ understand the library, clean it, organise it, create from it, and protect it.</
   <tr><td>CREATE</td><td>Story maker · Video compressor</td><td>"Share it."</td></tr>
   <tr><td>PROTECT</td><td>Health check · Compare &amp; sync · History &amp; recovery</td><td>"Make sure I never lose it."</td></tr>
 </table>
+<p><b>Check everything</b> (Overview) runs every read-only finder in one pass. Its results feed the pages directly
+and appear as <b>count badges</b> in the sidebar, turning the sidebar into a to-do list. Results stay valid until the
+library changes (a generation counter invalidates them).</p>
 <p>Indexing is not a page: it happens automatically whenever a library is opened (incremental, read-only), with a
 <i>Rescan library</i> button on Overview. The Overview page doubles as a dashboard: each tool card states, in one
 sentence, what that tool would do for <i>this</i> library ("25 files might have exact copies"), and highlights the
@@ -233,10 +246,12 @@ cards worth visiting.</p>
 <ol>
   <li><b>Find</b> — a primary button starts a read-only background task. Progress and Cancel appear in a task bar at the
       bottom of the window.</li>
+  <li><b>Select</b> (Photos &amp; videos) — multi-select reveals a selection bar with batch actions: Move to Recovery,
+      Copy to folder, Move to folder, Story maker, Compress videos.</li>
   <li><b>Review</b> — results show as thumbnails with badges (<i>KEEP</i>, <i>COPY</i>, <i>BEST</i>), reasons beneath each
       file, a large preview with metadata, and running totals ("14 copies (26.7 MB) will move to Recovery · 11 originals
       kept"). Users can change the keeper/best pick, tick/untick items and include/exclude whole groups.</li>
-  <li><b>Confirm</b> — one dialog per change: a sentence summary, bullet details (what is kept, what is re-checked),
+  <li><b>Confirm</b> — one dialog per change: a sentence summary, <b>thumbnails of the affected files</b> (+N more), bullet details (what is kept, what is re-checked),
       a green note that nothing is deleted, and a button labelled with the exact action ("Move 14 copies"). Cancel has
       initial focus.</li>
   <li><b>Apply</b> — runs in the background; the page refreshes itself afterwards.</li>
@@ -255,7 +270,8 @@ offers Undo.</figcaption></figure>
     safe, and the primary button.</td></tr>
   <tr><td>Nothing found</td><td>Positive empty state ("No duplicates — every photo and video in this library is unique").</td></tr>
   <tr><td>Busy</td><td>Task bar with title, message ("Analysing photos and videos… 412 of 1,050"), determinate progress
-    where possible, Cancel. Start buttons disable.</td></tr>
+    where possible with <b>percentage, elapsed time and time left</b>; multi-step work shows "Step 2 of 6 · …". Cancel
+    (Esc). Start buttons disable. Page insights compute in the background ("Updating…") without blocking.</td></tr>
   <tr><td>Cancelled</td><td>Toast: "Stopped. Anything already done is recorded in History." Partial batches stay undoable.</td></tr>
   <tr><td>Partial success</td><td>Toast states skipped files and why; failures open a dialog listing each file and confirming
     it was left in place.</td></tr>
@@ -280,7 +296,10 @@ returns a reason alongside its result:</p>
 
 <section id="visual">
 <h2>Visual design system</h2>
-<p>A calm, light, Windows 11-like style: neutral surfaces, one blue accent for primary actions, and semantic colours
+<p>Two palettes — <b>Light</b> and <b>Dark</b> — plus <b>Match Windows</b>, which follows the system setting live. Every
+colour comes from the active palette (no hard-coded colours in pages); switching theme rebuilds the window and reopens
+the same library and page. Badge colours (KEEP/BEST) stay identical in both themes so their meaning never shifts.</p>
+<p>A calm, Windows 11-like style: neutral surfaces, one blue accent for primary actions, and semantic colours
 reserved for meaning — green for safety, amber for caution, red only for the single destructive action.</p>
 <div class="swatches">
   <div class="sw"><div style="background:#2563eb"></div><span><b>Accent</b> #2563EB<br>primary buttons, selection</span></div>
@@ -361,6 +380,14 @@ explain what each tool would do for this library.</figcaption></figure>
     <td>Copies reset modified time; filing them by it would scatter photos into wrong years.</td></tr>
   <tr><td>Video tooling</td><td>FFmpeg from <code>imageio-ffmpeg</code></td><td>Require user install</td>
     <td>Zero setup; the binary is bundled with the app.</td></tr>
+  <tr><td>Performance changes</td><td>Only lossless speed-ups (laziness, threading, vectorisation, trimming unused binaries)</td>
+    <td>Cached backup hashes; sampled health checks</td><td>A cache keyed on size+date would miss silent corruption — the
+    exact thing Health and Compare exist to catch.</td></tr>
+  <tr><td>Similar videos</td><td>8 frame dHashes + duration, median distance ≤ 12, ±1-frame alignment</td><td>Full-video
+    perceptual hashing; audio fingerprints</td><td>Fast (≈0.15 s per short clip), explainable, robust to re-encoding and
+    small trims; measured margin between copies (3–9) and unrelated clips (≥16).</td></tr>
+  <tr><td>Theme switching</td><td>Rebuild the window</td><td>Live restyling of every widget</td><td>Guarantees no stale
+    colours anywhere; state that matters (library, page, geometry) is restored.</td></tr>
   <tr><td>Concurrency</td><td>One user task at a time</td><td>Parallel tasks</td><td>Prevents conflicting file operations and
     simplifies the mental model.</td></tr>
 </table>
@@ -387,7 +414,9 @@ duplicates takes seconds, and the window never freezes.</p>
   <li>Keyboard: grids support arrow navigation, <span class="kbd">Space</span> toggles a tick box, <span class="kbd">Delete</span>
       removes from the Story selection; dialogs focus Cancel first.</li>
   <li>High-DPI aware (Qt 6), text uses system fonts at legible sizes; tooltips repeat truncated names and full paths.</li>
-  <li>Known gap: no dark theme and limited screen-reader labelling of custom-painted grid cells (see roadmap).</li>
+  <li>Dark theme and "Match Windows"; full keyboard operation of the main flows (Ctrl+1…0 pages, F5, Ctrl+Z, Esc,
+      Ctrl+F, Ctrl+A, Delete, arrows in the viewer).</li>
+  <li>Known gap: limited screen-reader labelling of custom-painted grid cells (see roadmap).</li>
 </ul>
 </section>
 
@@ -397,6 +426,8 @@ duplicates takes seconds, and the window never freezes.</p>
   <tr><th>Risk</th><th>Mitigation / status</th></tr>
   <tr><td>Heuristics tuned on generated images</td><td>Blur thresholds and best-shot weights are calibrated on the synthetic
     test library; real-world tuning is expected. Nothing is auto-applied.</td></tr>
+  <tr><td>Similar-video margin</td><td>Unrelated videos with very similar visuals (e.g. the same static scene) may score
+    close to the threshold; groups are suggestions and nothing is pre-applied.</td></tr>
   <tr><td>Haar face detection is basic</td><td>Faces only nudge the best-shot score (12% weight).</td></tr>
   <tr><td>Recovery uses disk space</td><td>Size is shown on Overview and History; emptying is explicit.</td></tr>
   <tr><td>Very large libraries (&gt;100k)</td><td>Engine scales; some page refreshes load the full catalogue in memory and may
@@ -410,7 +441,7 @@ duplicates takes seconds, and the window never freezes.</p>
 <h2>Roadmap</h2>
 <ol>
   <li>Calibrate blur and best-shot scoring on real libraries (with an opt-in local feedback log).</li>
-  <li>Dark theme and screen-reader names for grid items.</li>
+  <li>Screen-reader names for grid items.</li>
   <li>Removable-drive catalogue (find which disconnected drive holds a file).</li>
   <li>Screenshot text search (local OCR) in Photos &amp; videos.</li>
   <li>Backup restore drill: restore a sample from a backup and prove it matches.</li>

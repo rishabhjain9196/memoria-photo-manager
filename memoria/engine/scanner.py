@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 from . import config, ffmpeg, media
-from .db import DERIVED, Library
+from .db import DERIVED, Library, LibraryUnavailable
 from .progress import Progress
 
 
@@ -22,6 +22,7 @@ class ScanResult:
     added: int = 0
     changed: int = 0
     removed: int = 0
+    unreadable_folders: int = 0
 
 
 @dataclass
@@ -30,8 +31,24 @@ class AnalyzeResult:
     errors: int = 0
 
 
-def walk_files(root: Path, skip_dirs: Optional[set[str]] = None) -> Iterator[os.DirEntry]:
-    """Iterative os.scandir walk that skips hidden app folders and does not follow links."""
+class _Entry:
+    """A found file: real path (without the long-path prefix) plus its cached stat."""
+    __slots__ = ("path", "name", "_entry")
+
+    def __init__(self, path: str, entry: os.DirEntry):
+        self.path, self.name, self._entry = path, entry.name, entry
+
+    def stat(self, follow_symlinks: bool = False):
+        return self._entry.stat(follow_symlinks=follow_symlinks)
+
+
+def walk_files(root: Path, skip_dirs: Optional[set[str]] = None,
+               failed: Optional[list[str]] = None) -> Iterator[_Entry]:
+    """Iterative os.scandir walk that skips hidden app folders and does not follow links.
+
+    Folders that cannot be read are appended to ``failed`` so callers never mistake an
+    unreadable folder (or an unplugged drive) for deleted files.
+    """
     skip = {config.APP_DIR_NAME.lower(), "$recycle.bin", "system volume information"}
     if skip_dirs:
         skip |= {s.lower() for s in skip_dirs}
@@ -39,17 +56,20 @@ def walk_files(root: Path, skip_dirs: Optional[set[str]] = None) -> Iterator[os.
     while stack:
         current = stack.pop()
         try:
-            with os.scandir(current) as it:
+            with os.scandir(config.longpath(current)) as it:
                 entries = list(it)
         except OSError:
+            if failed is not None:
+                failed.append(current)
             continue
         for entry in entries:
             try:
+                path = os.path.join(current, entry.name)
                 if entry.is_dir(follow_symlinks=False):
                     if entry.name.lower() not in skip:
-                        stack.append(entry.path)
+                        stack.append(path)
                 elif entry.is_file(follow_symlinks=False):
-                    yield entry
+                    yield _Entry(path, entry)
             except OSError:
                 continue
 
@@ -61,11 +81,12 @@ def walk_dirs(root: Path) -> list[str]:
     while stack:
         current = stack.pop()
         try:
-            with os.scandir(current) as it:
+            with os.scandir(config.longpath(current)) as it:
                 for e in it:
                     if e.is_dir(follow_symlinks=False) and e.name.lower() not in skip:
-                        out.append(e.path)
-                        stack.append(e.path)
+                        path = os.path.join(current, e.name)
+                        out.append(path)
+                        stack.append(path)
         except OSError:
             continue
     return out
@@ -75,12 +96,16 @@ def scan(lib: Library, progress: Optional[Progress] = None) -> ScanResult:
     progress = progress or Progress()
     root = str(lib.root)
     cut = len(root) + 1
+    if not os.path.isdir(root):
+        raise LibraryUnavailable(f"The library folder can't be reached ({root}). If it is on an external or "
+                                 "network drive, reconnect it and try again. Nothing was changed.")
     existing = {r["rel_path"].lower(): (r["id"], r["size"], r["mtime"])
                 for r in lib.db.execute("SELECT id, rel_path, size, mtime FROM files")}
     seen: set[str] = set()
+    failed: list[str] = []
     new_rows, changed_ids = [], []
     res = ScanResult()
-    for n, entry in enumerate(walk_files(lib.root), 1):
+    for n, entry in enumerate(walk_files(lib.root, failed=failed), 1):
         if n % 500 == 0:
             progress.update(n, 0, f"Scanning… {n:,} files found")
         try:
@@ -97,7 +122,13 @@ def scan(lib: Library, progress: Optional[Progress] = None) -> ScanResult:
             new_rows.append((rel, folder, name, ext, config.kind_for_ext(ext), st.st_size, st.st_mtime))
         elif old[1] != st.st_size or abs(old[2] - st.st_mtime) > 0.001:
             changed_ids.append((st.st_size, st.st_mtime, old[0]))
-    removed = [v[0] for k, v in existing.items() if k not in seen]
+    if root in failed or not os.path.isdir(root):
+        raise LibraryUnavailable(f"The library folder stopped responding while it was being read ({root}). "
+                                 "Nothing was changed.")
+    # Files inside folders that couldn't be read are kept: unreadable is not the same as deleted.
+    unreadable = tuple(f[cut:].lower() + os.sep for f in failed)
+    removed = [v[0] for k, v in existing.items() if k not in seen and not k.startswith(unreadable)]
+    res.unreadable_folders = len(failed)
 
     with lib.transaction() as db:
         db.executemany("INSERT INTO files (rel_path, folder, name, ext, kind, size, mtime) "

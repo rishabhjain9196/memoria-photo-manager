@@ -1,6 +1,8 @@
 """SQLite catalogue for one library. One connection per thread (WAL mode)."""
 from __future__ import annotations
 
+import json
+import os
 import sqlite3
 import threading
 from pathlib import Path
@@ -71,6 +73,17 @@ CREATE TABLE IF NOT EXISTS operations (
 CREATE INDEX IF NOT EXISTS ix_ops_batch ON operations(batch_id, seq);
 """
 
+# Numbered schema upgrades applied after the frozen v1 schema above. Never edit a released step;
+# append a new one. ``PRAGMA user_version`` records the last step applied.
+MIGRATIONS: dict[int, list[str]] = {
+    2: [
+        # Catalogue rows of files moved to Recovery, kept so Undo restores fingerprints/analysis.
+        "CREATE TABLE IF NOT EXISTS parked_files (op_id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL, "
+        "data TEXT NOT NULL)",
+    ],
+}
+SCHEMA_VERSION = max(MIGRATIONS)
+
 THUMB_SCHEMA = "CREATE TABLE IF NOT EXISTS thumbs (file_id INTEGER PRIMARY KEY, data BLOB NOT NULL);"
 
 # Columns derived from file content; cleared whenever a file's size or mtime changes.
@@ -89,6 +102,64 @@ def _connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
+class LibraryInUse(RuntimeError):
+    """Another Memoria window or process already has this library open."""
+
+
+class LibraryUnavailable(RuntimeError):
+    """The library folder can't be read right now (drive unplugged, network down…)."""
+
+
+class LibraryTooNew(RuntimeError):
+    """The catalogue was created by a newer version of Memoria."""
+
+
+_LOCKS: dict[str, list] = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+def _acquire_lock(path: Path) -> str:
+    """Exclusive cross-process lock (re-entrant within this process)."""
+    key = str(path).lower()
+    with _LOCKS_GUARD:
+        if key in _LOCKS:
+            _LOCKS[key][1] += 1
+            return key
+        fd = os.open(str(path), os.O_RDWR | os.O_CREAT)
+        try:
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            else:  # pragma: no cover
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            raise LibraryInUse("This library is already open in another Memoria window.")
+        _LOCKS[key] = [fd, 1]
+        return key
+
+
+def _release_lock(key: str) -> None:
+    with _LOCKS_GUARD:
+        entry = _LOCKS.get(key)
+        if not entry:
+            return
+        entry[1] -= 1
+        if entry[1] > 0:
+            return
+        fd = entry[0]
+        try:
+            if os.name == "nt":
+                import msvcrt
+                os.lseek(fd, 0, 0)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        os.close(fd)
+        del _LOCKS[key]
+
+
 class Library:
     """A folder of photos plus its ``.memoria`` catalogue."""
 
@@ -100,8 +171,32 @@ class Library:
         self.db_path = config.app_dir(self.root) / config.DB_NAME
         self.thumbs_path = config.app_dir(self.root) / config.THUMBS_DB_NAME
         self._local = threading.local()
-        self.db.executescript(SCHEMA)
-        self.thumbs_db.executescript(THUMB_SCHEMA)
+        self._lock_key: Optional[str] = _acquire_lock(config.app_dir(self.root) / "lock")
+        try:
+            self._migrate()
+            self.thumbs_db.executescript(THUMB_SCHEMA)
+        except BaseException:
+            self.close()
+            raise
+
+    def _migrate(self) -> None:
+        db = self.db
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+        if version > SCHEMA_VERSION:
+            raise LibraryTooNew("This library was last used by a newer version of Memoria. Please update Memoria.")
+        if version < 1:
+            db.executescript(SCHEMA)
+            version = 1
+        for step in range(version + 1, SCHEMA_VERSION + 1):
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                for sql in MIGRATIONS[step]:
+                    db.execute(sql)
+                db.execute(f"PRAGMA user_version={step}")
+                db.execute("COMMIT")
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
 
     # connections -----------------------------------------------------------------------
     @property
@@ -118,12 +213,20 @@ class Library:
             conn = self._local.thumbs = _connect(self.thumbs_path)
         return conn
 
-    def close(self) -> None:
+    def close_thread(self) -> None:
+        """Close the calling thread's connections only (the library stays open and locked)."""
         for name in ("db", "thumbs"):
             conn = getattr(self._local, name, None)
             if conn is not None:
                 conn.close()
                 setattr(self._local, name, None)
+
+    def close(self) -> None:
+        """Close this thread's connections and release the library lock."""
+        self.close_thread()
+        if self._lock_key is not None:
+            _release_lock(self._lock_key)
+            self._lock_key = None
 
     # paths -----------------------------------------------------------------------------
     def abspath(self, rel_path: str) -> Path:
@@ -180,6 +283,66 @@ class Library:
         tdb.execute("BEGIN")
         tdb.executemany("DELETE FROM thumbs WHERE file_id=?", [(i,) for i in file_ids])
         tdb.execute("COMMIT")
+
+    # parking: rows of files in Recovery ------------------------------------------------
+    def park_rows(self, pairs: list[tuple[int, int]]) -> None:
+        """Move catalogue rows (op_id, file_id) out of ``files`` but keep them (and thumbnails)."""
+        if not pairs:
+            return
+        with self.transaction() as db:
+            for op_id, fid in pairs:
+                row = db.execute("SELECT * FROM files WHERE id=?", (fid,)).fetchone()
+                if row is None:
+                    continue
+                db.execute("INSERT OR REPLACE INTO parked_files (op_id, file_id, data) VALUES (?,?,?)",
+                           (op_id, fid, json.dumps(dict(row))))
+                db.execute("DELETE FROM files WHERE id=?", (fid,))
+
+    def restore_parked(self, op_id: int, rel_path: str) -> bool:
+        """Put a parked row back at ``rel_path``. Returns False if there is nothing to restore."""
+        db = self.db
+        rec = db.execute("SELECT * FROM parked_files WHERE op_id=?", (op_id,)).fetchone()
+        if rec is None:
+            return False
+        data = json.loads(rec["data"])
+        folder, name = os.path.split(rel_path)
+        data.update(rel_path=rel_path, folder=folder, name=name)
+        with self.transaction() as tx:
+            if tx.execute("SELECT 1 FROM files WHERE rel_path=?", (rel_path,)).fetchone():
+                tx.execute("DELETE FROM parked_files WHERE op_id=?", (op_id,))
+                return False
+            old_id = data["id"]
+            if tx.execute("SELECT 1 FROM files WHERE id=?", (old_id,)).fetchone():
+                data.pop("id")
+            cols_known = {r[1] for r in tx.execute("PRAGMA table_info(files)")}
+            cols = [c for c in data if c in cols_known]
+            cur = tx.execute(f"INSERT INTO files ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                             [data[c] for c in cols])
+            new_id = cur.lastrowid if "id" not in data else old_id
+            tx.execute("DELETE FROM parked_files WHERE op_id=?", (op_id,))
+        if new_id != old_id:
+            t = self.thumbs_db
+            t.execute("UPDATE OR REPLACE thumbs SET file_id=? WHERE file_id=?", (new_id, old_id))
+        return True
+
+    def drop_parked(self, op_ids: list[int]) -> None:
+        """Forget parked rows for good (their files were permanently deleted)."""
+        if not op_ids:
+            return
+        ids = []
+        with self.transaction() as db:
+            for op_id in op_ids:
+                r = db.execute("SELECT file_id FROM parked_files WHERE op_id=?", (op_id,)).fetchone()
+                if r:
+                    ids.append(r[0])
+                db.execute("DELETE FROM parked_files WHERE op_id=?", (op_id,))
+            live = {r[0] for r in db.execute(f"SELECT id FROM files WHERE id IN ({','.join('?' * len(ids))})", ids)} if ids else set()
+        orphan = [i for i in ids if i not in live]
+        if orphan:
+            t = self.thumbs_db
+            t.execute("BEGIN")
+            t.executemany("DELETE FROM thumbs WHERE file_id=?", [(i,) for i in orphan])
+            t.execute("COMMIT")
 
     # transactions ----------------------------------------------------------------------
     def transaction(self):

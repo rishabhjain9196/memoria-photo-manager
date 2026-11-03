@@ -43,7 +43,17 @@ class TidyPage(Page):
         self.rescan_btn.setEnabled(not busy)
 
     def refresh(self) -> None:
-        self.report = tidy.find_tidy(self.lib)
+        cached = self.ctx.cached("tidy")
+        if cached is not None:
+            self._show(cached)
+            return
+        lib = self.lib
+        if not self.run("Looking for leftovers", lambda p: tidy.find_tidy(lib, p), self._show):
+            self.stale = True
+
+    def _show(self, report: tidy.TidyReport) -> None:
+        self.report = report
+        self.ctx.set_badge("tidy", report.count("junk") + report.count("empty") + report.count("folders"))
         self.tree.blockSignals(True)
         self.tree.clear()
         for cat, (title, desc, default) in tidy.CATEGORIES.items():

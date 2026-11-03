@@ -10,7 +10,6 @@ from .. import theme
 from ..widgets import Banner, Tile, button, fmt_date, fmt_n, fmt_size, friendly_error, hbox, label, show_in_explorer
 from .base import Page
 
-COLORS = {"damaged": theme.DANGER, "unreadable": theme.DANGER, "edited": theme.MUTED}
 
 
 class HealthPage(Page):
@@ -67,7 +66,7 @@ class HealthPage(Page):
             detail = friendly_error(p["detail"]) if p["status"] == "unreadable" else (p["detail"] or "")
             it = QTreeWidgetItem([health.STATUS_LABEL[p["status"]], p["rel_path"], detail])
             it.setToolTip(2, p["detail"] or "")
-            it.setForeground(0, QColor(COLORS.get(p["status"], theme.TEXT)))
+            it.setForeground(0, QColor({"damaged": theme.DANGER, "unreadable": theme.DANGER}.get(p["status"], theme.MUTED)))
             it.setData(1, Qt.ItemDataRole.UserRole, p["rel_path"])
             self.tree.addTopLevelItem(it)
         bad = rep.counts.get("damaged", 0)

@@ -84,15 +84,19 @@ class Page(QWidget):
                       after: Optional[Callable[[actions.BatchResult], None]] = None, rescan: bool = False) -> None:
         if not acts:
             return
-        if not confirm(self, title, summary, details, confirm_text, note=note):
+        ids = [a.file_id for a in acts if a.file_id is not None]
+        if not confirm(self, title, summary, details, confirm_text, note=note, thumbs=self.ctx.thumbs, file_ids=ids):
             return
         lib = self.lib
 
         def work(prog):
-            res = actions.apply(lib, kind, title, acts, prog)
-            if rescan:
-                from ...engine import scanner
-                scanner.index(lib, prog)
+            if not rescan:
+                return actions.apply(lib, kind, title, acts, prog)
+            res = actions.apply(lib, kind, title, acts, prog.step(0, 2, title))
+            if res.cancelled:
+                return res
+            from ...engine import scanner
+            scanner.index(lib, prog.step(1, 2, "Updating the catalogue"))
             return res
 
         def done(res: actions.BatchResult):

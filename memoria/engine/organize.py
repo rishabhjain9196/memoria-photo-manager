@@ -58,11 +58,15 @@ def plan_organize(lib: Library, pattern_id: str = "year_month", include_uncertai
     Files whose only date is the file-modified time are skipped unless ``include_uncertain``
     (copies and downloads reset that date, so it is often wrong).
     """
+    progress = progress or Progress()
+    progress.update(0, 0, "Reading dates…")
     rows = [dict(r) for r in lib.files("kind!='other' AND taken_at IS NOT NULL AND error IS NULL AND size>0")
             if not r["name"].startswith("._")]
     taken: set[str] = {r["rel_path"].lower() for r in lib.files()}
     items, in_place, uncertain = [], 0, 0
-    for r in rows:
+    for n, r in enumerate(rows, 1):
+        if n % 2000 == 0:
+            progress.update(n, len(rows), f"Planning… {n:,} of {len(rows):,}")
         if r["date_source"] == "modified" and not include_uncertain:
             uncertain += 1
             continue
@@ -81,6 +85,7 @@ def plan_organize(lib: Library, pattern_id: str = "year_month", include_uncertai
         taken.add(dst.lower())
         items.append(OrganizeItem(r, dst, dt, r["date_source"]))
     items.sort(key=lambda it: (it.dst_rel.lower()))
+    progress.update(len(rows), len(rows), "Plan ready", force=True)
     return OrganizePlan(items, in_place, uncertain, pattern_id)
 
 

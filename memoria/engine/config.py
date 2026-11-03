@@ -69,3 +69,12 @@ def recovery_dir(library: Path) -> Path:
 
 def default_export_dir() -> Path:
     return Path.home() / "Pictures" / "Memoria Exports"
+
+
+def longpath(p) -> str:
+    """Absolute path usable beyond Windows' 260-character limit (``\\\\?\\`` prefix when needed)."""
+    s = os.fspath(p)
+    if os.name != "nt" or len(s) < 240 or s.startswith("\\\\?\\"):
+        return s
+    s = os.path.abspath(s)
+    return "\\\\?\\UNC\\" + s[2:] if s.startswith("\\\\") else "\\\\?\\" + s

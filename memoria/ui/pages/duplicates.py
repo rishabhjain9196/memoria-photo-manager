@@ -69,9 +69,13 @@ class DuplicatesPage(Page):
         self.body.addWidget(self.stack, 1)
 
     def refresh(self) -> None:
-        if self.groups:
+        cached = self.ctx.cached("duplicates")
+        if cached is not None:
+            self._show(cached)
+        elif self.groups and not self.busy:
             self.find()  # library changed (e.g. after apply/undo) → recompute; hashes are cached so it's fast
         else:
+            self.groups = []
             self.stack.setCurrentWidget(self.empty)
 
     def on_busy_changed(self, busy: bool) -> None:
@@ -84,6 +88,7 @@ class DuplicatesPage(Page):
 
     def _show(self, groups) -> None:
         self.groups = groups
+        self.ctx.set_badge("duplicates", sum(len(g.files) - 1 for g in groups))
         self.keepers = {k: v for k, v in self.keepers.items() if any(g.hash == k for g in groups)}
         self.included = {g.hash for g in groups}
         if not groups:
