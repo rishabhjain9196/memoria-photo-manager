@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memoria-photo-manager"
+version = "1.0.0"
+description = "A private, offline, easy-to-trust photo and video manager for Windows."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Rishabh Jain" }]
+license = { text = "Proprietary — all rights reserved" }
+classifiers = [
+    "Private :: Do Not Upload",
+    "Environment :: Win32 (MS Windows)",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+    "PySide6>=6.7",
+    "numpy>=2.0",
+    "Pillow>=10.3",
+    "pillow-heif>=0.16",
+    "xxhash>=3.4",
+    "imageio-ffmpeg>=0.5",
+    "opencv-python-headless>=4.9,<5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pyinstaller>=6.6"]
+
+[project.gui-scripts]
+memoria = "memoria.ui.app:main"
+
+[tool.setuptools.packages.find]
+include = ["memoria*"]
+
+[tool.setuptools.package-data]
+"memoria.ui" = ["assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"

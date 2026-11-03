@@ -1,0 +1,18 @@
+# Normalise text files; keep Windows scripts in CRLF
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.heic binary
+*.mp4 binary
+*.mov binary
+*.db binary
+
+# Keep generated HTML out of language statistics
+docs/** linguist-documentation

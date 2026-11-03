@@ -1,0 +1,10 @@
+Copyright (c) 2026 Rishabh Jain. All rights reserved.
+
+This software and its documentation are proprietary and confidential. No part of this
+repository may be copied, modified, distributed or used without the prior written
+permission of the copyright holder.
+
+Third-party components installed as dependencies (see requirements.txt) remain under
+their own licences. If a packaged build (dist/) is ever distributed, it bundles
+LGPL-licensed (Qt/PySide6, libheif) and GPL-licensed (FFmpeg with libx264) binaries
+whose licence terms must then be honoured.

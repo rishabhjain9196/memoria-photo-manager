@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memoria — Design document</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="../memoria/ui/assets/memoria.png">
+</head>
+<body>
+<div class="top"><div class="inner">
+  <a class="brand" href="index.html"><img src="../memoria/ui/assets/memoria.png" alt="">Memoria</a>
+  <nav><a class="active" href="design.html">Design</a><a href="features.html">Features</a><a href="technical.html">Technical</a><a href="report.html">Quality report</a></nav>
+</div></div>
+
+<div class="layout">
+<aside class="toc">
+  <b>DESIGN DOCUMENT</b>
+  <a href="#summary">Summary</a>
+  <a href="#problem">Problem &amp; users</a>
+  <a href="#goals">Goals &amp; non-goals</a>
+  <a href="#principles">Design principles</a>
+  <a href="#trust">Trust model</a>
+  <a class="sub" href="#invariants">Safety invariants</a>
+  <a class="sub" href="#threats">What can go wrong</a>
+  <a href="#ia">Information architecture</a>
+  <a class="sub" href="#mapping">From 20 commands to 11 pages</a>
+  <a href="#interaction">Interaction model</a>
+  <a class="sub" href="#flow">Find → Review → Confirm → Apply → Undo</a>
+  <a class="sub" href="#states">States</a>
+  <a class="sub" href="#explain">Explaining decisions</a>
+  <a href="#visual">Visual design system</a>
+  <a href="#copy">Writing guidelines</a>
+  <a href="#decisions">Key decisions</a>
+  <a href="#performance">Performance as design</a>
+  <a href="#a11y">Accessibility</a>
+  <a href="#risks">Risks &amp; limitations</a>
+  <a href="#roadmap">Roadmap</a>
+</aside>
+
+<main>
+<header class="hero">
+  <h1>Design document</h1>
+  <p>Why Memoria looks and behaves the way it does — the product goals, the trust model that every tool obeys,
+     the information architecture, interaction patterns and the decisions behind them.</p>
+  <div class="meta"><span class="pill">Version 1.0</span><span class="pill">Windows desktop · PySide6</span>
+    <span class="pill">Offline · no accounts · no telemetry</span></div>
+</header>
+
+<section id="summary">
+<h2>Summary</h2>
+<p>Memoria is a desktop application for looking after a personal photo and video library on a Windows PC. It
+finds exact duplicates and look-alike shots, chooses the best photo of a burst, removes system junk, files photos
+into date folders, detects silent file damage, compares a library with a backup, creates Instagram stories and
+story videos, and makes smaller copies of videos for sharing.</p>
+<p>It started as a Python command-line tool with twenty commands. That tool worked for its author but was hard to
+trust: commands acted on plans saved earlier, results were printed as text, and a hashing bug made it skip almost
+every real photo while reporting them as corrupted. The desktop redesign keeps the useful engine ideas and wraps
+them in an interface whose first job is to <b>make every change visible, explainable and reversible</b>.</p>
+<div class="callout ok"><b>The one-sentence design:</b> Memoria may look at anything, but it changes nothing you
+haven't seen, nothing it can't undo, and it never deletes.</div>
+</section>
+
+<section id="problem">
+<h2>Problem &amp; users</h2>
+<h3>The problem</h3>
+<ul>
+  <li><b>Libraries grow messy.</b> Phone backups, WhatsApp forwards, "Download (1).jpg", bursts of ten nearly identical
+      frames, Thumbs.db files and empty folders accumulate over years and across devices.</li>
+  <li><b>Cleaning up feels dangerous.</b> Existing duplicate finders delete straight to the Recycle Bin (or permanently),
+      decide which copy to keep without saying why, and give no way to review or undo a large batch.</li>
+  <li><b>Damage is silent.</b> A failing drive or a bad sync can corrupt a photo without changing its name, size or date.
+      Nobody notices until the photo is needed.</li>
+  <li><b>Sharing needs extra tools.</b> Turning a trip into an Instagram story or shrinking a video below WhatsApp's
+      limit usually means uploading private media to an online editor.</li>
+</ul>
+<h3>Primary user</h3>
+<p>A person with a large personal library (thousands to tens of thousands of files, several devices' worth of backups),
+comfortable with Windows but not necessarily technical, who values their photos highly and is therefore
+<i>cautious</i>. The design assumes the user will not trust automation until it has proven itself on their own
+files — so the app must make proof easy to see.</p>
+<h3>Scenarios that shaped the design</h3>
+<div class="grid">
+  <div class="card"><h4>"I copied my phone twice"</h4><p>Hundreds of exact copies across <i>Phone Backup</i> and
+  <i>Downloads</i>. Wants space back without losing anything, and wants the "real" copy kept in the tidy folder.</p></div>
+  <div class="card"><h4>"Which of these 8 is best?"</h4><p>Bursts and retakes. Wants a suggestion with a reason, and the
+  freedom to disagree.</p></div>
+  <div class="card"><h4>"Is my backup complete?"</h4><p>An external drive that was reorganised differently. Wants to know
+  what is missing — by content, not by name.</p></div>
+  <div class="card"><h4>"Make a story from the trip"</h4><p>Wants a 1080×1920 collage or short video on the PC, without
+  uploading the photos anywhere.</p></div>
+</div>
+</section>
+
+<section id="goals">
+<h2>Goals &amp; non-goals</h2>
+<table>
+  <tr><th>Goals</th><th>Non-goals</th></tr>
+  <tr><td>
+    <ul>
+      <li>Be safe enough to run on an irreplaceable library on the first day.</li>
+      <li>Explain every suggestion in plain language.</li>
+      <li>Fit each task into one page with one obvious primary action.</li>
+      <li>Stay fast on tens of thousands of files; never freeze the window.</li>
+      <li>Work entirely offline; keep all data on the user's PC.</li>
+      <li>Be testable against a library with known answers.</li>
+    </ul></td><td>
+    <ul>
+      <li>Replacing a full photo editor or a DAM such as digiKam/Lightroom.</li>
+      <li>Cloud sync, accounts or sharing to social networks directly.</li>
+      <li>Automatic, unattended deletion of anything.</li>
+      <li>Face recognition / naming people (only face <i>counting</i> is used, to score best shots).</li>
+      <li>Reverse-geocoding through online services (the old CLI did this; it leaked locations to a third party).</li>
+    </ul></td></tr>
+</table>
+</section>
+
+<section id="principles">
+<h2>Design principles</h2>
+<div class="grid">
+  <div class="card"><h4>1. Looking is free</h4><p>Scanning, analysing, comparing and checking only read files. Users
+  should feel safe clicking any "Find…" button.</p></div>
+  <div class="card"><h4>2. Show before doing</h4><p>Every change is previewed as a concrete list of files, then summarised
+  in a confirmation that states exactly what will happen.</p></div>
+  <div class="card"><h4>3. Move, never delete</h4><p>"Remove" means move to Recovery. Permanent deletion is a separate,
+  deliberate act with its own warning.</p></div>
+  <div class="card"><h4>4. Everything has an Undo</h4><p>Each change becomes a named entry in History; an Undo button
+  appears the moment it finishes.</p></div>
+  <div class="card"><h4>5. Explain the machine</h4><p>Every automatic choice carries its reason: "In a backup folder",
+  "Sharpest (20× the softest)", "Date in file name".</p></div>
+  <div class="card"><h4>6. The user has the last word</h4><p>Keepers and best picks can be changed, groups excluded,
+  items unticked. Risky categories start unticked.</p></div>
+  <div class="card"><h4>7. Re-check at the last moment</h4><p>Decisions are re-validated against the disk right before
+  acting. If anything changed, Memoria skips it and says so.</p></div>
+  <div class="card"><h4>8. Never block the window</h4><p>All work runs in the background with progress and a Cancel
+  button; one task at a time so actions can't collide.</p></div>
+</div>
+</section>
+
+<section id="trust">
+<h2>Trust model</h2>
+<p>Trust is the product. It is not delivered by reassuring words but by rules the engine enforces — the interface
+then simply tells the truth about those rules.</p>
+
+<h3 id="invariants">Safety invariants</h3>
+<table>
+  <tr><th>#</th><th>Invariant</th><th>Enforced by</th><th>How the user sees it</th></tr>
+  <tr><td>I1</td><td>Reading never writes outside <code>.memoria</code></td><td>Scanner, analysis, health, compare
+    only open files for reading; the catalogue, thumbnails and journal live in the hidden library folder.</td>
+    <td>Welcome screen and Overview banner: "Memoria has only read this library unless you approved a change."</td></tr>
+  <tr><td>I2</td><td>No change without confirmation</td><td>Every page routes changes through one shared
+    <code>apply_actions</code> flow that opens a confirmation dialog first.</td><td>Dialog with counts, size, what is kept,
+    and a green "Nothing is deleted" note.</td></tr>
+  <tr><td>I3</td><td>Nothing is deleted</td><td>The executor has no delete operation for user files; "recycle" moves into
+    <code>.memoria\recovery\&lt;batch&gt;\&lt;original relative path&gt;</code>. Only <i>Empty Recovery</i> deletes.</td>
+    <td>Recovery size on Overview and History; Empty Recovery is red and requires ticking an acknowledgement.</td></tr>
+  <tr><td>I4</td><td>Every change is undoable</td><td>Each operation is journaled in SQLite before it runs
+    (<code>pending</code>) and after (<code>done</code>).</td><td>Toast with Undo; History lists every step.</td></tr>
+  <tr><td>I5</td><td>No stale decisions</td><td>Pre-flight checks size and modified time of each file; duplicates are
+    re-hashed in full and the kept copy is verified too.</td><td>"3 files skipped because they changed since you reviewed."</td></tr>
+  <tr><td>I6</td><td>No overwrites</td><td>Moves, copies and undo choose a non-clashing name ("IMG_1 (2).jpg").</td>
+    <td>Undo reports "restored as …" if a clash occurred.</td></tr>
+  <tr><td>I7</td><td>Copies are proven</td><td>Copy to temporary name → full-content hash compare → rename.</td>
+    <td>Compare &amp; sync banner explains this.</td></tr>
+  <tr><td>I8</td><td>Crashes leave a consistent record</td><td>On opening a library, pending journal entries are reconciled
+    against the disk.</td><td>"Memoria was interrupted last time… recorded in History, where you can undo them."</td></tr>
+  <tr><td>I9</td><td>Identity means identical bytes</td><td>Exact-duplicate decisions require equal xxh3-128 hashes of the
+    whole file; sampled hashes are only used to rule files out.</td><td>"Proven by comparing every byte."</td></tr>
+  <tr><td>I10</td><td>Originals of creative tools are untouched</td><td>Story and video outputs are new files in a separate
+    output folder; video copies must play, match duration and be smaller or they are discarded.</td>
+    <td>Video page banner and result column.</td></tr>
+</table>
+
+<h3 id="threats">What can go wrong — and the design response</h3>
+<table>
+  <tr><th>Situation</th><th>Response</th></tr>
+  <tr><td>User edits a photo between "Find" and "Apply"</td><td>Pre-flight detects size/mtime change → skipped, reported.</td></tr>
+  <tr><td>The copy chosen to keep is deleted or changed by another app</td><td>Guard check fails → its duplicates are not moved.</td></tr>
+  <tr><td>Power cut halfway through a 5,000-file move</td><td>Journal shows which moves completed; batch is marked
+      <i>Partly done</i> and can be undone.</td></tr>
+  <tr><td>Undo target name now taken by a new file</td><td>Restored under a new name; nothing overwritten.</td></tr>
+  <tr><td>Files are similar but not identical</td><td>Similar tool says so in the confirmation; blurry list starts
+      unticked; a group can never be emptied completely.</td></tr>
+  <tr><td>File modified date is wrong (common for copies)</td><td>Organise skips files dated only by modified time unless
+      the user opts in; date source is shown for every file.</td></tr>
+  <tr><td>Two operations at once</td><td>Single task runner; start buttons disable while busy; a second request shows
+      "Please wait for … to finish first."</td></tr>
+</table>
+</section>
+
+<section id="ia">
+<h2>Information architecture</h2>
+<p>The sidebar groups pages by the user's intent rather than by technique. Group order follows a natural journey:
+understand the library, clean it, organise it, create from it, and protect it.</p>
+<table>
+  <tr><th>Group</th><th>Pages</th><th>User intent</th></tr>
+  <tr><td>LIBRARY</td><td>Overview · Photos &amp; videos</td><td>"What do I have?"</td></tr>
+  <tr><td>CLEAN UP</td><td>Duplicates · Similar &amp; best shots · Tidy up</td><td>"Get rid of what I don't need — safely."</td></tr>
+  <tr><td>ORGANISE</td><td>Organise by date</td><td>"Make it findable."</td></tr>
+  <tr><td>CREATE</td><td>Story maker · Video compressor</td><td>"Share it."</td></tr>
+  <tr><td>PROTECT</td><td>Health check · Compare &amp; sync · History &amp; recovery</td><td>"Make sure I never lose it."</td></tr>
+</table>
+<p>Indexing is not a page: it happens automatically whenever a library is opened (incremental, read-only), with a
+<i>Rescan library</i> button on Overview. The Overview page doubles as a dashboard: each tool card states, in one
+sentence, what that tool would do for <i>this</i> library ("25 files might have exact copies"), and highlights the
+cards worth visiting.</p>
+
+<h3 id="mapping">From 20 commands to 11 pages</h3>
+<table>
+  <tr><th>Old CLI command(s)</th><th>Now</th><th>Why</th></tr>
+  <tr><td><code>index</code></td><td>Automatic on open; <i>Rescan library</i></td><td>An index is a means, not a goal.</td></tr>
+  <tr><td><code>duplicate-report</code> + <code>duplicate-execute</code></td><td>Duplicates</td><td>Report and execute were separated in time; now review and apply happen on one screen with the same data.</td></tr>
+  <tr><td><code>clean-report</code> + <code>clean-execute</code></td><td>Tidy up</td><td>Same merge; categories become tickable groups.</td></tr>
+  <tr><td><code>organize-report</code> + <code>organize-execute</code></td><td>Organise by date</td><td>Same merge; plan is an expandable tree of destination folders.</td></tr>
+  <tr><td><code>verify</code></td><td>Health check</td><td>Re-designed: fingerprints + silent-damage detection (the old verify reported every large file as corrupt).</td></tr>
+  <tr><td><code>timeline</code>, <code>find</code></td><td>Photos &amp; videos</td><td>A visual timeline and search replace text output.</td></tr>
+  <tr><td><code>import</code>, <code>compare</code>, <code>sync</code></td><td>Compare &amp; sync</td><td>Import is "copy into library" from another folder.</td></tr>
+  <tr><td><code>undo</code></td><td>History &amp; recovery (+ toast Undo)</td><td>Undo is available everywhere, not as a separate command.</td></tr>
+  <tr><td><code>status</code></td><td>Overview</td><td>—</td></tr>
+  <tr><td><code>geomap</code></td><td>Removed</td><td>Sent GPS coordinates to an online geocoder (privacy). Coordinates are shown in the preview instead.</td></tr>
+  <tr><td><code>export</code> (CSV)</td><td>Removed</td><td>The catalogue is a documented SQLite database.</td></tr>
+  <tr><td><code>reset</code></td><td>Removed from UI</td><td>Deleting the hidden <code>.memoria</code> folder does the same; too destructive for a button.</td></tr>
+  <tr><td>—</td><td>Similar &amp; best shots, Story maker, Video compressor</td><td>New tools from the product plan.</td></tr>
+</table>
+</section>
+
+<section id="interaction">
+<h2>Interaction model</h2>
+<h3 id="flow">Find → Review → Confirm → Apply → Undo</h3>
+<div class="flow"><span class="step">Find</span><span class="arrow">→</span><span class="step">Review</span>
+<span class="arrow">→</span><span class="step">Confirm</span><span class="arrow">→</span><span class="step">Apply</span>
+<span class="arrow">→</span><span class="step">Undo (any time)</span></div>
+<ol>
+  <li><b>Find</b> — a primary button starts a read-only background task. Progress and Cancel appear in a task bar at the
+      bottom of the window.</li>
+  <li><b>Review</b> — results show as thumbnails with badges (<i>KEEP</i>, <i>COPY</i>, <i>BEST</i>), reasons beneath each
+      file, a large preview with metadata, and running totals ("14 copies (26.7 MB) will move to Recovery · 11 originals
+      kept"). Users can change the keeper/best pick, tick/untick items and include/exclude whole groups.</li>
+  <li><b>Confirm</b> — one dialog per change: a sentence summary, bullet details (what is kept, what is re-checked),
+      a green note that nothing is deleted, and a button labelled with the exact action ("Move 14 copies"). Cancel has
+      initial focus.</li>
+  <li><b>Apply</b> — runs in the background; the page refreshes itself afterwards.</li>
+  <li><b>Undo</b> — a toast offers Undo for ten seconds; History offers it indefinitely (until Recovery for that change is
+      emptied).</li>
+</ol>
+<figure><img src="images/confirm.png" alt="Confirmation dialog"><figcaption>The confirmation dialog states the
+outcome, the safeguards and how to undo.</figcaption></figure>
+<figure><img src="images/toast.png" alt="Undo toast after applying"><figcaption>Immediately after a change, the toast
+offers Undo.</figcaption></figure>
+
+<h3 id="states">States every page handles</h3>
+<table>
+  <tr><th>State</th><th>Design</th></tr>
+  <tr><td>Not run yet</td><td>Empty state with an icon, a one-paragraph explanation of what the tool does and why it's
+    safe, and the primary button.</td></tr>
+  <tr><td>Nothing found</td><td>Positive empty state ("No duplicates — every photo and video in this library is unique").</td></tr>
+  <tr><td>Busy</td><td>Task bar with title, message ("Analysing photos and videos… 412 of 1,050"), determinate progress
+    where possible, Cancel. Start buttons disable.</td></tr>
+  <tr><td>Cancelled</td><td>Toast: "Stopped. Anything already done is recorded in History." Partial batches stay undoable.</td></tr>
+  <tr><td>Partial success</td><td>Toast states skipped files and why; failures open a dialog listing each file and confirming
+    it was left in place.</td></tr>
+  <tr><td>Error</td><td>Dialog with a plain sentence, reassurance about file state, and expandable technical details.</td></tr>
+  <tr><td>Library changed elsewhere</td><td>Pages are marked stale and refresh when shown, never while a task runs.</td></tr>
+</table>
+
+<h3 id="explain">Explaining decisions</h3>
+<p>Automatic choices are only acceptable if the user can see why they were made. Every engine heuristic therefore
+returns a reason alongside its result:</p>
+<table>
+  <tr><th>Decision</th><th>Example explanations</th></tr>
+  <tr><td>Which duplicate to keep</td><td>"Kept: best name and location"; others: "Name looks like a copy", "In a
+    backup/download/copy folder", "Newer copy of the same file".</td></tr>
+  <tr><td>Best shot</td><td>"Best pick: sharpest (20.1× the softest), best exposure, 2 faces detected"; others:
+    "blurrier (25% of best sharpness)", "too dark", "smaller (800×600)".</td></tr>
+  <tr><td>Photo date</td><td>"Camera date", "Date in file name", "File modified date (less reliable)".</td></tr>
+  <tr><td>Problem files</td><td>"The file is incomplete — it was probably cut off during a copy or download."</td></tr>
+  <tr><td>Video result</td><td>"620.7 KB → 155.9 KB (75% smaller), quality SSIM 0.999 · Excellent".</td></tr>
+</table>
+</section>
+
+<section id="visual">
+<h2>Visual design system</h2>
+<p>A calm, light, Windows 11-like style: neutral surfaces, one blue accent for primary actions, and semantic colours
+reserved for meaning — green for safety, amber for caution, red only for the single destructive action.</p>
+<div class="swatches">
+  <div class="sw"><div style="background:#2563eb"></div><span><b>Accent</b> #2563EB<br>primary buttons, selection</span></div>
+  <div class="sw"><div style="background:#e8effe"></div><span><b>Accent soft</b> #E8EFFE<br>info banners, selection bg</span></div>
+  <div class="sw"><div style="background:#15803d"></div><span><b>OK</b> #15803D<br>KEEP/BEST, savings, trust</span></div>
+  <div class="sw"><div style="background:#e7f6ec"></div><span><b>OK soft</b> #E7F6EC<br>"Nothing is deleted"</span></div>
+  <div class="sw"><div style="background:#b45309"></div><span><b>Warn</b> #B45309<br>uncertain dates, skipped</span></div>
+  <div class="sw"><div style="background:#b91c1c"></div><span><b>Danger</b> #B91C1C<br>Empty Recovery, damage</span></div>
+  <div class="sw"><div style="background:#f4f5f7"></div><span><b>Background</b> #F4F5F7</span></div>
+  <div class="sw"><div style="background:#ecEEF2"></div><span><b>Sidebar</b> #ECEEF2</span></div>
+  <div class="sw"><div style="background:#1f2328"></div><span><b>Text / toast</b> #1F2328</span></div>
+  <div class="sw"><div style="background:#5e6670"></div><span><b>Muted</b> #5E6670</span></div>
+</div>
+<h3>Typography &amp; iconography</h3>
+<ul>
+  <li><b>Segoe UI Variable</b> (falls back to Segoe UI): page title 19 pt semibold, section 12.5 pt semibold, body 10 pt,
+      captions 9 pt muted.</li>
+  <li>Icons use the system <b>Segoe Fluent Icons</b> font (fallback Segoe MDL2 Assets) so they match Windows and cost nothing to ship.</li>
+</ul>
+<h3>Components</h3>
+<table>
+  <tr><th>Component</th><th>Use</th></tr>
+  <tr><td>Page header</td><td>Title, one-line subtitle explaining the page's promise, primary action on the right.</td></tr>
+  <tr><td>Tile</td><td>Big number + label (+ optional sub-line), for counts and sizes.</td></tr>
+  <tr><td>Banner</td><td>Trust (green), info (blue), warning (amber), danger (red) explanations.</td></tr>
+  <tr><td>Card</td><td>White rounded container for groups of controls.</td></tr>
+  <tr><td>Photo grid</td><td>Thumbnail cells with rounded corners, badge pill (KEEP/COPY/BEST), optional tick box, video
+    duration tag, one or two caption lines (second line can carry a coloured reason).</td></tr>
+  <tr><td>Preview pane</td><td>Large image + facts: date with source, size, camera, location, path, problem in plain words;
+    Open / Show in folder.</td></tr>
+  <tr><td>Master–detail</td><td>Group list on the left (thumbnail + "Burst · 5 photos"), group grid in the middle, preview on
+    the right (Duplicates, Similar).</td></tr>
+  <tr><td>Task bar</td><td>Bottom strip for the running task, with progress and Cancel.</td></tr>
+  <tr><td>Toast</td><td>Dark bottom-right notification with optional Undo.</td></tr>
+  <tr><td>Confirm dialog</td><td>Title, summary, bullets, safety note, action-named primary button; optional acknowledgement
+    checkbox for destructive actions.</td></tr>
+  <tr><td>Segmented control</td><td>Mutually exclusive modes (Story images / Carousel / Story video; High / Balanced / Small).</td></tr>
+</table>
+<figure><img src="images/overview.png" alt="Overview page"><figcaption>Overview: tiles, trust banner and tool cards that
+explain what each tool would do for this library.</figcaption></figure>
+</section>
+
+<section id="copy">
+<h2>Writing guidelines</h2>
+<ul>
+  <li><b>Say what will happen, in numbers.</b> "14 files (26.7 MB) will be moved to Recovery." not "Proceed?"</li>
+  <li><b>Lead with reassurance where it is true.</b> "Nothing is deleted." "The other folder is only read while comparing."</li>
+  <li><b>Name buttons after their action.</b> "Move 14 copies", "Copy 79 files to other folder", "Delete permanently".</li>
+  <li><b>No jargon in the main text.</b> "Proven by comparing every byte" instead of "xxh3-128 match"; technical detail goes in
+      tooltips or expandable details.</li>
+  <li><b>Explain uncertainty.</b> "File modified date — may be inaccurate", "These photos are similar, not identical".</li>
+  <li><b>Errors tell the user the state of their files.</b> "They were left exactly where they were."</li>
+  <li><b>British spelling</b> (organise, colour), sentence case, no exclamation marks.</li>
+</ul>
+</section>
+
+<section id="decisions">
+<h2>Key decisions</h2>
+<table>
+  <tr><th>Decision</th><th>Chosen</th><th>Alternatives considered</th><th>Rationale</th></tr>
+  <tr><td>App stack</td><td>Python + PySide6 (Qt)</td><td>Rust + Tauri; C# WinUI/WPF; pywebview</td>
+    <td>Reuses the existing engine; best ecosystem for image analysis, OpenCV, FFmpeg and story rendering; native Qt
+    widgets render thousands of thumbnails smoothly. Hot paths are already in native code (Pillow, NumPy, xxhash, x264).
+    Rust via PyO3 remains an option for profiled bottlenecks.</td></tr>
+  <tr><td>Where the catalogue lives</td><td>Hidden <code>.memoria</code> folder inside the library</td><td>%LOCALAPPDATA%</td>
+    <td>Travels with external drives; Recovery must be on the same volume so moves are instant renames, not copies.</td></tr>
+  <tr><td>Removal</td><td>Library Recovery folder</td><td>Windows Recycle Bin</td><td>Recycle Bin is emptied by other tools,
+    has size limits, and can't be tied to a reversible batch with original paths.</td></tr>
+  <tr><td>Exact duplicates</td><td>Size → sampled hash → full hash</td><td>Full hash everything; name/size matching</td>
+    <td>Unique sizes are never read; certainty only from full content.</td></tr>
+  <tr><td>Similar photos</td><td>64-bit difference hash + capture-time bursts</td><td>CLIP embeddings; pHash</td>
+    <td>dHash is fast, offline and explainable; CLIP finds "same subject", which is not "same photo" (see product plan).</td></tr>
+  <tr><td>Best-shot scoring</td><td>Sharpness (log-scaled), exposure, resolution, faces — measured at a fixed 512 px</td>
+    <td>Learned aesthetic model</td><td>Transparent and explainable; fixed scale prevents small copies looking sharper.</td></tr>
+  <tr><td>Blurry detection</td><td>Opt-in review, nothing pre-ticked, 3 sensitivity presets</td><td>Auto-select</td>
+    <td>Blur metrics misfire on night, fog and intentional softness.</td></tr>
+  <tr><td>Organise dates</td><td>EXIF → filename → modified time (skipped by default)</td><td>Modified time always</td>
+    <td>Copies reset modified time; filing them by it would scatter photos into wrong years.</td></tr>
+  <tr><td>Video tooling</td><td>FFmpeg from <code>imageio-ffmpeg</code></td><td>Require user install</td>
+    <td>Zero setup; the binary is bundled with the app.</td></tr>
+  <tr><td>Concurrency</td><td>One user task at a time</td><td>Parallel tasks</td><td>Prevents conflicting file operations and
+    simplifies the mental model.</td></tr>
+</table>
+</section>
+
+<section id="performance">
+<h2>Performance as a design requirement</h2>
+<p>Slow tools teach users to stop checking. The design budget is: opening a known library feels instant, finding
+duplicates takes seconds, and the window never freezes.</p>
+<ul>
+  <li>Incremental scan: unchanged files (same size and modified time) are skipped — a rescan of 1,000 photos takes 0.01 s.</li>
+  <li>JPEG decoding at reduced resolution and parallel analysis (≈180 photos/s on the benchmark machine).</li>
+  <li>Duplicate funnel: only files sharing a size are ever read.</li>
+  <li>Similarity: vectorised, multi-threaded Hamming distance (100,000 photos in ≈4 s); bursts found by a time-sorted window.</li>
+  <li>Thumbnails stored once in their own SQLite file; the grid decodes only visible cells.</li>
+</ul>
+<p>See the <a href="technical.html#performance">technical document</a> for measurements.</p>
+</section>
+
+<section id="a11y">
+<h2>Accessibility</h2>
+<ul>
+  <li>Colour is never the only signal: badges carry words (KEEP, BEST, COPY), statuses are spelled out.</li>
+  <li>Keyboard: grids support arrow navigation, <span class="kbd">Space</span> toggles a tick box, <span class="kbd">Delete</span>
+      removes from the Story selection; dialogs focus Cancel first.</li>
+  <li>High-DPI aware (Qt 6), text uses system fonts at legible sizes; tooltips repeat truncated names and full paths.</li>
+  <li>Known gap: no dark theme and limited screen-reader labelling of custom-painted grid cells (see roadmap).</li>
+</ul>
+</section>
+
+<section id="risks">
+<h2>Risks &amp; limitations</h2>
+<table>
+  <tr><th>Risk</th><th>Mitigation / status</th></tr>
+  <tr><td>Heuristics tuned on generated images</td><td>Blur thresholds and best-shot weights are calibrated on the synthetic
+    test library; real-world tuning is expected. Nothing is auto-applied.</td></tr>
+  <tr><td>Haar face detection is basic</td><td>Faces only nudge the best-shot score (12% weight).</td></tr>
+  <tr><td>Recovery uses disk space</td><td>Size is shown on Overview and History; emptying is explicit.</td></tr>
+  <tr><td>Very large libraries (&gt;100k)</td><td>Engine scales; some page refreshes load the full catalogue in memory and may
+    need pagination.</td></tr>
+  <tr><td>Network drives</td><td>Untested; moves across volumes fall back to verified copy + delete of the source.</td></tr>
+  <tr><td>Packaged size (~380 MB)</td><td>Dominated by Qt, OpenCV and FFmpeg; could be trimmed.</td></tr>
+</table>
+</section>
+
+<section id="roadmap">
+<h2>Roadmap</h2>
+<ol>
+  <li>Calibrate blur and best-shot scoring on real libraries (with an opt-in local feedback log).</li>
+  <li>Dark theme and screen-reader names for grid items.</li>
+  <li>Removable-drive catalogue (find which disconnected drive holds a file).</li>
+  <li>Screenshot text search (local OCR) in Photos &amp; videos.</li>
+  <li>Backup restore drill: restore a sample from a backup and prove it matches.</li>
+  <li>Optional Rust (PyO3) extension for hashing and similarity if profiling shows a need.</li>
+</ol>
+</section>
+
+<footer>Memoria design document · see also <a href="features.html">Features</a> and <a href="technical.html">Technical</a></footer>
+</main>
+</div>
+</body>
+</html>

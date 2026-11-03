@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memoria — Quality report</title><link rel="stylesheet" href="style.css">
+<link rel="icon" href="../memoria/ui/assets/memoria.png">
+<style>.st{font-weight:600} .st.passed{color:var(--ok)} .st.failed,.st.error{color:var(--danger)} .st.skipped{color:var(--warn)}
+td.num{text-align:right;white-space:nowrap} details summary{cursor:pointer;font-weight:600;margin:10px 0}</style></head><body>
+<div class="top"><div class="inner"><a class="brand" href="index.html"><img src="../memoria/ui/assets/memoria.png" alt="">Memoria</a>
+<nav><a href="design.html">Design</a><a href="features.html">Features</a><a href="technical.html">Technical</a><a class="active" href="report.html">Quality report</a></nav></div></div>
+<div class="layout"><aside class="toc"><b>QUALITY REPORT</b><a href="#summary">Summary</a><a href="#tests">Test results</a>
+<a class="sub" href="#test_engine">Engine — ground truth, safety and undo</a><a class="sub" href="#test_story">Story maker</a><a class="sub" href="#test_ui_smoke">Desktop UI — end to end</a><a class="sub" href="#test_video">Video compressor</a>
+<a href="#bench">Benchmark</a><a href="#truth">Test library ground truth</a><a href="#env">Environment</a><a href="#repro">Reproduce</a></aside><main>
+<header class="hero"><h1>Quality report</h1><p>Automated test results and performance measurements for Memoria.</p>
+<div class="meta"><span class="pill">Generated 03 Nov 2026, 22:13</span><span class="pill">by tools/make_reports.py</span></div></header>
+<section id="summary"><h2>Summary</h2>
+<div class="callout ok"><b>All tests passed.</b>
+65 passed, 0 failed, 0 skipped in 65 s.</div>
+<div class="grid"><div class="card"><p>Tests</p><h4 style="font-size:26px;margin:4px 0 0">65</h4></div><div class="card"><p>Passed</p><h4 style="font-size:26px;margin:4px 0 0" style="color:var(--ok)">65</h4></div>
+<div class="card"><p>Failed</p><h4 style="font-size:26px;margin:4px 0 0">0</h4></div><div class="card"><p>Time in tests</p><h4 style="font-size:26px;margin:4px 0 0">63 s</h4></div></div>
+<table><tr><th>Area</th><th>Tests</th><th>Passed</th><th>Time</th></tr>
+<tr><td><a href='#test_engine'>Engine — ground truth, safety and undo</a></td><td class='num'>27</td><td class='num'>27</td><td class='num'>21.5 s</td></tr>
+<tr><td><a href='#test_story'>Story maker</a></td><td class='num'>30</td><td class='num'>30</td><td class='num'>10.5 s</td></tr>
+<tr><td><a href='#test_ui_smoke'>Desktop UI — end to end</a></td><td class='num'>1</td><td class='num'>1</td><td class='num'>24.6 s</td></tr>
+<tr><td><a href='#test_video'>Video compressor</a></td><td class='num'>7</td><td class='num'>7</td><td class='num'>6.7 s</td></tr>
+</table></section><section id='tests'><h2>Test results</h2><p>Every test name below states the behaviour it proves. Engine tests run against a generated library whose expected results are recorded in <code>expected.json</code>.</p>
+<h3 id='test_engine'>Engine — ground truth, safety and undo <span class='pill'>tests/test_engine.py</span></h3><table><tr><th>Behaviour verified</th><th>Result</th><th>Time</th></tr>
+<tr><td>Quick hash is only a prefilter<br><small style='color:var(--muted)'><code>test_quick_hash_is_only_a_prefilter</code></small></td><td class='st passed'>Passed</td><td class='num'>0.04 s</td></tr>
+<tr><td>Scan is incremental<br><small style='color:var(--muted)'><code>test_scan_is_incremental</code></small></td><td class='st passed'>Passed</td><td class='num'>7.63 s</td></tr>
+<tr><td>Index counts and errors<br><small style='color:var(--muted)'><code>test_index_counts_and_errors</code></small></td><td class='st passed'>Passed</td><td class='num'>0.18 s</td></tr>
+<tr><td>Dates and sources<br><small style='color:var(--muted)'><code>test_dates_and_sources</code></small></td><td class='st passed'>Passed</td><td class='num'>0.21 s</td></tr>
+<tr><td>Rotated photos are reported upright<br><small style='color:var(--muted)'><code>test_rotated_photos_are_reported_upright</code></small></td><td class='st passed'>Passed</td><td class='num'>0.19 s</td></tr>
+<tr><td>Heic and video analysis<br><small style='color:var(--muted)'><code>test_heic_and_video_analysis</code></small></td><td class='st passed'>Passed</td><td class='num'>0.18 s</td></tr>
+<tr><td>Duplicate groups match ground truth<br><small style='color:var(--muted)'><code>test_duplicate_groups_match_ground_truth</code></small></td><td class='st passed'>Passed</td><td class='num'>0.27 s</td></tr>
+<tr><td>Files &gt; 1.28 MB were skipped by the old CLI because of a sampled/full hash mismatch.<br><small style='color:var(--muted)'><code>test_large_duplicates_are_removed_regression</code></small></td><td class='st passed'>Passed</td><td class='num'>0.31 s</td></tr>
+<tr><td>Duplicate removal and undo<br><small style='color:var(--muted)'><code>test_duplicate_removal_and_undo</code></small></td><td class='st passed'>Passed</td><td class='num'>3.60 s</td></tr>
+<tr><td>Duplicate removal skips changed files<br><small style='color:var(--muted)'><code>test_duplicate_removal_skips_changed_files</code></small></td><td class='st passed'>Passed</td><td class='num'>0.32 s</td></tr>
+<tr><td>User can choose keeper and exclude<br><small style='color:var(--muted)'><code>test_user_can_choose_keeper_and_exclude</code></small></td><td class='st passed'>Passed</td><td class='num'>0.26 s</td></tr>
+<tr><td>Bursts grouped and best frame chosen<br><small style='color:var(--muted)'><code>test_bursts_grouped_and_best_frame_chosen</code></small></td><td class='st passed'>Passed</td><td class='num'>0.62 s</td></tr>
+<tr><td>Near duplicates prefer original<br><small style='color:var(--muted)'><code>test_near_duplicates_prefer_original</code></small></td><td class='st passed'>Passed</td><td class='num'>0.50 s</td></tr>
+<tr><td>Similar excludes exact copies and screenshots<br><small style='color:var(--muted)'><code>test_similar_excludes_exact_copies_and_screenshots</code></small></td><td class='st passed'>Passed</td><td class='num'>0.49 s</td></tr>
+<tr><td>Blurry detection<br><small style='color:var(--muted)'><code>test_blurry_detection</code></small></td><td class='st passed'>Passed</td><td class='num'>0.20 s</td></tr>
+<tr><td>Organize plan apply undo<br><small style='color:var(--muted)'><code>test_organize_plan_apply_undo</code></small></td><td class='st passed'>Passed</td><td class='num'>1.49 s</td></tr>
+<tr><td>Organize include uncertain<br><small style='color:var(--muted)'><code>test_organize_include_uncertain</code></small></td><td class='st passed'>Passed</td><td class='num'>0.20 s</td></tr>
+<tr><td>Tidy categories match<br><small style='color:var(--muted)'><code>test_tidy_categories_match</code></small></td><td class='st passed'>Passed</td><td class='num'>0.22 s</td></tr>
+<tr><td>Tidy apply and undo<br><small style='color:var(--muted)'><code>test_tidy_apply_and_undo</code></small></td><td class='st passed'>Passed</td><td class='num'>1.07 s</td></tr>
+<tr><td>Health baseline then detect damage<br><small style='color:var(--muted)'><code>test_health_baseline_then_detect_damage</code></small></td><td class='st passed'>Passed</td><td class='num'>0.77 s</td></tr>
+<tr><td>Compare and sync both ways<br><small style='color:var(--muted)'><code>test_compare_and_sync_both_ways</code></small></td><td class='st passed'>Passed</td><td class='num'>1.60 s</td></tr>
+<tr><td>Compare rejects overlapping folders<br><small style='color:var(--muted)'><code>test_compare_rejects_overlapping_folders</code></small></td><td class='st passed'>Passed</td><td class='num'>0.20 s</td></tr>
+<tr><td>Verified copy never leaves bad file<br><small style='color:var(--muted)'><code>test_verified_copy_never_leaves_bad_file</code></small></td><td class='st passed'>Passed</td><td class='num'>0.02 s</td></tr>
+<tr><td>Never overwrites<br><small style='color:var(--muted)'><code>test_never_overwrites</code></small></td><td class='st passed'>Passed</td><td class='num'>0.21 s</td></tr>
+<tr><td>Reconcile interrupted batch<br><small style='color:var(--muted)'><code>test_reconcile_interrupted_batch</code></small></td><td class='st passed'>Passed</td><td class='num'>0.21 s</td></tr>
+<tr><td>Cancel stops cleanly<br><small style='color:var(--muted)'><code>test_cancel_stops_cleanly</code></small></td><td class='st passed'>Passed</td><td class='num'>0.27 s</td></tr>
+<tr><td>Empty recovery is explicit<br><small style='color:var(--muted)'><code>test_empty_recovery_is_explicit</code></small></td><td class='st passed'>Passed</td><td class='num'>0.30 s</td></tr>
+</table>
+<h3 id='test_story'>Story maker <span class='pill'>tests/test_story.py</span></h3><table><tr><th>Behaviour verified</th><th>Result</th><th>Time</th></tr>
+<tr><td>Render sizes exact<br><small style='color:var(--muted)'><code>test_render_sizes_exact[size0]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.95 s</td></tr>
+<tr><td>Render sizes exact<br><small style='color:var(--muted)'><code>test_render_sizes_exact[size1]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.10 s</td></tr>
+<tr><td>Render sizes exact<br><small style='color:var(--muted)'><code>test_render_sizes_exact[size2]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.09 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[blur-single]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.17 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[blur-duo]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.21 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[blur-trio]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.23 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[blur-grid4]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.24 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[blur-before_after]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.20 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[blur-polaroid]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.27 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-single]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.09 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-duo]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.12 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-trio]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.14 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-grid4]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.15 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-before_after]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.12 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[white-polaroid]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.22 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-single]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.09 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-duo]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.12 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-trio]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.14 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-grid4]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.16 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-before_after]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.12 s</td></tr>
+<tr><td>Every template renders<br><small style='color:var(--muted)'><code>test_every_template_renders[#336699-polaroid]</code></small></td><td class='st passed'>Passed</td><td class='num'>0.20 s</td></tr>
+<tr><td>Template slots and partial group<br><small style='color:var(--muted)'><code>test_template_slots_and_partial_group</code></small></td><td class='st passed'>Passed</td><td class='num'>0.16 s</td></tr>
+<tr><td>Exif rotated photo renders upright<br><small style='color:var(--muted)'><code>test_exif_rotated_photo_renders_upright</code></small></td><td class='st passed'>Passed</td><td class='num'>0.13 s</td></tr>
+<tr><td>Heic photo renders<br><small style='color:var(--muted)'><code>test_heic_photo_renders</code></small></td><td class='st passed'>Passed</td><td class='num'>0.28 s</td></tr>
+<tr><td>Panorama split is seamless<br><small style='color:var(--muted)'><code>test_panorama_split_is_seamless</code></small></td><td class='st passed'>Passed</td><td class='num'>1.08 s</td></tr>
+<tr><td>Export stories and carousel unique names<br><small style='color:var(--muted)'><code>test_export_stories_and_carousel_unique_names</code></small></td><td class='st passed'>Passed</td><td class='num'>0.93 s</td></tr>
+<tr><td>Export cancel leaves nothing<br><small style='color:var(--muted)'><code>test_export_cancel_leaves_nothing</code></small></td><td class='st passed'>Passed</td><td class='num'>0.12 s</td></tr>
+<tr><td>Story video duration and resolution<br><small style='color:var(--muted)'><code>test_story_video_duration_and_resolution</code></small></td><td class='st passed'>Passed</td><td class='num'>2.56 s</td></tr>
+<tr><td>Story video with music and unique name<br><small style='color:var(--muted)'><code>test_story_video_with_music_and_unique_name</code></small></td><td class='st passed'>Passed</td><td class='num'>0.98 s</td></tr>
+<tr><td>Story video cancel cleans up<br><small style='color:var(--muted)'><code>test_story_video_cancel_cleans_up</code></small></td><td class='st passed'>Passed</td><td class='num'>0.18 s</td></tr>
+</table>
+<h3 id='test_ui_smoke'>Desktop UI — end to end <span class='pill'>tests/test_ui_smoke.py</span></h3><table><tr><th>Behaviour verified</th><th>Result</th><th>Time</th></tr>
+<tr><td>Every page runs without errors<br><small style='color:var(--muted)'><code>test_every_page_runs_without_errors</code></small></td><td class='st passed'>Passed</td><td class='num'>24.60 s</td></tr>
+</table>
+<h3 id='test_video'>Video compressor <span class='pill'>tests/test_video.py</span></h3><table><tr><th>Behaviour verified</th><th>Result</th><th>Time</th></tr>
+<tr><td>Quality mode shrinks verifies and never overwrites<br><small style='color:var(--muted)'><code>test_quality_mode_shrinks_verifies_and_never_overwrites</code></small></td><td class='st passed'>Passed</td><td class='num'>2.88 s</td></tr>
+<tr><td>Target mode fits small target<br><small style='color:var(--muted)'><code>test_target_mode_fits_small_target</code></small></td><td class='st passed'>Passed</td><td class='num'>1.07 s</td></tr>
+<tr><td>Portrait without audio is downscaled by short side<br><small style='color:var(--muted)'><code>test_portrait_without_audio_is_downscaled_by_short_side</code></small></td><td class='st passed'>Passed</td><td class='num'>0.84 s</td></tr>
+<tr><td>Keeps original when not smaller<br><small style='color:var(--muted)'><code>test_keeps_original_when_not_smaller</code></small></td><td class='st passed'>Passed</td><td class='num'>0.35 s</td></tr>
+<tr><td>Cancel removes partial output<br><small style='color:var(--muted)'><code>test_cancel_removes_partial_output</code></small></td><td class='st passed'>Passed</td><td class='num'>0.51 s</td></tr>
+<tr><td>Estimate flags impossible target<br><small style='color:var(--muted)'><code>test_estimate_flags_impossible_target</code></small></td><td class='st passed'>Passed</td><td class='num'>0.08 s</td></tr>
+<tr><td>Compress many reports each file<br><small style='color:var(--muted)'><code>test_compress_many_reports_each_file</code></small></td><td class='st passed'>Passed</td><td class='num'>0.96 s</td></tr>
+</table>
+</section><section id='bench'><h2>Benchmark</h2>
+<p>525 generated 6 MP JPEGs (5% exact copies), 0.51 GB, on 32 CPU threads. Absolute numbers depend on the machine and disk.</p><table><tr><th>Stage</th><th>Time</th><th>Result</th></tr>
+<tr><td>generate test photos</td><td class='num'>25.56 s</td><td>525 files, 0.51 GB</td></tr>
+<tr><td>scan (walk + catalogue)</td><td class='num'>0.01 s</td><td></td></tr>
+<tr><td>analyse (EXIF, thumbs, hashes, quality)</td><td class='num'>2.87 s</td><td>183 photos/s, 178 MB/s of photos</td></tr>
+<tr><td>rescan, nothing changed</td><td class='num'>0.01 s</td><td></td></tr>
+<tr><td>find duplicates (first run)</td><td class='num'>0.07 s</td><td>25 groups</td></tr>
+<tr><td>find duplicates (cached)</td><td class='num'>0.00 s</td><td></td></tr>
+<tr><td>find similar (+faces for group members)</td><td class='num'>3.05 s</td><td>23 groups</td></tr>
+<tr><td>health check (full read)</td><td class='num'>1.89 s</td><td>270 MB/s</td></tr>
+<tr><td>similarity pairs, 100,000 hashes</td><td class='num'>4.93 s</td><td>5×10⁹ pair comparisons</td></tr>
+</table>
+</section><section id='truth'><h2>Test library ground truth</h2>
+<p>The full test library (<code>tools/make_test_library.py</code>) contains these known cases; the test suite uses a smaller variant with the same scenarios.</p><table><tr><th>Scenario</th><th>Count</th></tr>
+<tr><td>Total files</td><td class='num'>111</td></tr>
+<tr><td>Total size</td><td class='num'>72.8 MB</td></tr>
+<tr><td>Exact-duplicate groups</td><td class='num'>11</td></tr>
+<tr><td>…of which large (&gt; 1.28 MB) originals</td><td class='num'>4</td></tr>
+<tr><td>Bursts (5 frames, known best)</td><td class='num'>3</td></tr>
+<tr><td>Near-duplicates (WhatsApp-style)</td><td class='num'>4</td></tr>
+<tr><td>Blurry photos</td><td class='num'>4</td></tr>
+<tr><td>Junk files</td><td class='num'>5</td></tr>
+<tr><td>Empty files</td><td class='num'>2</td></tr>
+<tr><td>Empty folders</td><td class='num'>3</td></tr>
+<tr><td>Corrupt photos</td><td class='num'>1</td></tr>
+<tr><td>Non-media files</td><td class='num'>3</td></tr>
+<tr><td>EXIF-rotated photos</td><td class='num'>2</td></tr>
+<tr><td>Files with a known date and source</td><td class='num'>70</td></tr>
+<tr><td>Files with no reliable date</td><td class='num'>1</td></tr>
+<tr><td>Videos</td><td class='num'>3</td></tr>
+<tr><td>HEIC photos</td><td class='num'>1</td></tr>
+</table>
+</section><section id='env'><h2>Environment</h2><table><tr><th>Component</th><th>Version</th></tr>
+<tr><td>Python</td><td>3.12.10</td></tr>
+<tr><td>OS</td><td>Windows 11</td></tr>
+<tr><td>CPU threads</td><td>32</td></tr>
+<tr><td>PySide6</td><td>6.12.0</td></tr>
+<tr><td>numpy</td><td>2.5.4</td></tr>
+<tr><td>Pillow</td><td>13.0.0</td></tr>
+<tr><td>pillow-heif</td><td>1.8.1</td></tr>
+<tr><td>xxhash</td><td>4.0.2</td></tr>
+<tr><td>imageio-ffmpeg</td><td>0.6.0</td></tr>
+<tr><td>opencv-python-headless</td><td>4.14.0.94</td></tr>
+<tr><td>pytest</td><td>9.1.1</td></tr>
+</table></section><section id="repro"><h2>Reproduce</h2>
+<pre><code>.\.venv\Scripts\python -m pytest -q
+.\.venv\Scripts\python tools\benchmark.py --photos 500
+.\.venv\Scripts\python tools\make_reports.py        # regenerates this page</code></pre></section>
+<footer>Memoria quality report · <a href="index.html">Documentation home</a></footer></main></div></body></html>

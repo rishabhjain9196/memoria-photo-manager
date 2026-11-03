@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memoria — Technical document</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="../memoria/ui/assets/memoria.png">
+</head>
+<body>
+<div class="top"><div class="inner">
+  <a class="brand" href="index.html"><img src="../memoria/ui/assets/memoria.png" alt="">Memoria</a>
+  <nav><a href="design.html">Design</a><a href="features.html">Features</a><a class="active" href="technical.html">Technical</a><a href="report.html">Quality report</a></nav>
+</div></div>
+
+<div class="layout">
+<aside class="toc">
+  <b>TECHNICAL DOCUMENT</b>
+  <a href="#overview">Overview</a>
+  <a href="#architecture">Architecture</a>
+  <a href="#layout">Repository layout</a>
+  <a href="#modules">Module reference</a>
+  <a href="#storage">Storage &amp; data model</a>
+  <a href="#pipelines">Pipelines</a>
+  <a class="sub" href="#p-index">Indexing</a>
+  <a class="sub" href="#p-dup">Exact duplicates</a>
+  <a class="sub" href="#p-sim">Similarity &amp; best shot</a>
+  <a class="sub" href="#p-org">Organise</a>
+  <a class="sub" href="#p-tidy">Tidy</a>
+  <a class="sub" href="#p-health">Health</a>
+  <a class="sub" href="#p-compare">Compare &amp; sync</a>
+  <a class="sub" href="#p-video">Video compression</a>
+  <a class="sub" href="#p-story">Story rendering</a>
+  <a href="#executor">Action executor &amp; journal</a>
+  <a href="#ui">UI architecture</a>
+  <a href="#concurrency">Concurrency model</a>
+  <a href="#performance">Performance</a>
+  <a href="#config">Configuration constants</a>
+  <a href="#testing">Testing</a>
+  <a href="#build">Build &amp; run</a>
+  <a href="#extend">Extending Memoria</a>
+  <a href="#deps">Dependencies &amp; licences</a>
+  <a href="#legacy">Legacy CLI bugs fixed</a>
+  <a href="#limits">Known limitations</a>
+</aside>
+
+<main>
+<header class="hero">
+  <h1>Technical document</h1>
+  <p>How Memoria is built: architecture, modules, data model, algorithms, the journaled executor that makes every
+  change undoable, concurrency, performance, testing and packaging.</p>
+  <div class="meta"><span class="pill">Python 3.12</span><span class="pill">PySide6 6.12</span><span class="pill">SQLite (WAL)</span>
+  <span class="pill">NumPy · Pillow · OpenCV 4 · FFmpeg 7</span><span class="pill">≈7,600 lines incl. tests</span></div>
+</header>
+
+<section id="overview">
+<h2>Overview</h2>
+<p>Memoria is a two-layer application:</p>
+<ul>
+  <li><b><code>memoria.engine</code></b> — a UI-independent library. Every operation is a plain function taking a
+      <code>Library</code> and an optional <code>Progress</code>. It is fully testable without Qt.</li>
+  <li><b><code>memoria.ui</code></b> — a PySide6 shell: a main window with sidebar navigation, one page per tool, a single
+      background <code>TaskRunner</code>, and shared widgets.</li>
+</ul>
+<p>All file mutations — from any page — are expressed as a list of <code>Action</code> objects and executed by one
+function, <code>engine.actions.apply</code>, which journals, verifies and makes them undoable.</p>
+</section>
+
+<section id="architecture">
+<h2>Architecture</h2>
+<svg class="diagram" viewBox="0 0 960 470" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, sans-serif" font-size="13">
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5e6670"/></marker></defs>
+  <rect x="10" y="10" width="940" height="140" rx="12" fill="#e8effe" stroke="#c9d8fb"/>
+  <text x="26" y="34" font-weight="600" fill="#1e3a8a">memoria.ui (PySide6, main thread)</text>
+  <rect x="26" y="48" width="170" height="86" rx="8" fill="#fff" stroke="#c9d8fb"/><text x="40" y="70" font-weight="600">MainWindow</text><text x="40" y="90" fill="#5e6670">sidebar · stack</text><text x="40" y="108" fill="#5e6670">task bar · toast</text><text x="40" y="126" fill="#5e6670">open / index / undo</text>
+  <rect x="210" y="48" width="330" height="86" rx="8" fill="#fff" stroke="#c9d8fb"/><text x="224" y="70" font-weight="600">Pages (11) — base.Page</text><text x="224" y="90" fill="#5e6670">refresh() · on_busy_changed()</text><text x="224" y="108" fill="#5e6670">run(title, fn, on_done)</text><text x="224" y="126" fill="#5e6670">apply_actions(...) → confirm → apply → toast</text>
+  <rect x="554" y="48" width="180" height="86" rx="8" fill="#fff" stroke="#c9d8fb"/><text x="568" y="70" font-weight="600">widgets</text><text x="568" y="90" fill="#5e6670">PhotoGrid · Preview</text><text x="568" y="108" fill="#5e6670">ConfirmDialog · Toast</text><text x="568" y="126" fill="#5e6670">AppContext · ThumbCache</text>
+  <rect x="748" y="48" width="186" height="86" rx="8" fill="#fff" stroke="#c9d8fb"/><text x="762" y="70" font-weight="600">TaskRunner</text><text x="762" y="90" fill="#5e6670">one QThread at a time</text><text x="762" y="108" fill="#5e6670">progress · cancel</text><text x="762" y="126" fill="#5e6670">errors → dialog</text>
+  <line x1="840" y1="134" x2="840" y2="180" stroke="#5e6670" marker-end="url(#a)"/>
+  <rect x="10" y="182" width="940" height="200" rx="12" fill="#f7f8fa" stroke="#e3e6ea"/>
+  <text x="26" y="206" font-weight="600">memoria.engine (worker thread + internal thread pools)</text>
+  <g fill="#fff" stroke="#e3e6ea">
+    <rect x="26" y="220" width="140" height="60" rx="8"/><rect x="176" y="220" width="140" height="60" rx="8"/><rect x="326" y="220" width="140" height="60" rx="8"/>
+    <rect x="476" y="220" width="140" height="60" rx="8"/><rect x="626" y="220" width="140" height="60" rx="8"/><rect x="776" y="220" width="158" height="60" rx="8"/>
+    <rect x="26" y="292" width="140" height="74" rx="8"/><rect x="176" y="292" width="140" height="74" rx="8"/><rect x="326" y="292" width="290" height="74" rx="8"/>
+    <rect x="626" y="292" width="308" height="74" rx="8"/>
+  </g>
+  <text x="40" y="244" font-weight="600">scanner</text><text x="40" y="264" fill="#5e6670">scan · analyze</text>
+  <text x="190" y="244" font-weight="600">duplicates</text><text x="190" y="264" fill="#5e6670">size→quick→full</text>
+  <text x="340" y="244" font-weight="600">similar</text><text x="340" y="264" fill="#5e6670">dHash · bursts · rank</text>
+  <text x="490" y="244" font-weight="600">organize · tidy</text><text x="490" y="264" fill="#5e6670">plans of Actions</text>
+  <text x="640" y="244" font-weight="600">health · compare</text><text x="640" y="264" fill="#5e6670">fingerprints · sync</text>
+  <text x="790" y="244" font-weight="600">story · videotools</text><text x="790" y="264" fill="#5e6670">render · x264</text>
+  <text x="40" y="316" font-weight="600">media · ffmpeg</text><text x="40" y="336" fill="#5e6670">decode, EXIF,</text><text x="40" y="354" fill="#5e6670">probe, frames</text>
+  <text x="190" y="316" font-weight="600">hashing</text><text x="190" y="336" fill="#5e6670">xxh3-128 full</text><text x="190" y="354" fill="#5e6670">+ sampled</text>
+  <text x="340" y="316" font-weight="600">actions (executor + journal)</text><text x="340" y="336" fill="#5e6670">preflight · recycle/move/copy/rmdir</text><text x="340" y="354" fill="#5e6670">undo · reconcile · recovery</text>
+  <text x="640" y="316" font-weight="600">db.Library · progress · config</text><text x="640" y="336" fill="#5e6670">thread-local SQLite connections</text><text x="640" y="354" fill="#5e6670">Progress(callback, cancel Event)</text>
+  <rect x="10" y="398" width="460" height="62" rx="12" fill="#e7f6ec" stroke="#c7e9d2"/>
+  <text x="26" y="422" font-weight="600" fill="#14532d">Library folder</text><text x="26" y="444" fill="#14532d">your photos (read; changed only via actions)</text>
+  <rect x="490" y="398" width="460" height="62" rx="12" fill="#fdf3e1" stroke="#f3d9a9"/>
+  <text x="506" y="422" font-weight="600" fill="#78350f">.memoria (hidden)</text><text x="506" y="444" fill="#78350f">memoria.db · thumbs.db · recovery\&lt;batch&gt;\…</text>
+  <line x1="240" y1="382" x2="240" y2="396" stroke="#5e6670" marker-end="url(#a)"/><line x1="720" y1="382" x2="720" y2="396" stroke="#5e6670" marker-end="url(#a)"/>
+</svg>
+<p>Dependencies point downward only: pages import engine modules; the engine never imports Qt. The
+<code>AppContext</code> object carries shared state (open <code>Library</code>, runner, thumbnail cache) and app-wide
+signals (<code>library_opened</code>, <code>library_modified</code>, <code>toast_requested</code>, <code>navigate</code>).</p>
+</section>
+
+<section id="layout">
+<h2>Repository layout</h2>
+<pre><code>picture-manager/
+├─ Memoria.pyw              launcher (no console)          run.ps1   create venv + start
+├─ build.ps1                PyInstaller → dist\Memoria\Memoria.exe
+├─ requirements.txt         README.md   .gitignore
+├─ memoria/
+│  ├─ __main__.py           python -m memoria
+│  ├─ samplelib.py          deterministic sample/test library generator (+ expected.json)
+│  ├─ engine/               UI-independent engine (see Module reference)
+│  └─ ui/
+│     ├─ app.py             QApplication, style, icon
+│     ├─ main_window.py     sidebar, page stack, task bar, toast, library lifecycle, undo
+│     ├─ tasks.py           TaskRunner (single background QThread)
+│     ├─ widgets.py         formatting, PhotoGrid/Model/Delegate, Preview, ConfirmDialog, Toast, AppContext
+│     ├─ theme.py           colours + Qt stylesheet
+│     ├─ assets/            memoria.ico / memoria.png (generated by tools/make_icon.py)
+│     └─ pages/             base.py + overview, photos, duplicates, similar, tidy, organize,
+│                           story, video, health, compare, history
+├─ tests/                   conftest.py (session library fixtures), test_engine, test_story, test_video, test_ui_smoke
+├─ tools/                   make_test_library.py, ui_screenshots.py, benchmark.py, make_icon.py
+└─ docs/                    design.html, features.html, technical.html, style.css, images/</code></pre>
+</section>
+
+<section id="modules">
+<h2>Module reference</h2>
+<h3>Engine</h3>
+<table>
+  <tr><th>Module</th><th>Lines</th><th>Responsibility · key API</th></tr>
+  <tr><td><code>config</code></td><td>71</td><td>Extension sets (<code>IMAGE_EXT</code>, <code>RAW_EXT</code>, <code>VIDEO_EXT</code>), junk names, tuning constants, <code>kind_for_ext</code>, <code>app_dir/ensure_app_dir</code> (creates hidden <code>.memoria</code>), <code>recovery_dir</code>, <code>default_export_dir</code>.</td></tr>
+  <tr><td><code>db</code></td><td>199</td><td><code>Library(root)</code>: schema creation, thread-local connections (<code>.db</code>, <code>.thumbs_db</code>), <code>files(where, params, order)</code>, <code>file</code>, <code>file_by_rel</code>, <code>set_hashes</code>, <code>thumbnail</code>, <code>stats</code>, <code>remove_rows</code>, <code>transaction()</code>, <code>abspath/rel</code>.</td></tr>
+  <tr><td><code>progress</code></td><td>44</td><td><code>Progress(callback, cancel_event, interval)</code> — throttled reporting; <code>update()</code>/<code>check()</code> raise <code>Cancelled</code> when the event is set.</td></tr>
+  <tr><td><code>hashing</code></td><td>49</td><td><code>full_hash(path)</code> xxh3-128 over 1 MiB <code>readinto</code> chunks; <code>quick_hash(path, size)</code> five 64 KiB samples + size (pre-filter only).</td></tr>
+  <tr><td><code>media</code></td><td>214</td><td><code>open_oriented</code> (JPEG draft decode, EXIF transpose, RGB), <code>read_exif</code> (date, camera, GPS), <code>date_from_filename</code>, <code>dhash</code>, <code>quality_metrics</code>, <code>thumbnail_bytes</code>, <code>analyze_image</code>, <code>load_for_display</code>, <code>count_faces</code> (OpenCV Haar, thread-local).</td></tr>
+  <tr><td><code>ffmpeg</code></td><td>104</td><td><code>ffmpeg_exe()</code> (imageio-ffmpeg), <code>run_ffmpeg</code> (no console window), <code>probe()</code> → <code>VideoInfo</code> (parses <code>ffmpeg -i</code>), <code>video_frame()</code> → JPEG bytes.</td></tr>
+  <tr><td><code>scanner</code></td><td>213</td><td><code>walk_files/walk_dirs</code> (iterative <code>os.scandir</code>), <code>scan</code> (incremental diff), <code>analyze</code> (parallel, batched commits), <code>index</code>.</td></tr>
+  <tr><td><code>actions</code></td><td>339</td><td><code>Action</code>, <code>BatchResult</code>, <code>apply</code>, <code>undo</code>, <code>reconcile</code>, <code>batches</code>, <code>operations</code>, <code>verified_copy</code>, <code>safe_move</code>, <code>recovery_size</code>, <code>empty_recovery</code>.</td></tr>
+  <tr><td><code>duplicates</code></td><td>142</td><td><code>confirm_identical</code> (size→quick→full funnel with hash caching), <code>keeper_score/keeper_reason</code>, <code>find_duplicates</code> → <code>DuplicateGroup</code>, <code>plan_removal</code>.</td></tr>
+  <tr><td><code>similar</code></td><td>253</td><td><code>similar_pairs</code> (threaded blocked Hamming + burst window), <code>find_similar</code> → <code>SimilarGroup</code>, <code>rank_group</code>, <code>find_blurry</code>, <code>BLUR_PRESETS</code>, <code>plan_recycle</code>.</td></tr>
+  <tr><td><code>organize</code></td><td>121</td><td><code>PATTERNS</code>, <code>plan_organize</code> → <code>OrganizePlan</code>, <code>plan_actions</code>, <code>empty_folders_after</code>.</td></tr>
+  <tr><td><code>tidy</code></td><td>85</td><td><code>CATEGORIES</code>, <code>find_tidy</code> → <code>TidyReport</code>, <code>empty_folders</code>, <code>plan_actions</code>.</td></tr>
+  <tr><td><code>health</code></td><td>104</td><td><code>run_health</code> → <code>HealthReport</code> (fingerprints, damage, decode check), <code>last_checked</code>.</td></tr>
+  <tr><td><code>compare</code></td><td>132</td><td><code>compare(lib, other)</code> → <code>CompareResult</code>, <code>plan_sync</code>.</td></tr>
+  <tr><td><code>videotools</code></td><td>372</td><td><code>CompressSettings</code>, <code>CompressResult</code>, <code>estimate</code>, <code>compress</code>, <code>compress_many</code>, <code>unique_path</code>, <code>publish_file</code>.</td></tr>
+  <tr><td><code>story</code></td><td>623</td><td><code>StyleOptions</code>, <code>TEMPLATES</code>, <code>render_story</code>, <code>render_carousel</code>, <code>export_stories</code>, <code>export_carousel</code>, <code>make_story_video</code>, <code>story_video_duration</code>.</td></tr>
+</table>
+<h3>UI</h3>
+<table>
+  <tr><th>Module</th><th>Lines</th><th>Responsibility</th></tr>
+  <tr><td><code>main_window</code></td><td>365</td><td>Sidebar (<code>NAV</code> groups), page stack, <code>WelcomePage</code>, task bar, toast; <code>open_library</code> (reconcile → set context → index), <code>open_sample</code>, <code>undo_batch</code>, <code>restore_last</code> (QSettings).</td></tr>
+  <tr><td><code>tasks</code></td><td>108</td><td><code>TaskRunner.run(title, fn(progress), on_done, on_cancel)</code>; signals <code>started/progressed/finished/error/busy_changed</code>.</td></tr>
+  <tr><td><code>widgets</code></td><td>668</td><td>Formatting helpers, <code>friendly_error</code>, layout helpers, <code>Tile/Banner/Card/EmptyState</code>, <code>AppContext</code>, <code>ThumbCache</code> (LRU 4,000 pixmaps), <code>PhotoModel/PhotoDelegate/PhotoGrid</code>, <code>Preview</code>, <code>ConfirmDialog</code>, <code>MessageDialog</code>, <code>Toast</code>.</td></tr>
+  <tr><td><code>pages/base</code></td><td>122</td><td><code>Page</code>: header, stale/refresh lifecycle, busy handling, <code>run</code>, <code>apply_actions</code> (the shared Confirm → Apply → Toast/Undo flow).</td></tr>
+  <tr><td><code>pages/*</code></td><td>≈2,800</td><td>One per tool. Story (817) and Video (636) include their own preview/probe worker threads.</td></tr>
+</table>
+</section>
+
+<section id="storage">
+<h2>Storage &amp; data model</h2>
+<p>Each library gets a hidden <code>.memoria</code> folder (Windows <code>FILE_ATTRIBUTE_HIDDEN</code>):</p>
+<table>
+  <tr><th>Path</th><th>Contents</th></tr>
+  <tr><td><code>.memoria\memoria.db</code></td><td>Catalogue + journal (SQLite, WAL, <code>synchronous=NORMAL</code>).</td></tr>
+  <tr><td><code>.memoria\thumbs.db</code></td><td>256 px JPEG thumbnails as BLOBs keyed by file id (separate file keeps the catalogue small and fast).</td></tr>
+  <tr><td><code>.memoria\recovery\&lt;batch-id&gt;\&lt;relative path&gt;</code></td><td>Files removed by a batch, mirroring their original folders.</td></tr>
+</table>
+<h3><code>files</code></h3>
+<table>
+  <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+  <tr><td><code>id</code></td><td>INTEGER PK</td><td>Stable across organise moves (row updated in place).</td></tr>
+  <tr><td><code>rel_path</code></td><td>TEXT UNIQUE NOCASE</td><td>Relative to library root — catalogue is portable between drive letters.</td></tr>
+  <tr><td><code>folder, name, ext, kind</code></td><td>TEXT</td><td><code>kind</code> ∈ image | video | other.</td></tr>
+  <tr><td><code>size, mtime</code></td><td>INTEGER, REAL</td><td>Change detection key.</td></tr>
+  <tr><td><code>qhash, chash</code></td><td>TEXT</td><td>Cached quick / full content hashes; cleared when size or mtime changes.</td></tr>
+  <tr><td><code>analyzed, error</code></td><td>INTEGER, TEXT</td><td>Analysis state; error text for unreadable media.</td></tr>
+  <tr><td><code>width, height</code></td><td>INTEGER</td><td>Upright (EXIF orientation applied).</td></tr>
+  <tr><td><code>taken_at, date_source</code></td><td>TEXT</td><td>ISO datetime; source ∈ exif | metadata | filename | modified.</td></tr>
+  <tr><td><code>camera, lat, lon, duration</code></td><td>TEXT, REAL</td><td>From EXIF / FFmpeg.</td></tr>
+  <tr><td><code>dhash</code></td><td>INTEGER</td><td>64-bit difference hash stored signed.</td></tr>
+  <tr><td><code>sharpness, brightness, contrast, clipped, faces</code></td><td>REAL / INTEGER</td><td>Quality metrics at 512 px; faces computed lazily (−1 = unavailable).</td></tr>
+  <tr><td><code>baseline_hash, baseline_size, baseline_mtime, checked_at</code></td><td>TEXT, INTEGER, REAL, TEXT</td><td>Health fingerprints — <i>not</i> cleared on change, so damage stays visible.</td></tr>
+</table>
+<p>Indexes: <code>size</code>, <code>taken_at</code>, <code>kind</code>.</p>
+<h3><code>batches</code> and <code>operations</code> (journal)</h3>
+<table>
+  <tr><th>Table</th><th>Columns</th></tr>
+  <tr><td><code>batches</code></td><td><code>id</code> (YYYYMMDD-HHMMSS-xxxxxx), <code>created_at</code>, <code>kind</code> (duplicates | similar | tidy | organize | sync), <code>title</code>, <code>status</code> (applying | applied | partial | undone | emptied | nothing), <code>files</code>, <code>bytes</code></td></tr>
+  <tr><td><code>operations</code></td><td><code>batch_id</code>, <code>seq</code>, <code>op</code> (recycle | move | copy | rmdir), <code>src</code>, <code>dst</code>, <code>size</code>, <code>hash</code>, <code>reason</code>, <code>status</code> (pending | done | failed | skipped | undone | purged), <code>error</code></td></tr>
+</table>
+</section>
+
+<section id="pipelines">
+<h2>Pipelines</h2>
+
+<h3 id="p-index">Indexing (<code>scanner.scan</code> + <code>scanner.analyze</code>)</h3>
+<ol>
+  <li><b>Walk</b> with an explicit stack over <code>os.scandir</code>, skipping <code>.memoria</code>, <code>$RECYCLE.BIN</code>,
+      <code>System Volume Information</code>; never follows links.</li>
+  <li><b>Diff</b> against the catalogue by lower-cased relative path: new rows inserted; rows whose size or mtime changed have
+      derived columns reset (<code>analyzed=0</code>); missing rows removed (with their thumbnails). One transaction.</li>
+  <li><b>Analyse</b> un-analysed media in a <code>ThreadPoolExecutor</code> (images: <code>WORKERS</code> threads; videos: a
+      smaller pool). Per image: open → <code>draft()</code> JPEG decode near 512 px → EXIF → transpose → resize to
+      <b>exactly</b> 512 px on the long side → dHash, Laplacian-variance sharpness, brightness, contrast, clipped share →
+      256 px thumbnail. Per video: <code>probe</code> + one frame at min(1 s, duration/2).</li>
+  <li><b>Date resolution:</b> EXIF <code>DateTimeOriginal</code> → <code>DateTimeDigitized</code> → <code>DateTime</code> →
+      video <code>creation_time</code> → regex on file name → file mtime (<code>modified</code>).</li>
+  <li><b>Commit</b> every 200 results (catalogue + thumbnails) so cancelled runs keep their progress.</li>
+</ol>
+<p>Errors (truncated, unidentified, no video stream) are stored per file and never abort the run.</p>
+
+<h3 id="p-dup">Exact duplicates (<code>duplicates.confirm_identical</code>)</h3>
+<pre><code>media files ──group by size──► sizes with ≥2 files ──quick_hash (5×64 KiB + size)──►
+groups with equal (size, qhash) ──full_hash (xxh3-128 of whole file)──► identical groups</code></pre>
+<p>Hashes are computed in parallel and cached in <code>qhash</code>/<code>chash</code>. The keeper is the minimum of
+<code>keeper_score</code> = (penalty, mtime, path length, path) where penalty = 3 for a copy-like name
+(<code>(1)</code>, <code>copy</code>, <code>_copy</code>, <code>duplicate</code>, <code>~1</code>) + 2 for a copy-like folder
+(backup, download, whatsapp, temp, export…) + 0.1 per folder level. <code>plan_removal</code> emits <code>recycle</code>
+actions with <code>hash</code> = group hash (forces a fresh full hash of each copy) and a <code>guard</code> = (keeper path,
+hash) verified once per batch.</p>
+
+<h3 id="p-sim">Similarity &amp; best shot (<code>similar</code>)</h3>
+<ol>
+  <li><b>Hash pairs:</b> 64-bit dHashes as <code>uint64</code>; for each 512-row block, XOR against 8,192-column tiles and
+      <code>np.bitwise_count</code> (≈32 MB per tile). Blocks run on a thread pool (NumPy releases the GIL). Pairs with
+      distance ≤ <code>threshold</code> (10) are unioned (disjoint-set).</li>
+  <li><b>Bursts:</b> capture times from EXIF/video metadata only (file-name dates are too coarse) are sorted; a sliding
+      window joins pairs ≤ 3 s apart with distance ≤ 16.</li>
+  <li><b>Collapse identical:</b> members are passed through <code>confirm_identical</code>; byte-identical files keep one
+      representative (they belong to Duplicates). Groups that fall to one member are dropped.</li>
+  <li><b>Faces:</b> computed lazily for group members only (OpenCV Haar, 640 px, thread-local classifier) and cached.</li>
+  <li><b>Rank:</b> <code>score = 0.55·log1p(sharp)/log1p(max_sharp) + 0.25·exposure + 0.08·pixels/max_pixels (+ 0.12·faces/max_faces)</code>,
+      where <code>exposure = 1 − min(1, 2.5·clipped + 0.6·|brightness−118|/118)</code>. Reasons are generated from the same
+      quantities.</li>
+  <li><b>Burst flag:</b> ≥3 members, all with capture times, spanning ≤ 3 s × members.</li>
+</ol>
+<p><b>Blurry:</b> <code>sharpness &lt; threshold</code> with presets strict 8 / normal 20 / lenient 45 (variance of the
+Laplacian at 512 px).</p>
+
+<h3 id="p-org">Organise (<code>organize.plan_organize</code>)</h3>
+<p>Eligible rows: media with a date, no error, size &gt; 0, not AppleDouble. Rows dated only by <code>modified</code> are
+counted as skipped unless <code>include_uncertain</code>. Destination = pattern folder + original name; clashes with existing
+or already-planned names (case-insensitive) get <code>" (n)"</code>. <code>empty_folders_after</code> walks every source
+folder's ancestors and returns those whose remaining file count (existing non-moving files + incoming destinations) is
+zero, deepest first, to append as <code>rmdir</code> actions.</p>
+
+<h3 id="p-tidy">Tidy (<code>tidy.find_tidy</code>)</h3>
+<p>Classifies catalogue rows: junk (names/extensions/<code>._</code> prefix) → empty (0 bytes) → unreadable (media with
+error) → other (non-media). Empty folders are computed from a recursive per-folder count that excludes files about to be
+removed, so folders containing only junk qualify. Plans recycle files first, then <code>rmdir</code> deepest-first.</p>
+
+<h3 id="p-health">Health (<code>health.run_health</code>)</h3>
+<p>Runs an incremental scan, then re-reads every file (thread pool, half the workers to be gentle on HDDs) computing the
+full hash and, for images, a reduced-size decode. Classification against the stored fingerprint: none → <i>new</i>;
+size+mtime equal and hash equal → <i>ok</i>, hash differs → <i>damaged</i>; size or mtime differ → <i>edited</i>; decode
+failure → <i>unreadable</i>. Fingerprints are refreshed except for damaged files, which stay flagged.</p>
+
+<h3 id="p-compare">Compare &amp; sync (<code>compare</code>)</h3>
+<p>Refuses overlapping folders. Lists the other folder without writing to it, then hashes only files whose size occurs on
+both sides (library hashes cached, other side hashed in memory). Results: only-here, only-there, in-both counts.
+<code>plan_sync</code> emits <code>copy</code> actions preserving relative paths; the executor's verified copy never
+overwrites (clashes get a new name).</p>
+
+<h3 id="p-video">Video compression (<code>videotools</code>)</h3>
+<ul>
+  <li><b>Output size:</b> limit applied to the shorter side (portrait-safe), even dimensions, Lanczos scaling.</li>
+  <li><b>Quality mode:</b> libx264 CRF 20 / 24 / 28 (high / balanced / small), preset medium, AAC ≤ 128 kbps (never above the
+      source), <code>-map_metadata 0 -movflags +faststart</code>.</li>
+  <li><b>Target mode:</b> two-pass ABR; video kbps = target × 97% payload / duration − audio; audio drops to 64 kbps when
+      video would be &lt; 400 kbps; floor 150 kbps (flagged infeasible with an explanation).</li>
+  <li><b>Progress:</b> <code>-progress pipe:1</code> parsing of <code>out_time_us</code>; pass 1 = first half.</li>
+  <li><b>Verification:</b> output must probe, match duration within max(0.5 s, 2%), and be smaller — else discarded.
+      Optional SSIM via FFmpeg's <code>ssim</code> filter over ≤ 600 sampled frames, source scaled to output size.</li>
+  <li><b>Publishing:</b> work in <code>.memoria-work-*</code> inside the output folder, rename to a unique
+      <code>&lt;stem&gt; (compressed).mp4</code>, copy source mtime. Cancellation kills FFmpeg and removes the work folder.</li>
+</ul>
+<p><b>Estimates</b> (no encoding): quality mode uses bits-per-pixel 0.09 / 0.055 / 0.032 × w × h × fps, capped at 90% of
+the source video bitrate.</p>
+
+<h3 id="p-story">Story rendering (<code>story</code>)</h3>
+<ul>
+  <li>Sizes: story 1080×1920, post 1080×1350, square 1080×1080. Photos loaded upright at ≤ 2,200 px.</li>
+  <li>Templates: single, duo, trio, grid4, before_after, polaroid (slots 1/2/3/4/2/1). Backgrounds: blurred darkened cover,
+      black, white or hex colour. Fit: contain, or cover with a centre-weighted edge-energy saliency focus.</li>
+  <li>Captions: Segoe UI fonts, word-wrapped, on a translucent pill with shadow.</li>
+  <li>Panorama carousel: N = round(aspect / 0.8) slides (2–10) cut from one continuous scaled strip, so edges match.</li>
+  <li>Story video: each photo pre-composed once (8% oversize for Ken Burns), per-frame zoom/pan via
+      <code>cv2.warpAffine</code>, crossfades via <code>cv2.addWeighted</code>, raw RGB piped to FFmpeg (libx264 CRF 20,
+      BT.709) by a writer thread with a 4-frame queue. Duration = n·spp − (n−1)·transition. Optional music with a 1 s fade.</li>
+  <li>Exports are all-or-nothing: on cancel, files written in that run are removed.</li>
+</ul>
+</section>
+
+<section id="executor">
+<h2>Action executor &amp; journal</h2>
+<p><code>actions.apply(lib, kind, title, actions, progress)</code> is the only code path that changes user files.</p>
+<pre><code>for each Action (in order):
+    preflight ── guards (keeper exists + full hash, verified once per batch)
+              ── src exists / folder empty (rmdir)
+              ── size == reviewed size, mtime == reviewed mtime
+              ── full_hash(src) == expected (recycle/move with hash)
+    fail?  → journal 'skipped' + reason, continue
+    dst   = recycle: recovery/&lt;batch&gt;/&lt;rel path&gt;   move/copy: requested path
+            made unique ("name (2).ext") — never overwrite
+    journal 'pending'
+    perform: recycle/move → safe_move (rename on same volume; else verified copy + remove)
+             copy         → verified_copy (tmp → hash compare → rename)
+             rmdir        → os.rmdir (only if empty)
+    journal 'done' | 'failed' + error
+update catalogue (remove recycled rows; rewrite moved rel_paths); batch status = applied | partial | nothing</code></pre>
+<h3>Undo</h3>
+<p>Processes <code>done</code> operations in reverse. Moves are reversed with <code>safe_move</code>; if the original path is
+taken the file is restored as a unique name and reported. Copies are removed only if their full hash still equals the
+recorded source hash. <code>rmdir</code> is reversed with <code>mkdir</code>. The batch becomes <code>undone</code> or
+<code>partial</code>; empty recovery sub-folders are pruned. The UI re-indexes afterwards.</p>
+<h3>Crash reconciliation</h3>
+<p><code>reconcile(lib)</code> runs whenever a library is opened. For each <code>pending</code> operation it inspects the
+disk: a move/recycle is <code>done</code> if the destination exists and the source does not; a copy is <code>done</code> if
+the destination hash matches (stray <code>.memoria-tmp</code> files are removed); otherwise <code>failed</code>. Batches left in
+<code>applying</code> become <code>partial</code> — and therefore undoable.</p>
+<h3>Recovery</h3>
+<p><code>recovery_size</code> walks the folder; <code>empty_recovery(lib, batch_ids=None)</code> deletes batch folders, marks
+their recycle operations <code>purged</code> and batches <code>emptied</code>. This is the only deleting function in the
+codebase.</p>
+</section>
+
+<section id="ui">
+<h2>UI architecture</h2>
+<ul>
+  <li><b>Page lifecycle:</b> pages listen to <code>library_opened</code>/<code>library_modified</code>, mark themselves stale and
+      refresh when visible and the runner is idle (never mid-task). <code>refresh()</code> does cheap catalogue reads;
+      expensive work goes through <code>run()</code>.</li>
+  <li><b>Shared change flow:</b> <code>Page.apply_actions</code> → <code>ConfirmDialog</code> → <code>runner.run(apply [+ index])</code>
+      → <code>library_modified</code> → toast with Undo (batch id) → failure dialog if needed.</li>
+  <li><b>PhotoGrid:</b> <code>QListView</code> (icon mode, uniform sizes, batched layout) + <code>PhotoModel</code> holding plain
+      dicts + <code>PhotoDelegate</code> custom painting (rounded thumbnail, badge, tick box, video tag, captions). Thumbnails
+      load on demand through <code>ThumbCache</code> (SQLite BLOB → <code>QPixmap</code>, LRU).</li>
+  <li><b>Preview:</b> full image decoded at 900 px via <code>media.load_for_display</code> (draft decode keeps it fast).</li>
+  <li><b>Styling:</b> one Qt stylesheet (<code>theme.QSS</code>) using object names (<code>primary</code>, <code>danger</code>,
+      <code>card</code>, <code>tile</code>, <code>trust</code>…); Fusion style for consistent rendering.</li>
+  <li><b>Persistence:</b> <code>QSettings("Memoria","Memoria")</code> stores last library, last page and recent libraries.</li>
+</ul>
+</section>
+
+<section id="concurrency">
+<h2>Concurrency model</h2>
+<table>
+  <tr><th>Thread</th><th>Does</th><th>Rules</th></tr>
+  <tr><td>Qt main thread</td><td>UI, cheap catalogue reads in <code>refresh()</code>, thumbnail BLOB reads</td><td>Never runs long work.</td></tr>
+  <tr><td>TaskRunner worker (QThread)</td><td>One engine call at a time; all catalogue writes except schema creation and journal reconciliation when a library is opened</td><td>Single task enforces "no two file operations at once".</td></tr>
+  <tr><td>Engine thread pools</td><td>Decode/analyse, hash, faces, similarity blocks, health reads</td><td>Pure functions; results returned to the worker which writes to SQLite.</td></tr>
+  <tr><td>Story preview thread</td><td>Debounced (250 ms) preview rendering at half size</td><td>Latest request wins; never touches the runner.</td></tr>
+  <tr><td>Video probe thread</td><td>Probes ticked videos lazily for estimates</td><td>Cached by path.</td></tr>
+  <tr><td>Story-video writer thread</td><td>Pipes frames to FFmpeg while the next frame renders</td><td>Bounded queue (4).</td></tr>
+</table>
+<p>SQLite: each thread gets its own connection via <code>threading.local</code>; WAL allows concurrent readers with one
+writer; <code>BEGIN IMMEDIATE</code> transactions; 30 s busy timeout. Cancellation is cooperative through a shared
+<code>threading.Event</code> checked by <code>Progress.update/check</code>; <code>apply</code> and <code>undo</code> stop between
+operations and record the batch as partial.</p>
+</section>
+
+<section id="performance">
+<h2>Performance</h2>
+<p>Measured with <code>tools\benchmark.py --photos 1000</code> (1,050 files: 6 MP JPEGs + 5% copies, 1.02 GB) on a 32-core
+Windows machine with an SSD. Expect lower absolute numbers on laptops.</p>
+<table>
+  <tr><th>Stage</th><th>Time</th><th>Throughput / note</th></tr>
+  <tr><td>Scan (walk + catalogue)</td><td>0.02 s</td><td>—</td></tr>
+  <tr><td>Analyse (EXIF, thumbnails, dHash, quality)</td><td>5.9 s</td><td>≈178 photos/s, ≈172 MB/s</td></tr>
+  <tr><td>Rescan, nothing changed</td><td>0.01 s</td><td>size+mtime diff only</td></tr>
+  <tr><td>Find duplicates (first / cached)</td><td>0.14 s / 0.01 s</td><td>only size collisions are read</td></tr>
+  <tr><td>Find similar (incl. faces for group members)</td><td>5.6 s</td><td>dominated by face detection on ~1,000 grouped photos</td></tr>
+  <tr><td>Health check (full read)</td><td>3.5 s</td><td>≈290 MB/s</td></tr>
+  <tr><td>Similarity pairs, 50,000 / 100,000 hashes</td><td>1.1 s / 4.2 s</td><td>was 50 s for 100k before threading and the burst window</td></tr>
+  <tr><td>Story video 1080×1920 with Ken Burns</td><td>—</td><td>≈96 fps end-to-end</td></tr>
+  <tr><td>Compress 4 s 720p clip (quality + SSIM)</td><td>1.45 s</td><td>4.6 MB → 1.3 MB, SSIM 0.994</td></tr>
+</table>
+<h3>Techniques</h3>
+<ul>
+  <li>JPEG DCT-domain downscaling via <code>Image.draft</code>; Pillow, NumPy and xxhash release the GIL so threads scale.</li>
+  <li>Batched transactions (200 rows), WAL, <code>synchronous=NORMAL</code>, 32 MB page cache, separate thumbnail DB.</li>
+  <li>Size-first duplicate funnel and cached hashes; compare hashes only cross-side size collisions.</li>
+  <li>Tiled, threaded <code>bitwise_count</code> similarity with bounded memory; O(n log n) burst detection.</li>
+  <li>Grid renders only visible cells; pixmaps cached LRU.</li>
+</ul>
+</section>
+
+<section id="config">
+<h2>Configuration constants</h2>
+<table>
+  <tr><th>Constant</th><th>Value</th><th>Where</th></tr>
+  <tr><td><code>THUMB_SIZE</code> / <code>ANALYSIS_SIZE</code></td><td>256 / 512 px</td><td>config</td></tr>
+  <tr><td><code>SAMPLE_BYTES</code> × <code>SAMPLE_POINTS</code></td><td>64 KiB × 5</td><td>config (quick hash)</td></tr>
+  <tr><td><code>WORKERS</code></td><td>max(2, min(12, CPU count))</td><td>config</td></tr>
+  <tr><td>Similar threshold / burst window / burst threshold</td><td>10 bits / 3 s / 16 bits</td><td>similar.find_similar</td></tr>
+  <tr><td><code>BLUR_PRESETS</code></td><td>strict 8 · normal 20 · lenient 45</td><td>similar</td></tr>
+  <tr><td>Best-shot weights</td><td>0.55 sharp · 0.25 exposure · 0.08 resolution · 0.12 faces</td><td>similar.rank_group</td></tr>
+  <tr><td><code>QUALITY_CRF</code></td><td>high 20 · balanced 24 · small 28</td><td>videotools</td></tr>
+  <tr><td><code>MIN_VIDEO_KBPS</code> / payload share / SSIM frames</td><td>150 / 97% / 600</td><td>videotools</td></tr>
+  <tr><td>Story <code>LOAD_SIDE</code> / JPEG quality / Ken Burns zoom</td><td>2,200 px / 92 / 8%</td><td>story</td></tr>
+  <tr><td>ThumbCache capacity</td><td>4,000 pixmaps</td><td>widgets</td></tr>
+  <tr><td>Toast duration</td><td>10 s (6 s for informational)</td><td>widgets / main_window</td></tr>
+</table>
+</section>
+
+<section id="testing">
+<h2>Testing</h2>
+<p><b>65 tests</b>, ≈50 s: <code>.\.venv\Scripts\python -m pytest -q</code></p>
+<table>
+  <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
+  <tr><td><code>test_engine.py</code></td><td>27</td><td>Hash pre-filter semantics; incremental scan; counts, errors, dates and date sources; EXIF rotation; HEIC and video analysis; duplicate groups vs ground truth incl. the &gt;1.28 MB regression; removal + undo restores an identical tree; changed keeper/copy are skipped; user keeper override/exclusion; bursts and best frame; near-duplicates prefer original; exact copies and screenshots excluded from Similar; blur detection; organise plan/apply/undo and uncertain dates; tidy categories and apply/undo (folders recreated); health baseline, bit-flip damage, edit detection; compare read-only + two-way sync + undo; overlapping folder rejection; verified copy failure leaves nothing; never overwrites; crash reconciliation; cancellation; Empty Recovery.</td></tr>
+  <tr><td><code>test_video.py</code> + <code>test_story.py</code></td><td>37</td><td>Compression shrinks and verifies, sources untouched, no overwrite, target mode within tolerance, cancellation cleans up; story sizes, every template, panorama seams, EXIF-rotated input, story-video duration and resolution.</td></tr>
+  <tr><td><code>test_ui_smoke.py</code></td><td>1</td><td>Drives the real window offscreen through every page (find, preview, plan, health, compare, story preview, video compress), applies a duplicate removal through the confirmation flow, undoes it from History, and asserts no UI exceptions and an empty Recovery.</td></tr>
+</table>
+<h3>Ground-truth library</h3>
+<p><code>memoria/samplelib.py</code> deterministically generates procedural landscape photos (sky gradient, sun, ridges,
+trees, buildings, film grain) with EXIF dates, cameras, GPS and orientation, then derives every scenario a tool must
+handle, recording expectations in <code>expected.json</code> (<code>duplicate_groups</code>, <code>bursts</code> with
+<code>best</code>, <code>near_duplicates</code>, <code>blurry</code>, <code>junk</code>, <code>empty_files</code>,
+<code>empty_folders</code>, <code>corrupt</code>, <code>non_media</code>, <code>rotated</code>, <code>dates</code>,
+<code>uncertain_dates</code>, <code>large_duplicates</code>, <code>videos</code>, <code>heic</code>). Tests build a
+<code>--small</code> variant once per session, index it once, and copy it per test.</p>
+<h3>Tooling</h3>
+<pre><code>.\.venv\Scripts\python tools\make_test_library.py [DEST] [--small] [--no-video]
+.\.venv\Scripts\python tools\ui_screenshots.py LIBRARY OUT_DIR     # offscreen; set QT_QPA_FONTDIR for fonts
+.\.venv\Scripts\python tools\benchmark.py [WORK_DIR] --photos 1000
+.\.venv\Scripts\python tools\make_icon.py</code></pre>
+</section>
+
+<section id="build">
+<h2>Build &amp; run</h2>
+<table>
+  <tr><th>Task</th><th>Command</th></tr>
+  <tr><td>First run / start</td><td><code>.\run.ps1</code> (creates <code>.venv</code>, installs <code>requirements.txt</code>, starts with <code>pythonw</code>)</td></tr>
+  <tr><td>Open a library directly</td><td><code>.\run.ps1 "D:\Photos"</code> or <code>python -m memoria "D:\Photos"</code></td></tr>
+  <tr><td>Standalone app</td><td><code>.\build.ps1</code> → <code>dist\Memoria\Memoria.exe</code> (PyInstaller one-folder, windowed, ≈380 MB)</td></tr>
+</table>
+<p><code>build.ps1</code> regenerates the icon, bundles <code>memoria/ui/assets</code>, collects the imageio-ffmpeg binary and
+OpenCV data (Haar cascades), and excludes unused Qt modules (WebEngine, QML/Quick, 3D, Multimedia, PDF) plus tkinter and
+pytest. The packaged app was verified to index the test library with HEIC decoding and FFmpeg probing working.</p>
+<p>Generated artefacts are ignored by git: <code>.venv/</code>, <code>build/</code>, <code>dist/</code>, <code>*.spec</code>,
+<code>__pycache__/</code>, <code>.pytest_cache/</code>, <code>test-library/</code>, <code>shots/</code>, any <code>.memoria/</code>,
+<code>.memoria-work-*/</code>, <code>*.memoria-tmp</code>, <code>*.zip</code>, logs and editor/OS files.</p>
+</section>
+
+<section id="extend">
+<h2>Extending Memoria</h2>
+<h3>Adding a tool that changes files</h3>
+<ol>
+  <li>Engine: write a <code>find_*</code> function (read-only, accepts <code>progress</code>) and a <code>plan_*</code> function
+      returning <code>list[Action]</code>. Set <code>size</code>/<code>mtime</code> (and <code>hash</code>/<code>guards</code> when
+      identity matters) so pre-flight can detect stale reviews. Use <code>op="recycle"</code> for removals.</li>
+  <li>Add ground-truth scenarios to <code>samplelib.build</code> and assertions to <code>tests/test_engine.py</code>, including
+      apply → undo restores the tree.</li>
+  <li>UI: subclass <code>pages.base.Page</code>, set <code>title/subtitle</code>, implement <code>refresh()</code> and
+      <code>on_busy_changed()</code>, run finds through <code>self.run()</code>, and apply through
+      <code>self.apply_actions(kind, title, actions, summary=…, details=…, confirm_text=…, note=recovery_note(), done_message=…)</code>.</li>
+  <li>Register the page in <code>main_window.NAV</code> and <code>page_classes</code>, add a card to Overview, and extend
+      <code>tools/ui_screenshots.py</code> so the smoke test drives it.</li>
+</ol>
+<h3>Rules for contributors</h3>
+<ul>
+  <li>Never call <code>os.remove</code>, <code>shutil.rmtree</code> or <code>os.replace</code> on user files outside
+      <code>actions.py</code>.</li>
+  <li>Engine modules must not import Qt.</li>
+  <li>Every subprocess uses <code>CREATE_NO_WINDOW</code>; every long loop calls <code>progress.update</code>.</li>
+  <li>New user-facing strings follow the writing guidelines in the <a href="design.html#copy">design document</a>.</li>
+</ul>
+</section>
+
+<section id="deps">
+<h2>Dependencies &amp; licences</h2>
+<table>
+  <tr><th>Package</th><th>Used for</th><th>Licence (check before redistributing binaries)</th></tr>
+  <tr><td>PySide6 (Qt 6)</td><td>UI</td><td>LGPL-3.0</td></tr>
+  <tr><td>NumPy</td><td>metrics, similarity, frames</td><td>BSD-3-Clause</td></tr>
+  <tr><td>Pillow</td><td>decode, EXIF, render</td><td>MIT-CMU (HPND)</td></tr>
+  <tr><td>pillow-heif</td><td>HEIC/HEIF/AVIF</td><td>BSD-3-Clause (bundles libheif, LGPL)</td></tr>
+  <tr><td>xxhash</td><td>content hashes</td><td>BSD-2-Clause</td></tr>
+  <tr><td>imageio-ffmpeg</td><td>FFmpeg binary (probe, x264, SSIM)</td><td>BSD-2-Clause wrapper; the bundled FFmpeg build includes GPL components (libx264)</td></tr>
+  <tr><td>opencv-python-headless &lt; 5</td><td>Haar faces, fast warps</td><td>Apache-2.0 (OpenCV 5 removed the Haar cascades)</td></tr>
+  <tr><td>pytest, PyInstaller</td><td>tests, packaging</td><td>MIT; GPL-2.0 with bootloader exception</td></tr>
+</table>
+<div class="callout warn">Publishing the source is unaffected, but distributing <code>dist\Memoria</code> means distributing
+LGPL (Qt, libheif) and GPL (FFmpeg/x264) binaries — include the licence texts and offer corresponding source.</div>
+</section>
+
+<section id="legacy">
+<h2>Legacy CLI bugs fixed</h2>
+<table>
+  <tr><th>Bug</th><th>Effect</th><th>Fix</th></tr>
+  <tr><td>Files &gt; 1.28 MB stored a sampled hash as <code>hash_full</code>; execute/verify compared against a real full hash</td>
+    <td>Every large duplicate skipped as "KEEPER CHANGED"; every large file reported "CORRUPTED"</td>
+    <td>Sampled hashes only filter; identity always from full hashes (regression test).</td></tr>
+  <tr><td>Only the keeper was re-checked before moving copies</td><td>A copy edited after the report could be moved</td>
+    <td>Each copy re-hashed in pre-flight.</td></tr>
+  <tr><td>Startup printed <code>⚠</code> through cp1252 when output was redirected</td><td>Crash</td><td>No console I/O in the app.</td></tr>
+  <tr><td>Reverse geocoding via an online service</td><td>Privacy leak</td><td>Removed.</td></tr>
+  <tr><td>README described non-existent modules/commands</td><td>Confusion</td><td>Rewritten docs.</td></tr>
+</table>
+</section>
+
+<section id="limits">
+<h2>Known limitations</h2>
+<ul>
+  <li>Blur thresholds and best-shot weights were calibrated on generated images; real libraries may need tuning.</li>
+  <li>Some pages load the full catalogue into memory on refresh (fine to tens of thousands of files; very large libraries may
+      need pagination).</li>
+  <li>RAW previews depend on what Pillow can decode; RAW files are still catalogued and de-duplicated.</li>
+  <li>Network shares are untested; cross-volume moves fall back to verified copy + delete.</li>
+  <li>The packaged app is unsigned (SmartScreen will warn) and ≈380 MB.</li>
+</ul>
+</section>
+
+<footer>Memoria technical document · see also <a href="design.html">Design</a> and <a href="features.html">Features</a></footer>
+</main>
+</div>
+</body>
+</html>
