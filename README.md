@@ -3,7 +3,7 @@
 A private, offline photo and video manager for Windows, built to be easy to trust.
 
 Memoria looks after a personal photo library:
-- finds exact duplicates and look-alike shots, and picks the best photo of a burst;
+- finds exact duplicates — including whole duplicate folders — and look-alike shots, and picks the best photo of a burst;
 - clears junk files and files photos into date folders;
 - detects silent file damage and compares the library with a backup;
 - makes Instagram stories and story videos, and smaller copies of videos for sharing.
@@ -96,7 +96,7 @@ No library handy? On the welcome screen choose **Try it on a sample library**. I
 |---|---|---|
 | **Overview** | Totals, years covered, safety status, and what each tool would do for this library. | Nothing |
 | **Photos & videos** | Timeline (year → month), search, filters, zoom, viewer and a large preview. The preview shows the date and where it came from, camera, GPS and problems. **Batch actions** on a selection. | Nothing, unless you run a batch action |
-| **Duplicates** | Byte-identical copies, grouped. Memoria explains which copy it keeps; you can choose another or exclude a group. | Moves copies to Recovery |
+| **Duplicates** | Whole duplicate folders first (same files, or all inside a bigger folder), shown at the highest level with size, photo and video counts and sizes; then byte-identical single copies. Memoria explains which copy or folder it keeps; you can choose another or exclude any. | Moves copies or whole folders to Recovery |
 | **Similar & best shots** | Bursts, retakes and resized copies, with an explained best pick. The *Similar videos* tab finds re-encoded and trimmed copies. A *Blurry photos* tab has three sensitivities, and nothing is pre-ticked. | Moves ticked items to Recovery |
 | **Tidy up** | Thumbs.db, desktop.ini, .DS_Store, `._` files, partial downloads, empty files and folders. Unreadable media and stray documents start unticked. | Moves files to Recovery; removes empty folders (undo recreates them) |
 | **Organise by date** | Moves files into `2024\2024-07`-style folders using the camera date, then a date in the file name. Files dated only by modified time are skipped unless you opt in. | Moves files inside the library |
@@ -130,7 +130,7 @@ The [Features guide](docs/features.html) explains every option.
 
 | Duplicates | Similar & best shots |
 |---|---|
-| ![Duplicates](docs/images/duplicates.png) | ![Similar](docs/images/similar.png) |
+| ![Duplicate folders](docs/images/duplicates-folders.png) | ![Similar](docs/images/similar.png) |
 | **Editor (photo)** | **Editor (video)** |
 | ![Editor photo](docs/images/editor-crop.png) | ![Editor video](docs/images/editor-video.png) |
 | **Story maker** | **Video compressor** |
@@ -202,7 +202,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 120 tests, about 2 minutes
+.\.venv\Scripts\python -m pytest -q                       # 126 tests, about 2 minutes
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 ```
@@ -210,6 +210,9 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | Suite | Tests | Proves |
 |---|---|---|
 | `tests/test_engine.py` | 27 | Results match ground truth: duplicates (including files over 1.28 MB), bursts and best frame, near-duplicates, blur, dates and their sources, rotation, HEIC, video, tidy, organise. Safety: changed files are skipped, nothing is overwritten, copies are verified, undo restores an identical tree, crash reconciliation, cancellation, Empty Recovery. |
+| `tests/test_dupfolders.py` | 6 | Duplicate folders: nested copies shown once at the top, contained and renamed folders, folder sizes and counts, clean-up and undo restore the exact tree, changed or new files keep their folder. |
+| `tests/test_photoedit.py` | 20 | Photo edits: exact rotate/flip/crop, straighten, adjustments, formats, EXIF and GPS handling, split and join, cancellation. |
+| `tests/test_videoedit.py` | 12 | Video edits: trim, speed, rotate, crop, mute, split, join, frame export, cancellation. |
 | `tests/test_safety.py` | 11 | Unplugged drive and unreadable folders, undo keeps catalogue rows, library lock, schema migrations, paths over 260 characters. |
 | `tests/test_videosim.py` | 7 | Similar videos match ground truth, signature cache, cancellation, undo. |
 | `tests/test_batch.py` | 5 | Batch copy, move and recycle with undo; Check everything is read-only and correct. |
@@ -218,7 +221,8 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_ui_smoke.py` | 1 | Drives the real window offscreen through every page, runs Check everything and a batch action, applies and undoes changes, and repeats in the dark theme. |
 
 The **test library** (`tools\make_test_library.py [DEST] [--small]`) is a deterministic library of generated photos. It
-includes camera, phone and backup folders; exact duplicates (including 6 MB files); 5-frame bursts with a known best
+includes camera, phone and backup folders; exact duplicates (including 6 MB files); a nested album copied whole to an old
+laptop folder and a USB stick holding some camera photos; 5-frame bursts with a known best
 frame; WhatsApp-style copies; blurry shots; EXIF-rotated portraits; HEIC; screenshots and other files dated only by file
 name; junk; empty files and folders; a truncated JPEG; documents; and videos. Its `expected.json` lists what every tool
 should find.

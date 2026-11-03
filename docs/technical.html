@@ -24,6 +24,7 @@
   <a href="#pipelines">Pipelines</a>
   <a class="sub" href="#p-index">Indexing</a>
   <a class="sub" href="#p-dup">Exact duplicates</a>
+  <a class="sub" href="#p-dupfolders">Duplicate folders</a>
   <a class="sub" href="#p-sim">Similarity &amp; best shot</a>
   <a class="sub" href="#p-org">Organise</a>
   <a class="sub" href="#p-tidy">Tidy</a>
@@ -54,7 +55,7 @@
   <p>How Memoria is built: architecture, modules, data model, algorithms, the journaled executor that makes every
   change undoable, concurrency, performance, testing and packaging.</p>
   <div class="meta"><span class="pill">Python 3.12</span><span class="pill">PySide6 6.12</span><span class="pill">SQLite (WAL)</span>
-  <span class="pill">NumPy · Pillow · OpenCV 4 · FFmpeg 7</span><span class="pill">v1.2 · ≈14,100 lines incl. tests</span></div>
+  <span class="pill">NumPy · Pillow · OpenCV 4 · FFmpeg 7</span><span class="pill">v1.3 · ≈14,800 lines incl. tests</span></div>
 </header>
 
 <section id="overview">
@@ -148,7 +149,7 @@ signals (<code>library_opened</code>, <code>library_modified</code>, <code>toast
   <tr><td><code>ffmpeg</code></td><td>104</td><td><code>ffmpeg_exe()</code> (imageio-ffmpeg), <code>run_ffmpeg</code> (no console window), <code>probe()</code> → <code>VideoInfo</code> (parses <code>ffmpeg -i</code>), <code>video_frame()</code> → JPEG bytes.</td></tr>
   <tr><td><code>scanner</code></td><td>244</td><td><code>walk_files/walk_dirs</code> (iterative <code>os.scandir</code>, long-path aware, reports unreadable folders), <code>scan</code> (incremental diff; raises <code>LibraryUnavailable</code>; never removes rows under unreadable folders), <code>analyze</code> (parallel, batched commits), <code>index</code>.</td></tr>
   <tr><td><code>actions</code></td><td>393</td><td><code>Action</code>, <code>BatchResult</code>, <code>apply</code>, <code>record_created</code>, <code>undo</code>, <code>reconcile</code>, <code>batches</code>, <code>operations</code>, <code>verified_copy</code>, <code>safe_move</code>, <code>recovery_size</code>, <code>empty_recovery</code>.</td></tr>
-  <tr><td><code>duplicates</code></td><td>142</td><td><code>confirm_identical</code> (size→quick→full funnel with hash caching), <code>keeper_score/keeper_reason</code>, <code>find_duplicates</code> → <code>DuplicateGroup</code>, <code>plan_removal</code>.</td></tr>
+  <tr><td><code>duplicates</code></td><td>474</td><td><code>confirm_identical</code> (size→quick→full funnel with hash caching), <code>find_all</code> → <code>DuplicateReport</code> (<code>groups</code>, <code>folders</code>, <code>loose_groups</code>), <code>find_duplicate_folders</code> → <code>FolderMatch</code>/<code>FolderInfo</code>, <code>plan_cleanup</code>, <code>keeper_score/keeper_reason</code>, <code>find_duplicates</code> → <code>DuplicateGroup</code>, <code>plan_removal</code>.</td></tr>
   <tr><td><code>similar</code></td><td>253</td><td><code>similar_pairs</code> (threaded blocked Hamming + burst window), <code>find_similar</code> → <code>SimilarGroup</code>, <code>rank_group</code>, <code>find_blurry</code>, <code>BLUR_PRESETS</code>, <code>plan_recycle</code>.</td></tr>
   <tr><td><code>organize</code></td><td>121</td><td><code>PATTERNS</code>, <code>plan_organize</code> → <code>OrganizePlan</code>, <code>plan_actions</code>, <code>empty_folders_after</code>.</td></tr>
   <tr><td><code>tidy</code></td><td>85</td><td><code>CATEGORIES</code>, <code>find_tidy</code> → <code>TidyReport</code>, <code>empty_folders</code>, <code>plan_actions</code>.</td></tr>
@@ -248,6 +249,32 @@ groups with equal (size, qhash) ──full_hash (xxh3-128 of whole file)──�
 actions with <code>hash</code> = group hash (forces a fresh full hash of each copy) and a <code>guard</code> = (keeper path,
 hash) verified once per batch.</p>
 
+<h3 id="p-dupfolders">Duplicate folders (<code>duplicates.find_all</code>, <code>find_duplicate_folders</code>, <code>plan_cleanup</code>)</h3>
+<ol>
+  <li><b>One funnel:</b> <code>find_all</code> runs <code>confirm_identical</code> once over every non-junk, non-empty file
+      (media and documents) and derives the media groups shown as single files from it.</li>
+  <li><b>Folder contents:</b> every folder (with its sub-folders) accumulates a <code>FolderInfo</code> (files, photos, videos,
+      others, their bytes, sub-folders) and a multiset of content hashes. Junk and 0-byte files count towards sizes but not
+      contents. A folder holding any file with no copy anywhere cannot be a duplicate.</li>
+  <li><b>Top folders:</b> a parent holding exactly what its child holds (nothing else) is the same folder; chains collapse
+      to the highest one.</li>
+  <li><b>same:</b> top folders with equal multisets (never nested). <b>inside:</b> for each top folder, the ancestors of each
+      copy of its rarest content are walked upwards; the first folder whose multiset contains it is a container. Originals
+      win over backup/download-looking folders, then fewer files.</li>
+  <li><b>Highest level only:</b> a match is dropped when a parent of the folder is already a duplicate of a folder that holds
+      the other side (e.g. <code>Old Laptop\Pictures\Family 2020\Picnic</code> ≡ <code>Albums\Family 2020\Picnic</code> is
+      implied by <code>Old Laptop</code> ≡ <code>Albums</code>). Matches are ordered shallow-first so one representative of
+      a collapsed set survives when a third copy exists elsewhere.</li>
+  <li><b>Single files:</b> <code>DuplicateReport.loose_groups(keepers)</code> removes copies inside folders being removed;
+      groups that fall below two copies disappear (their copies are handled with the folder).</li>
+  <li><b>Plan:</b> <code>plan_cleanup</code> takes the outermost folders to remove, then for each file finds an identical copy
+      that stays (outside every removed folder and not removed by the file plan; best <code>keeper_score</code>). A folder
+      with any file lacking such a copy is dropped and the check repeats. Files get <code>recycle</code> actions guarded by that
+      copy (junk and 0-byte files go along unguarded); folders get <code>rmdir</code> actions deepest-first, which pre-flight
+      skips unless the folder is empty.</li>
+</ol>
+<p>Cost is O(files × folder depth) in memory after hashing: ≈0.1 s for the sample library with cached hashes.</p>
+
 <h3 id="p-sim">Similarity &amp; best shot (<code>similar</code>)</h3>
 <ol>
   <li><b>Hash pairs:</b> 64-bit dHashes as <code>uint64</code>; for each 512-row block, XOR against 8,192-column tiles and
@@ -337,7 +364,7 @@ the source video bitrate.</p>
 
 <section id="p-checkup">
 <h2>Check everything &amp; batch actions</h2>
-<p><code>checkup.run</code> calls <code>scanner.index</code>, <code>duplicates.find_duplicates</code>,
+<p><code>checkup.run</code> calls <code>scanner.index</code>, <code>duplicates.find_all</code>,
 <code>similar.find_similar</code>, <code>videosim.find_similar_videos</code>, <code>similar.find_blurry</code>,
 <code>tidy.find_tidy</code> and <code>organize.plan_organize</code>, each with a <code>StepProgress</code>. The UI stores the
 results in <code>AppContext</code> tagged with the library <i>generation</i>; pages use them only while the generation is
@@ -520,13 +547,14 @@ Windows machine with an SSD. Expect lower absolute numbers on laptops.</p>
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>120 tests</b>, ≈2 min: <code>.\.venv\Scripts\python -m pytest -q</code></p>
+<p><b>126 tests</b>, ≈2 min: <code>.\.venv\Scripts\python -m pytest -q</code></p>
 <table>
   <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
   <tr><td><code>test_engine.py</code></td><td>27</td><td>Hash pre-filter semantics; incremental scan; counts, errors, dates and date sources; EXIF rotation; HEIC and video analysis; duplicate groups vs ground truth incl. the &gt;1.28 MB regression; removal + undo restores an identical tree; changed keeper/copy are skipped; user keeper override/exclusion; bursts and best frame; near-duplicates prefer original; exact copies and screenshots excluded from Similar; blur detection; organise plan/apply/undo and uncertain dates; tidy categories and apply/undo (folders recreated); health baseline, bit-flip damage, edit detection; compare read-only + two-way sync + undo; overlapping folder rejection; verified copy failure leaves nothing; never overwrites; crash reconciliation; cancellation; Empty Recovery.</td></tr>
   <tr><td><code>test_video.py</code> + <code>test_story.py</code></td><td>37</td><td>Compression shrinks and verifies, sources untouched, no overwrite, target mode within tolerance, cancellation cleans up; story sizes, every template, panorama seams, EXIF-rotated input, story-video duration and resolution.</td></tr>
   <tr><td><code>test_safety.py</code></td><td>11</td><td>Unplugged drive, unreadable folder, real deletions still removed, undo keeps ids/thumbnails/fingerprints, organise undo keeps ids, Empty Recovery drops parked rows, cross-process lock, re-entrant lock released on close, schema migration from v1, refusal of newer catalogues, paths over 260 characters.</td></tr>
   <tr><td><code>test_videosim.py</code></td><td>7</td><td>Similar-video groups and best pick vs ground truth, identical copies excluded, signature cache and invalidation, cancellation, recycle/undo round trip.</td></tr>
+  <tr><td><code>test_dupfolders.py</code></td><td>6</td><td>Nested copies reported once at the top folder, contained folders, renamed copies, junk ignored, folder stats (counts and sizes), originals preferred as containers, remaining file groups, keeper override, folder clean-up + undo restores the exact tree, a changed kept copy or a new file keeps the folder, no remaining copy → not planned, ground truth on the sample library.</td></tr>
   <tr><td><code>test_photoedit.py</code></td><td>20</td><td>Identity recipe, exact rotate/flip pixel mapping, pixel-exact crops and aspect boxes, straighten leaves no empty corners, adjustments move the right way, filters, resize never upscales, EXIF date kept + Orientation reset + GPS stripped, formats/quality, PNG alpha, HEIC → JPEG, split tiles reassemble exactly, join sizes and cap, size estimate, partial failures, cancellation leaves nothing.</td></tr>
   <tr><td><code>test_videoedit.py</code></td><td>12</td><td>Rotated sources baked upright, recipe planning, trim without overwrite, default output folder, speed changes duration and keeps audio, rotate/crop/mute/max height, fast filtered preview frames, split points, join landscape + portrait, frame extraction, cancelled export/split leave nothing.</td></tr>
   <tr><td><code>test_batch.py</code></td><td>5</td><td>Copy to folder (verified, no overwrite, undo), move within library (rows follow, undo), refusals, batch recycle/undo, Check everything is read-only and matches ground truth with step progress.</td></tr>
@@ -539,7 +567,8 @@ trees, buildings, film grain) with EXIF dates, cameras, GPS and orientation, the
 handle, recording expectations in <code>expected.json</code> (<code>duplicate_groups</code>, <code>bursts</code> with
 <code>best</code>, <code>near_duplicates</code>, <code>blurry</code>, <code>junk</code>, <code>empty_files</code>,
 <code>empty_folders</code>, <code>corrupt</code>, <code>non_media</code>, <code>rotated</code>, <code>dates</code>,
-<code>uncertain_dates</code>, <code>large_duplicates</code>, <code>videos</code>, <code>heic</code>, <code>similar_videos</code>). Tests build a
+<code>uncertain_dates</code>, <code>large_duplicates</code>, <code>videos</code>, <code>heic</code>, <code>similar_videos</code>,
+<code>duplicate_folders</code>). Tests build a
 <code>--small</code> variant once per session, index it once, and copy it per test.</p>
 <h3>Tooling</h3>
 <pre><code>.\.venv\Scripts\python tools\make_test_library.py [DEST] [--small] [--no-video]

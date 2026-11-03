@@ -201,7 +201,8 @@ BUILD_STEPS = [
     "Making WhatsApp-style photo copies…", "Shooting bursts…", "Adding blurry shots…",
     "Adding screenshots and downloads…", "Adding an iPhone HEIC photo…", "Adding problem files…",
     "Recording videos…", "Copying a duplicate video…", "Making a compressed video copy…",
-    "Making a trimmed video copy…", "Recording an unrelated video…", "Writing the answer key…",
+    "Making a trimmed video copy…", "Recording an unrelated video…", "Copying whole folders…",
+    "Writing the answer key…",
 ]
 
 
@@ -222,7 +223,7 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True, p
     exp: dict = {"duplicate_groups": [], "bursts": [], "near_duplicates": [], "blurry": [], "junk": [],
                  "empty_files": [], "empty_folders": [], "corrupt": [], "non_media": [], "rotated": [],
                  "dates": {}, "uncertain_dates": [], "large_duplicates": [], "videos": [], "heic": [],
-                 "similar_videos": []}
+                 "similar_videos": [], "duplicate_folders": []}
     seed = 1000
     originals: list[tuple[str, datetime]] = []
     scale = 0.5 if small else 1.0
@@ -436,6 +437,39 @@ def build(dest: Path = DEFAULT_DEST, small: bool = False, videos: bool = True, p
             exp["videos"].append(r)
             exp["dates"][r] = {"date": created.isoformat(sep=" "), "source": "metadata"}
     exp["similar_videos"].sort(key=lambda g: g["files"])
+
+    # 12. Duplicate folders: a nested family album copied whole to an old laptop backup (with a
+    # Thumbs.db that must not matter), and a USB stick holding some of the Christmas photos.
+    step()
+    album = dest / "Albums" / "Family 2020"
+    for sub, (month, day) in (("Birthday", (5, 9)), ("Picnic", (9, 27))):
+        for k in range(2 if small else 3):
+            seed += 1
+            dt = datetime(2020, month, day, 11, 10 * k)
+            p = album / sub / f"IMG_{seed:04d}.JPG"
+            save_jpeg(scene(seed, W, H), p, dt, 0, None)
+            exp["dates"][rel(p)] = {"date": dt.isoformat(sep=" "), "source": "exif"}
+    if have_ffmpeg:
+        clip = album / "Picnic" / "VID_20200927_113000.mp4"
+        created = datetime(2020, 9, 27, 11, 30)
+        if make_video(clip, "life", "320x240", 1.4, created, "300k"):
+            exp["videos"].append(rel(clip))
+            exp["dates"][rel(clip)] = {"date": created.isoformat(sep=" "), "source": "metadata"}
+    copy_root = dest / "Old Laptop" / "Pictures"
+    shutil.copytree(dest / "Albums", copy_root, copy_function=shutil.copy2)
+    for f in sorted(album.rglob("*")):
+        if f.is_file():
+            exp["duplicate_groups"].append(sorted([rel(f), rel(copy_root / f.relative_to(dest / "Albums"))]))
+    thumbs = copy_root / "Family 2020" / "Picnic" / "Thumbs.db"
+    thumbs.write_bytes(b"\x00" * 1536)
+    exp["junk"].append(rel(thumbs))
+    exp["duplicate_folders"].append({"kind": "same", "folders": ["Albums", "Old Laptop"]})
+    for r, _ in originals[:2]:                     # Christmas photos 1 and 2 (not used by other scenarios)
+        c = dest / "USB Stick" / "Christmas picks" / Path(r).name
+        c.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(dest / r, c)
+        exp["duplicate_groups"].append(sorted([r, rel(c)]))
+    exp["duplicate_folders"].append({"kind": "inside", "folders": ["USB Stick", str(Path(originals[0][0]).parent)]})
 
     step()
     exp["duplicate_groups"].sort()

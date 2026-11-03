@@ -38,10 +38,13 @@ def run(lib: Library, progress: Optional[Progress] = None, include_videos: bool 
         return p
 
     scanner.index(lib, step())
-    dups = duplicates.find_duplicates(lib, step())
+    report = duplicates.find_all(lib, step())
+    dups = report.groups
     c.results["duplicates"] = dups
+    c.results["duplicate_report"] = report
     c.counts["duplicates"] = sum(len(g.files) - 1 for g in dups)
-    c.summary["duplicates"] = f"{c.counts['duplicates']:,} extra copies in {len(dups):,} groups"
+    c.summary["duplicates"] = (f"{c.counts['duplicates']:,} extra copies in {len(dups):,} groups"
+                               + (f", {len(report.folders):,} duplicate folders" if report.folders else ""))
     sim = similar.find_similar(lib, progress=step())
     c.results["similar"] = sim
     c.counts["similar"] = sum(len(g.files) - 1 for g in sim)

@@ -94,7 +94,8 @@ class OverviewPage(Page):
         self.cards["video"].set(f"{fmt_n(st['videos'], 'video')} in this library. Make smaller copies for sharing."
                                 if st["videos"] else "Make smaller copies of videos for sharing.")
         self.cards["compare"].set("Check a backup drive or old laptop folder against this library and copy what's missing.")
-        cached = {k: self.ctx.cached(k) for k in ("duplicates", "similar", "similar_videos", "tidy", "organize")}
+        cached = {k: self.ctx.cached(k) for k in ("duplicates", "duplicate_report", "similar", "similar_videos", "tidy",
+                                                "organize")}
         self.updating.setText("Updating…")
         self.bg.call(lambda: _insights(lib, cached))
 
@@ -106,7 +107,9 @@ class OverviewPage(Page):
             f"Recovery holds {fmt_n(rf, 'file')} ({fmt_size(rs)}); every change is listed in History and can be undone.")
         if d["dup_groups"] is not None:
             n = d["dup_copies"]
-            self.cards["duplicates"].set(f"{fmt_n(n, 'extra copy', 'extra copies')} found in {fmt_n(d['dup_groups'], 'group')}."
+            nf = d["dup_folders"]
+            self.cards["duplicates"].set(f"{fmt_n(n, 'extra copy', 'extra copies')} found in {fmt_n(d['dup_groups'], 'group')}"
+                                         + (f", including {fmt_n(nf, 'whole duplicate folder')}." if nf else ".")
                                          if n else "No exact copies — every file is unique.", bool(n))
         else:
             m = d["maybe_dupes"]
@@ -152,6 +155,8 @@ def _insights(lib, cached: dict) -> dict:
         dups = cached.get("duplicates")
         d["dup_groups"] = len(dups) if dups is not None else None
         d["dup_copies"] = sum(len(g.files) - 1 for g in dups) if dups is not None else None
+        rep = cached.get("duplicate_report")
+        d["dup_folders"] = len(rep.folders) if rep is not None else 0
         sims = cached.get("similar")
         d["similar_groups"] = (len(sims) + len(cached.get("similar_videos") or [])) if sims is not None else None
         rep = cached.get("tidy") or tidy.find_tidy(lib)

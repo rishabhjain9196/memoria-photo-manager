@@ -112,6 +112,12 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
             elif key == "duplicates":
                 page.find()
                 idle()
+                page.f_grid.setCurrentIndex(page.f_grid.model().index(0, 0))
+                pump(0.4)
+                shot(name=f"{i:02d}-duplicates-folders")
+                row = next(r for r, (k, _) in enumerate(page.entries) if k == "file")
+                page.list.setCurrentRow(row)
+                pump()
                 page.grid.setCurrentIndex(page.grid.model().index(1, 0))
                 pump()
             elif key == "similar":
@@ -125,7 +131,8 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
             elif key == "editor":
                 ids = [r["id"] for r in page.lib.files("kind='image' AND error IS NULL AND rel_path LIKE 'DCIM%'",
                                                        order="rel_path")][:2]
-                vids = [r["id"] for r in page.lib.files("kind='video' AND error IS NULL", order="rel_path")][:2]
+                vids = [r["id"] for r in page.lib.files("kind='video' AND error IS NULL AND rel_path LIKE 'Camera Roll%'",
+                                                        order="rel_path")][:2]
                 win.ctx.edit_selection[:] = ids + vids
                 page._take_selection()
                 page.files.setCurrentRow(0)

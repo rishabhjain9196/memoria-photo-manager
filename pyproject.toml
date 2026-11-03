@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memoria-photo-manager"
-version = "1.2.0"
+version = "1.3.0"
 description = "A private, offline, easy-to-trust photo and video manager for Windows."
 readme = "README.md"
 requires-python = ">=3.11"

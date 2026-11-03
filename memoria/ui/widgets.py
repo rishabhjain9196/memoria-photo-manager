@@ -619,7 +619,7 @@ class ConfirmDialog(QDialog):
                  file_ids: Optional[list[int]] = None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.setMinimumWidth(500)
+        self.setFixedWidth(580)     # a fixed width lets wrapped text claim the height it needs
         t = label(title, "h2")
         s = label(summary, wrap=True)
         lay = vbox(t, s, spacing=12, margins=(22, 20, 22, 18))
@@ -644,8 +644,14 @@ class ConfirmDialog(QDialog):
         self.setLayout(lay)
         cancel.setFocus()
 
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        h = self.layout().totalHeightForWidth(self.width())
+        if h > 0:
+            self.setFixedHeight(h)
+
     @staticmethod
-    def _strip(thumbs: "ThumbCache", file_ids: list[int], limit: int = 8) -> QHBoxLayout:
+    def _strip(thumbs: "ThumbCache", file_ids: list[int], limit: int = 7) -> QHBoxLayout:
         """A row of thumbnails of the affected files, so the user sees exactly what is about to move."""
         row = QHBoxLayout()
         row.setSpacing(8)

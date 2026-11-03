@@ -43,7 +43,7 @@
   <h1>Design document</h1>
   <p>Why Memoria looks and behaves the way it does — the product goals, the trust model that every tool obeys,
      the information architecture, interaction patterns and the decisions behind them.</p>
-  <div class="meta"><span class="pill">Version 1.2</span><span class="pill">Windows desktop · PySide6</span>
+  <div class="meta"><span class="pill">Version 1.3</span><span class="pill">Windows desktop · PySide6</span>
     <span class="pill">Offline · no accounts · no telemetry</span></div>
 </header>
 
@@ -175,6 +175,10 @@ then simply tells the truth about those rules.</p>
   <tr><td>I14</td><td>Edits never touch originals</td><td>The Editor only writes new files (unique names, temp file →
     verify → rename) and journals them as <code>create</code> operations.</td><td>"Saved IMG_1 (edited).jpg. The original is
     unchanged." with Undo.</td></tr>
+  <tr><td>I15</td><td>A folder is removed only if nothing in it is lost</td><td>Every file in a duplicate folder is
+    recycled with a guard on an identical copy that stays (outside every folder being removed); a folder that can't be fully
+    guarded is left out; <code>rmdir</code> runs only on empty folders.</td><td>"2 folders left out: some of their files no
+    longer have a copy elsewhere."</td></tr>
   <tr><td>I10</td><td>Originals of creative tools are untouched</td><td>Story and video outputs are new files in a separate
     output folder; video copies must play, match duration and be smaller or they are discarded.</td>
     <td>Video page banner and result column.</td></tr>
@@ -289,6 +293,8 @@ returns a reason alongside its result:</p>
   <tr><th>Decision</th><th>Example explanations</th></tr>
   <tr><td>Which duplicate to keep</td><td>"Kept: best name and location"; others: "Name looks like a copy", "In a
     backup/download/copy folder", "Newer copy of the same file".</td></tr>
+  <tr><td>Which folder to keep</td><td>"Same files; looks like a backup or copy", "Every file in it is also in “DCIM\100CANON”",
+    "Not ticked at first because “Phone Backup\2023” looks like a backup and “Camera Roll\2023” like the original".</td></tr>
   <tr><td>Best shot</td><td>"Best pick: sharpest (20.1× the softest), best exposure, 2 faces detected"; others:
     "blurrier (25% of best sharpness)", "too dark", "smaller (800×600)".</td></tr>
   <tr><td>Photo date</td><td>"Camera date", "Date in file name", "File modified date (less reliable)".</td></tr>
@@ -373,6 +379,10 @@ explain what each tool would do for this library.</figcaption></figure>
     has size limits, and can't be tied to a reversible batch with original paths.</td></tr>
   <tr><td>Exact duplicates</td><td>Size → sampled hash → full hash</td><td>Full hash everything; name/size matching</td>
     <td>Unique sizes are never read; certainty only from full content.</td></tr>
+  <tr><td>Duplicate folders</td><td>Per-folder multiset of content hashes (with sub-folders), reported at the highest
+    level; "same" and "inside"</td><td>Compare names/sizes or exact tree layout; list every sub-folder</td>
+    <td>Backups are often re-organised or renamed, so content is the only reliable test. Showing the top folder turns
+    hundreds of file groups into one decision; files stay guarded individually.</td></tr>
   <tr><td>Similar photos</td><td>64-bit difference hash + capture-time bursts</td><td>CLIP embeddings; pHash</td>
     <td>dHash is fast, offline and explainable; CLIP finds "same subject", which is not "same photo" (see product plan).</td></tr>
   <tr><td>Best-shot scoring</td><td>Sharpness (log-scaled), exposure, resolution, faces — measured at a fixed 512 px</td>

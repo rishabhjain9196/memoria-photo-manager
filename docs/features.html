@@ -49,7 +49,7 @@
 <header class="hero">
   <h1>Features guide</h1>
   <p>Everything Memoria can do, how to use each tool, and exactly what each one will — and won't — change on your PC.</p>
-  <div class="meta"><span class="pill">Version 1.2</span><span class="pill">12 pages</span><span class="pill">Light &amp; dark</span><span class="pill">Works offline</span><span class="pill">Windows 10/11</span></div>
+  <div class="meta"><span class="pill">Version 1.3</span><span class="pill">12 pages</span><span class="pill">Light &amp; dark</span><span class="pill">Works offline</span><span class="pill">Windows 10/11</span></div>
 </header>
 
 <section id="start">
@@ -158,22 +158,36 @@ currently shown, <b>Open in default app</b>, <b>Show in folder</b>, and Esc to c
 
 <section id="duplicates">
 <h2>Duplicates</h2>
-<p>Finds <b>exact copies</b> — files with identical content, whatever their names or folders. Typical sources: phone backups,
-"(1)" downloads, copies made while reorganising.</p>
+<p>Finds <b>exact copies</b> — files with identical content, whatever their names or folders — and <b>whole duplicate
+folders</b>. Typical sources: phone backups, an old laptop copied onto a drive twice, "(1)" downloads, copies made while
+reorganising.</p>
 <h3>How to use</h3>
 <ol>
   <li>Click <b>Find duplicates</b>. Files are compared byte by byte; only files that share a size are read, so this is quick.</li>
-  <li>The tiles show groups, extra copies and space you can free.</li>
-  <li>Each group (left list) shows its copies with a <b>KEEP</b> badge on the one Memoria suggests keeping and <b>COPY</b> on
+  <li>The tiles show duplicate folders, extra file copies and the space you can free.</li>
+  <li><b>Duplicate folders</b> are listed first. A folder is listed when another folder holds <i>exactly the same files</i>,
+      or <i>all of its files and more</i>. Sub-folders are included and names or layout don't matter (leftovers like
+      Thumbs.db and empty files are ignored). Only the <b>highest</b> folder is shown: if all of "Old Laptop" is a copy of
+      "Albums", you see "Old Laptop" once — not every album inside it. Each entry shows its duplicate size.</li>
+  <li>Select a folder entry to see a table of the folders involved — <b>total size, number and size of photos, number and
+      size of videos, other files and sub-folders</b> — and the files inside. For identical folders, select one and click
+      <b>Keep this folder instead</b> to keep it. When an original-looking folder sits inside a backup folder, the entry is
+      shown but not ticked.</li>
+  <li><b>Duplicate files</b> follow: copies that are not already handled by a duplicate folder. Each group (left list) shows its copies with a <b>KEEP</b> badge on the one Memoria suggests keeping and <b>COPY</b> on
       the others. The note explains the choice: copies in backup/download folders, names like "(1)" or "copy", or newer
       copies are moved; the original-looking one is kept.</li>
   <li>To keep a different copy, select it and click <b>Keep this copy instead</b>.</li>
-  <li>Untick a group to leave it exactly as it is (<b>Include all / Include none</b> for every group).</li>
-  <li>Click <b>Move copies to Recovery</b>, read the confirmation, confirm.</li>
+  <li>Untick a folder or group to leave it exactly as it is (<b>Include all / Include none</b> for everything).</li>
+  <li>Click <b>Move duplicates to Recovery</b>, read the confirmation, confirm.</li>
 </ol>
 <h3>What changes</h3>
 <p>The extra copies move into Recovery, keeping their folder structure there. The kept copy is not touched. Right before
 moving, each copy is re-read to prove it is still identical to the kept copy, and the kept copy itself is checked.</p>
+<p>A duplicate folder moves as a whole: every file in it goes to Recovery, each one checked against an identical copy that
+stays in the library, and the emptied folders are then removed. If a file in it has changed, or something new has appeared
+in the folder, that file and its folder stay where they are. Undo puts the whole folder back.</p>
+<figure><img src="images/duplicates-folders.png" alt="Duplicate folders"><figcaption>"Old Laptop" holds exactly the same
+files as "Albums" — shown once, at the top folder, with sizes and counts of photos and videos for each folder.</figcaption></figure>
 <figure><img src="images/duplicates.png" alt="Duplicates"><figcaption>Large 6 MB duplicates are handled correctly (the
 old command-line tool skipped every file over 1.28 MB).</figcaption></figure>
 </section>
@@ -463,6 +477,7 @@ to find:</p>
 <div class="grid">
   <div class="card"><h4>Camera &amp; phone folders</h4><p>DCIM, Camera Roll, iPhone Import with EXIF dates, cameras and GPS.</p></div>
   <div class="card"><h4>Exact duplicates</h4><p>Phone Backup copies, "(1)" downloads, triple copies, 6 MB files, a duplicated video.</p></div>
+  <div class="card"><h4>Duplicate folders</h4><p>A nested family album copied whole to "Old Laptop" (with a Thumbs.db), and a USB stick holding some Christmas photos.</p></div>
   <div class="card"><h4>Look-alikes</h4><p>Five-frame bursts with one sharp frame; WhatsApp-style resized copies.</p></div>
   <div class="card"><h4>Blurry shots</h4><p>Four heavily blurred photos.</p></div>
   <div class="card"><h4>Tricky dates</h4><p>Dates only in file names; one scan with no date at all.</p></div>

@@ -27,6 +27,10 @@ def test_every_page_runs_without_errors(pristine_library, tmp_path):
     batches = actions.batches(check)
     kinds = {b["kind"] for b in batches}
     assert {"duplicates", "batch", "edit"} <= kinds              # clean-up, Photos batch action, Editor saves
+    dup = next(b for b in batches if b["kind"] == "duplicates")
+    removed = [o["src"] for o in actions.operations(check, dup["id"]) if o["op"] == "rmdir" and o["status"] == "undone"]
+    assert any(p.endswith("Old Laptop") for p in removed)        # a whole duplicate folder was removed, then restored
+    assert (lib / "Old Laptop" / "Pictures" / "Family 2020").is_dir()
     assert all(b["status"] == "undone" for b in batches if b["kind"] != "edit")
     edits = [b for b in batches if b["kind"] == "edit"]
     assert len(edits) == 2 and all(b["status"] == "applied" for b in edits)

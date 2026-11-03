@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.0 — 2026-11-04
+
+### Added
+- **Duplicate folders.** Duplicates now finds whole folders whose files all exist in another folder — exactly the same
+  files ("same"), or all of them inside a bigger folder ("inside"). Sub-folders are included, names and layout don't
+  matter, and Thumbs.db-style leftovers and empty files are ignored.
+  - Results are shown at the highest level: a copied tree appears once, as its top folder, with its duplicate size.
+  - Every folder involved shows total size, number and size of photos, number and size of videos, other files and
+    sub-folders, plus the files inside.
+  - Choose which identical folder to keep. An original-looking folder inside a backup folder is listed but not ticked.
+  - Single-file groups below only list copies that a duplicate folder doesn't already cover.
+  - A folder moves to Recovery as a whole. Each file is checked against an identical copy that stays, and folders are
+    removed only once empty. Undo restores the whole folder.
+- Test library: a nested album copied whole to "Old Laptop" and a USB stick holding some camera photos.
+
 ## 1.2.0 — 2026-11-04
 
 ### Added
