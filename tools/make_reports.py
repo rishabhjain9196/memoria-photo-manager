@@ -44,6 +44,7 @@ AREAS = {
     "test_storage": "Selective reset, interruption recovery and storage",
     "test_insights": "Storage charts, timeline, offline map and filtered browsing",
     "test_metadata": "Extended photo/video metadata, migration, filters and numeric sorting",
+    "test_diagnostics": "Aggregate diagnostic privacy, cached reports, opt-in and publication",
 }
 
 

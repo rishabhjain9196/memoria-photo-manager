@@ -147,8 +147,8 @@ then simply tells the truth about those rules.</p>
 <h3 id="invariants">Safety invariants</h3>
 <table>
   <tr><th>#</th><th>Invariant</th><th>Enforced by</th><th>How the user sees it</th></tr>
-  <tr><td>I1</td><td>Reading never writes outside <code>.memoria</code></td><td>Scanner, analysis, health, compare
-    only open files for reading; the catalogue, thumbnails and journal live in the hidden library folder.</td>
+  <tr><td>I1</td><td>Read-only tools preserve media</td><td>Scanner, analysis, health and compare read originals;
+    catalogue/cache/journal writes stay in <code>.memoria</code>. Opt-in diagnostics writes aggregate reports in the source checkout.</td>
     <td>Read-only chart descriptions and an Overview reminder that Recovery is not a backup.</td></tr>
   <tr><td>I2</td><td>Review file clean-up before applying</td><td>Clean-up pages route file plans through one shared
     <code>apply_actions</code> flow that opens a confirmation dialog first.</td><td>Dialog with counts, size, what is kept,
@@ -267,6 +267,11 @@ cards worth visiting.</p>
 
 <section id="explore-reset">
 <h2>Exploration and recovery without surprises</h2>
+<p>Diagnostics is opt-in per library and device, with local-only reports inside the source checkout. It uses
+allowlisted aggregate categories rather than raw logs or catalogue exports. The user can preview JSON and must stop
+recording and review it before committing; the app never uploads or runs git mutations. Existing cached libraries
+work without rescanning, while unrecorded past performance cannot be reconstructed. Aggregates are not promised
+anonymous, and opt-out does not erase previously shared git history.</p>
 <p>Metadata controls distinguish available values from unknowns: numeric sorts put missing/inapplicable rows last,
 video bitrate is labelled as an overall estimate rather than a quality score, and photo exposure uses explicit units.
 The extended catalogue refresh is one-time and resumable; it must not clear IDs, organisation or health baselines.

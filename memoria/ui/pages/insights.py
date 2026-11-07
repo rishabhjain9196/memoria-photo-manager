@@ -140,11 +140,12 @@ class InsightsPage(Page):
         self.tabs.setEnabled(False)
         def work():
             try:
-                return {"generation": generation, "request": (filters, prefix, bounds),
-                        "distribution": catalogue.distribution(lib, filters),
-                        "time": catalogue.timeline(lib, filters, prefix),
-                        "albums": catalogue.matching_albums(lib, catalogue.in_period(filters, prefix)),
-                        "map": catalogue.map_data(lib, filters, bounds)}
+                with self.ctx.diagnostics.measure("insights"):
+                    return {"generation": generation, "request": (filters, prefix, bounds),
+                            "distribution": catalogue.distribution(lib, filters),
+                            "time": catalogue.timeline(lib, filters, prefix),
+                            "albums": catalogue.matching_albums(lib, catalogue.in_period(filters, prefix)),
+                            "map": catalogue.map_data(lib, filters, bounds)}
             finally:
                 lib.close_thread()
         self.bg.call(work)

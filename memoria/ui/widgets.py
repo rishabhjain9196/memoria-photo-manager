@@ -247,6 +247,8 @@ class AppContext(QObject):
     def __init__(self, runner):
         super().__init__()
         self.runner = runner
+        from ..engine.diagnostics import Metrics
+        self.diagnostics = Metrics()
         self.library: Optional[Library] = None
         self.maintenance = False
         self.thumbs = ThumbCache(self)
@@ -569,6 +571,10 @@ class Preview(QFrame):
         self.show_btn.setEnabled(False)
 
     def show_row(self, row: dict, extra: str = "") -> None:
+        with self.ctx.diagnostics.measure("preview"):
+            self._show_row(row, extra)
+
+    def _show_row(self, row: dict, extra: str = "") -> None:
         lib = self.ctx.library
         if lib is None or row is None or row.get("rel_path") is None:
             self.clear()

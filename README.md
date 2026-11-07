@@ -36,6 +36,7 @@ the rendered page).
 - [How it works](#how-it-works)
 - [Repository layout](#repository-layout)
 - [Testing & quality reports](#testing--quality-reports)
+- [Local diagnostics](#local-diagnostics)
 - [Building a standalone app](#building-a-standalone-app)
 - [Performance](#performance)
 - [Troubleshooting](#troubleshooting)
@@ -81,7 +82,7 @@ the rendered page).
   Similarity is still quadratic; old random-hash microbenchmarks are not end-to-end photo-library timings.
 - **Extended metadata**: sort/filter video length, resolution, estimated overall bitrate, FPS and codecs; photo ISO,
   aperture, exposure time, focal length and lens; plus camera, orientation, format and modified dates.
-- **Tested** against generated libraries and synthetic catalogues: 196 automated tests, including UI tests in both
+- **Tested** against generated libraries and synthetic catalogues: 205 automated tests, including UI tests in both
   themes.
 
 ## Quick start
@@ -133,7 +134,7 @@ These documents describe unreleased source updates after 1.4; an existing packag
 
 | Promise | How it is enforced |
 |---|---|
-| Looking never changes anything | Scanning, analysis, comparison and health checks only read files. Memoria writes only to a hidden `.memoria` folder in the library. |
+| Looking preserves originals | Scanning, analysis, comparison and health checks read media and update `.memoria`. Opt-in diagnostics additionally writes aggregate reports in the source checkout. |
 | Review clean-up first | The shared file-plan confirmation states what will happen, with counts and sizes. Creative tools have explicit Save/Export controls. |
 | Originals are protected | "Remove" moves files to `.memoria\recovery\<batch>\<original path>`. **Empty Recovery** permanently deletes them and requires acknowledgement. Undo can delete unchanged generated copies. |
 | File operations are recoverable | Moves, copies and published outputs are journaled for Undo. Empty Recovery and acknowledged deletion of personal catalogue data cannot be undone. |
@@ -208,6 +209,7 @@ memoria-photo-manager/
 │   │   ├── actions.py          journaled executor: apply · undo · reconcile · Recovery
 │   │   ├── db.py               Library + schema v6 (files, extended metadata, journal, retained rows, reset state)
 │   │   ├── catalogue.py · geography.py · storage.py  filters/aggregates, offline map, selective reset
+│   │   ├── diagnostics.py      allowlisted aggregate reports and bounded performance metrics
 │   │   ├── scanner.py          incremental scan + parallel analysis
 │   │   ├── media.py · ffmpeg.py · hashing.py · config.py · progress.py
 │   │   ├── duplicates.py · similar.py · videosim.py · organize.py · tidy.py · health.py · compare.py
@@ -217,6 +219,7 @@ memoria-photo-manager/
 │   ├── ui/                     PySide6 desktop app
 │   │   ├── app.py · main_window.py · tasks.py · widgets.py · theme.py · assets/
 │   │   ├── insight_charts.py · library_filters.py · storage_dialog.py
+│   │   ├── diagnostics.py      per-device/library consent, preview and local report recording
 │   │   └── pages/              one module per sidebar page (+ base.py)
 │   ├── samplelib.py            generator for the sample / test library (with expected.json)
 │   ├── sample_faces/           public-domain portraits used by the sample library (CREDITS.txt)
@@ -237,7 +240,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 196 tests; runtime depends on the machine
+.\.venv\Scripts\python -m pytest -q                       # 205 tests; runtime depends on the machine
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 .\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + documentation screenshots
@@ -260,6 +263,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_storage.py` | 13 | Safe/custom/hard reset, retained media and Undo, atomic rollback, abrupt process exit, cancellation/retry, updated media and low-space compaction. |
 | `tests/test_insights.py` | 6 | Folder/type totals, literal search, combined filters, leap-day boundaries, album links, India/world GPS selection, bounded 10,000-file browsing and interactive charts in both themes. |
 | `tests/test_metadata.py` | 21 | Real EXIF/video extraction, schema-5 backfill, retained-row migration, cancellation/resume, numeric sorting with unknowns last, combined metadata filters and preview UI. |
+| `tests/test_diagnostics.py` | 9 | Cached-only summaries, sensitive-field exclusion, opt-in and bounded metrics, real Windows memory counters, atomic writes, task timing and library-switch/disable safety. |
 
 The **test library** (`tools\make_test_library.py [DEST] [--small]`) is a deterministic library of generated photos. It
 includes camera, phone and backup folders; exact duplicates (including 6 MB files); a nested album copied whole to an old
@@ -285,6 +289,30 @@ $env:MEMORIA_SHOT_LABEL = "<b>Photos</b><br>D:\"     # optional: hide the real l
 The build bundles the icon, FFmpeg and OpenCV data. It then removes parts the app never loads (OpenCV's video-capture
 FFmpeg, Qt's software OpenGL, Qt Quick/QML/PDF and unused face models), which takes it from 420 MB to 338 MB. The `.exe` is unsigned, so Windows
 SmartScreen warns the first time it runs.
+
+## Local diagnostics
+
+Open **Diagnostics** in the sidebar and enable recording for the current library on that device.
+This works with an **already-scanned catalogue**: diagnostics does not reset or rescan media. Past timings cannot
+be reconstructed; future tasks, browsing and previews are measured. You can enable it while an initial scan is
+running to include that task when it finishes.
+
+When running from a source checkout, aggregate JSON reports are saved under
+`diagnostics\reports\report-<random>.json`, automatically after main tasks, roughly once a minute, and on normal exit.
+Each library/recording session gets a separate report. Consent is local application settings, not a tracked repo file.
+No automatic staging, commits, uploads or deletion occur.
+
+Reports contain counts/bytes, allowlisted format/codec distributions, coarse technical-metadata bins, coverage,
+error categories, journal status counts, timings and basic system/process-memory information. They exclude media,
+filenames/paths, capture dates, GPS coordinates, camera/person/album names, face embeddings and file-content hashes.
+CPU/memory cover the app process, not FFmpeg children; per-operation CPU deltas can overlap with background/UI work.
+Browsing/preview timings accumulate between snapshots to avoid a whole-catalogue query on every click.
+Counts and system information are not guaranteed anonymous.
+
+**Turn recording off, review the JSON, then stage only reports you intend to share.** Do not add the catalogue or
+raw logs to git. See [diagnostics/README.md](diagnostics/README.md) for precise contents and sharing commands.
+Old reports remain after disabling recording or resetting a library; interrupted writes keep the previous complete
+snapshot. A packaged installation without a source checkout cannot record repository-local reports.
 
 ## Performance
 

@@ -26,6 +26,9 @@ Memoria Exports/
 *.zip
 *.log
 
+# Atomic diagnostic-report staging files; reviewed aggregate .json reports may be committed.
+diagnostics/reports/.*.tmp
+
 # Editors and OS
 .vscode/
 .idea/

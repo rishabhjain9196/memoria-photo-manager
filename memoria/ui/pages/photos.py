@@ -191,6 +191,10 @@ class PhotosPage(Page):
         self._load_page()
 
     def _load_page(self) -> None:
+        with self.ctx.diagnostics.measure("browse_page"):
+            self._load_page_impl()
+
+    def _load_page_impl(self) -> None:
         if self.lib is None:
             return
         cur = self.tree.currentItem()

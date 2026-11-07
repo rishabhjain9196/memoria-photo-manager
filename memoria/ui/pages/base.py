@@ -77,7 +77,9 @@ class Page(QWidget):
         if self.ctx.maintenance:
             self.ctx.toast_requested.emit("Finish the library rebuild using Resume rebuild first.", "")
             return False
-        ok = self.ctx.runner.run(title, fn, on_done, on_cancel)
+        from ...engine.diagnostics import OPERATIONS
+        key = self.__class__.__module__.rsplit(".", 1)[-1]
+        ok = self.ctx.runner.run(title, fn, on_done, on_cancel, diagnostic_key=key if key in OPERATIONS else "other")
         if not ok:
             self.ctx.toast_requested.emit(f"Please wait for “{self.ctx.runner.title}” to finish first.", "")
         return ok

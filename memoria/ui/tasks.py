@@ -6,12 +6,14 @@ user can never start two conflicting file operations.
 from __future__ import annotations
 
 import threading
+import time
 import traceback
 from typing import Any, Callable, Optional
 
 from PySide6.QtCore import QObject, QThread, Signal
 
 from ..engine.progress import Cancelled, Progress
+from ..engine.diagnostics import OPERATIONS
 
 
 class _Worker(QThread):
@@ -24,18 +26,26 @@ class _Worker(QThread):
         super().__init__()
         self._fn = fn
         self._cancel = cancel
+        self.wall_seconds = self.cpu_seconds = 0.0
+        self.outcome = "failed"
 
     def run(self) -> None:
         prog = Progress(lambda d, t, m: self.progressed.emit(d, t, m), self._cancel)
+        wall, cpu = time.perf_counter(), time.process_time()
+        result, error = None, None
         try:
             result = self._fn(prog)
+            self.outcome = "cancelled" if self._cancel.is_set() and result is None else "ok"
         except Cancelled:
-            self.was_cancelled.emit()
-            return
+            self.outcome = "cancelled"
         except Exception as e:  # surfaced to the user, never swallowed
-            self.failed.emit(f"{type(e).__name__}: {e}", traceback.format_exc())
-            return
-        if self._cancel.is_set() and result is None:
+            error = (f"{type(e).__name__}: {e}", traceback.format_exc())
+        finally:
+            self.wall_seconds = time.perf_counter() - wall
+            self.cpu_seconds = time.process_time() - cpu
+        if error is not None:
+            self.failed.emit(*error)
+        elif self.outcome == "cancelled":
             self.was_cancelled.emit()
         else:
             self.succeeded.emit(result)
@@ -47,12 +57,16 @@ class TaskRunner(QObject):
     finished = Signal(str)          # outcome: "ok" | "failed" | "cancelled"
     error = Signal(str, str, str)   # title, message, details
     busy_changed = Signal(bool)
+    measured = Signal(str, str, float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._worker: Optional[_Worker] = None
         self._cancel = threading.Event()
         self.title = ""
+        self._diagnostic_key = "other"
+        self._diagnostic_started = 0.0
+        self._measurement_reported = True
 
     @property
     def busy(self) -> bool:
@@ -60,9 +74,14 @@ class TaskRunner(QObject):
 
     def run(self, title: str, fn: Callable[[Progress], Any],
             on_done: Optional[Callable[[Any], None]] = None,
-            on_cancel: Optional[Callable[[], None]] = None) -> bool:
+            on_cancel: Optional[Callable[[], None]] = None, *, diagnostic_key: str = "other") -> bool:
         if self.busy:
             return False
+        if diagnostic_key not in OPERATIONS:
+            raise ValueError("Unknown diagnostic task category")
+        self._diagnostic_key = diagnostic_key
+        self._diagnostic_started = time.perf_counter()
+        self._measurement_reported = False
         self.title = title
         self._cancel = threading.Event()
         w = _Worker(fn, self._cancel)
@@ -96,16 +115,29 @@ class TaskRunner(QObject):
 
     def _finish(self, outcome: str) -> None:
         w = self._worker
-        self._worker = None
         if w is not None:
             w.wait(2000)
+            self.report_measurement()
             w.deleteLater()
+        self._worker = None
         self.finished.emit(outcome)
         self.busy_changed.emit(False)
 
     def wait(self) -> None:
         if self._worker is not None:
             self._worker.wait()
+
+    def report_measurement(self) -> None:
+        w = self._worker
+        if w is not None and not w.isRunning() and not self._measurement_reported:
+            self._measurement_reported = True
+            self.measured.emit(self._diagnostic_key, w.outcome, w.wall_seconds, w.cpu_seconds)
+
+    def active_measurement(self):
+        if self._worker is None:
+            return None
+        return {"operation": self._diagnostic_key,
+                "elapsed_seconds": time.perf_counter() - self._diagnostic_started}
 
 
 class _CallThread(QThread):

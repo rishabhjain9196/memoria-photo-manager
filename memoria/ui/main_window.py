@@ -139,6 +139,10 @@ class MainWindow(QMainWindow):
         self.current_key = ""
         self._task_started_at = 0.0
         self._build()
+        from .diagnostics import DiagnosticsController
+        self.diagnostics = DiagnosticsController(self.ctx, self.settings, self)
+        self.diagnostics.updated.connect(self._diagnostics_updated)
+        self.diagnostics.problem.connect(lambda message: self.toast.show_message(message, seconds=12))
         self._shortcuts()
         self.runner.started.connect(self._task_started)
         self.runner.progressed.connect(self._task_progress)
@@ -180,6 +184,8 @@ class MainWindow(QMainWindow):
         sl.addLayout(hbox(8, change, None))
         self.storage_btn = button("Storage && reset…", "link", self.manage_storage)
         sl.addLayout(hbox(8, self.storage_btn, None))
+        self.diagnostics_btn = button("Diagnostics…", "link", self.manage_diagnostics)
+        sl.addLayout(hbox(8, self.diagnostics_btn, None))
         sl.addSpacing(6)
         group = QButtonGroup(self)
         group.setExclusive(True)
@@ -410,7 +416,18 @@ class MainWindow(QMainWindow):
 
         self.runner.run("Resuming library rebuild" if self.ctx.maintenance else "Reading your library",
                         lambda prog: storage.resume(lib, prog), done,
-                        on_cancel=self.ctx.library_modified.emit)
+                        on_cancel=self.ctx.library_modified.emit,
+                        diagnostic_key="reset" if self.ctx.maintenance else "index")
+
+    def _diagnostics_updated(self):
+        self.diagnostics_btn.setText("Diagnostics (recording)" if self.diagnostics.enabled else "Diagnostics…")
+        self.diagnostics_btn.setToolTip(self.diagnostics.status)
+
+    def manage_diagnostics(self):
+        from .diagnostics import DiagnosticsDialog
+        dialog = DiagnosticsDialog(self, self.diagnostics)
+        dialog.exec()
+        dialog.deleteLater()
 
     def _reset_state(self) -> None:
         try:
@@ -479,7 +496,7 @@ class MainWindow(QMainWindow):
             self.toast.show_message(message, seconds=15)
 
         self.runner.run("Rebuilding library storage", work, done,
-                        on_cancel=self.ctx.library_modified.emit)
+                        on_cancel=self.ctx.library_modified.emit, diagnostic_key="reset")
 
     def run_checkup(self) -> None:
         """Run every finder in one read-only pass; pages and sidebar badges use the results."""
@@ -500,7 +517,7 @@ class MainWindow(QMainWindow):
                      f"{fmt_n(c.counts.get('tidy', 0), 'item')} to tidy"]
             self.toast.show_message("Check-up complete: " + ", ".join(parts) + ". Nothing was changed.", seconds=12)
 
-        self.runner.run("Checking everything", lambda prog: checkup.run(lib, prog), done)
+        self.runner.run("Checking everything", lambda prog: checkup.run(lib, prog), done, diagnostic_key="checkup")
 
     def open_sample(self) -> None:
         if self.runner.busy:
@@ -518,7 +535,7 @@ class MainWindow(QMainWindow):
                 build(dest)
             return str(dest)
 
-        self.runner.run("Creating the sample library", work, lambda p: self.open_library(p))
+        self.runner.run("Creating the sample library", work, lambda p: self.open_library(p), diagnostic_key="sample")
 
     def restore_last(self) -> None:
         last = self.settings.value("library", "")
@@ -561,7 +578,7 @@ class MainWindow(QMainWindow):
                 msg += " " + res.messages[0]
             self.toast.show_message(msg)
 
-        self.runner.run("Undoing", work, done)
+        self.runner.run("Undoing", work, done, diagnostic_key="undo")
 
     # ---------------------------------------------------------------------------- task bar
     def _task_started(self, title: str) -> None:
@@ -619,11 +636,15 @@ class MainWindow(QMainWindow):
         if self.runner.busy:
             self.runner.cancel()
             self.runner.wait()
+            self.runner.report_measurement()
         self.settings.setValue("geometry", self.saveGeometry())
         for p in self.pages.values():
             stop = getattr(p, "shutdown", None)
             if callable(stop):
                 stop()
+        diagnostic_error = self.diagnostics.close()
+        if diagnostic_error:
+            MessageDialog(self, "Diagnostic report not saved", diagnostic_error).exec()
         if self.ctx.library:
             self.ctx.library.close()
             self.ctx.library = None

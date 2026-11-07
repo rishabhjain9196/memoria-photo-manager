@@ -41,6 +41,7 @@
   <a href="#compare">Compare &amp; sync</a>
   <a href="#history">History &amp; recovery</a>
   <a href="#reset">Storage &amp; reset</a>
+  <a href="#diagnostics">Local diagnostics</a>
   <a href="#progress">Progress &amp; cancelling</a>
   <a href="#themes">Themes</a>
   <a href="#shortcuts">Keyboard shortcuts</a>
@@ -582,6 +583,26 @@ copying into the library) shows the step it is on. <b>Cancel</b> (or Esc) stops 
 done in a file-operation batch is journaled. Cancellation is cooperative and can wait for an active decode or atomic
 database step. Insights has a separate read-only loading indicator. Reset follows the resumable behaviour above,
 not normal Undo. One main task runs at a time to avoid conflicting file operations.</p>
+</section>
+
+<section id="diagnostics">
+<h2>Local diagnostics</h2>
+<p>Open <b>Diagnostics</b> in the sidebar and opt in for this library on this device. Existing scanned/cached
+metadata works immediately; no media rescan or reset is required. Previous timings cannot be recreated, but future
+tasks, browsing and previews are measured, including a task running when you enable recording.</p>
+<p>When using a source checkout, reports update under <code>diagnostics\reports\report-&lt;random&gt;.json</code> after
+main tasks, approximately every minute, and on normal exit. The app does not stage, commit, upload or delete them.
+Consent is stored in local settings, not in git. Another library/device requires its own opt-in.</p>
+<p>The report includes aggregate counts/bytes, safe format/codec buckets, technical-metadata distributions and coverage,
+fixed error categories, timings and basic system/process-memory data. It excludes media, filenames/paths, actual
+capture dates, GPS coordinates, camera/person/album names, face vectors, file-content hashes and raw error traces.
+CPU/memory exclude FFmpeg child processes and are not an isolated performance benchmark.</p>
+<div class="callout warn">Aggregates can still reveal information about your collection/computer. Turn recording off
+before editing or committing reports, review the JSON, and stage only the intended reports. Existing reports and git
+history remain after disabling/resetting. Do not copy <code>.memoria</code> or raw logs into the repository.</div>
+<p>Interrupted writes leave the previous complete snapshot intact. Reports may be partial during indexing or unavailable
+when the catalogue/checkout cannot be read or written; failures are shown in Diagnostics. See the
+<a href="../diagnostics/README.md">report contents and sharing guide</a>.</p>
 </section>
 
 <section id="themes">

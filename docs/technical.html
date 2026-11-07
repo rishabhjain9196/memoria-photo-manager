@@ -39,6 +39,7 @@
   <a class="sub" href="#p-albums">Albums &amp; places</a>
   <a href="#p-insights">Catalogue queries &amp; maps</a>
   <a href="#p-reset">Selective storage reset</a>
+  <a href="#diagnostics">Aggregate diagnostics</a>
   <a href="#executor">Action executor &amp; journal</a>
   <a href="#integrity">Catalogue integrity</a>
   <a href="#ui">UI architecture</a>
@@ -182,15 +183,18 @@ Insights uses read-only background queries and reset uses its own journaled phas
   <tr><td><code>storage</code></td><td>159</td><td><code>ResetOptions</code>, <code>usage</code>, <code>pending</code>, <code>reset</code>, <code>resume</code>; selective clearing, optional compaction, resumable indexing.</td></tr>
 </table>
 <h3>UI</h3>
+<p>Repository-local diagnostics adds <code>engine/diagnostics.py</code> (allowlisted aggregation, bounded metrics,
+native memory sampling and atomic publication) and <code>ui/diagnostics.py</code> (consent, background recording and
+plain-text JSON preview). See <a href="#diagnostics">Aggregate diagnostics</a> for the privacy and lifecycle contract.</p>
 <table>
   <tr><th>Module</th><th>Lines</th><th>Responsibility</th></tr>
-  <tr><td><code>main_window</code></td><td>630</td><td>Sidebar (<code>NAV</code> groups, count badges, theme selector), lazily created pages (<code>page(key)</code>), <code>WelcomePage</code>, task bar (% · elapsed · time left · Cancel), toast, shortcuts, drag &amp; drop, saved geometry; <code>open_library</code> (lock → reconcile → set context → index), <code>run_checkup</code>, <code>open_sample</code> (with progress), <code>undo_last</code>, <code>undo_batch</code>, <code>restore_last</code>.</td></tr>
+  <tr><td><code>main_window</code></td><td>651</td><td>Sidebar (<code>NAV</code> groups, count badges, theme selector), lazily created pages (<code>page(key)</code>), <code>WelcomePage</code>, task bar (% · elapsed · time left · Cancel), toast, shortcuts, drag &amp; drop, saved geometry; <code>open_library</code> (lock → reconcile → set context → index), <code>run_checkup</code>, <code>open_sample</code> (with progress), <code>undo_last</code>, <code>undo_batch</code>, <code>restore_last</code>.</td></tr>
   <tr><td><code>theme</code></td><td>193</td><td>Light/dark palettes, <code>use(mode)</code> (system | light | dark), stylesheet builder, <code>qpalette()</code>, <code>badge_colors</code>, <code>settings()</code> (profile via <code>MEMORIA_PROFILE</code>).</td></tr>
-  <tr><td><code>tasks</code></td><td>165</td><td><code>TaskRunner.run(title, fn(progress), on_done, on_cancel)</code>; signals <code>started/progressed/finished/error/busy_changed</code>. <code>BackgroundCall</code>: latest-wins read-only computations off the UI thread (page insights).</td></tr>
-  <tr><td><code>widgets</code></td><td>876</td><td>Formatting/layout helpers, tiles/banners/cards, <code>AppContext</code> (generations, cached results, maintenance state, navigation signals), <code>ThumbCache</code> (64 MiB pixel budget and 4,000-entry cap), model/delegate/grid, Preview, Viewer, confirmation/message dialogs and Toast.</td></tr>
-  <tr><td><code>pages/base</code></td><td>129</td><td><code>Page</code>: header, stale/refresh lifecycle, busy handling, <code>run</code>, <code>apply_actions</code> (the shared Confirm → Apply → Toast/Undo flow).</td></tr>
+  <tr><td><code>tasks</code></td><td>197</td><td><code>TaskRunner.run(title, fn(progress), on_done, on_cancel)</code>; signals <code>started/progressed/finished/error/busy_changed</code>. <code>BackgroundCall</code>: latest-wins read-only computations off the UI thread (page insights).</td></tr>
+  <tr><td><code>widgets</code></td><td>882</td><td>Formatting/layout helpers, tiles/banners/cards, <code>AppContext</code> (generations, cached results, maintenance state, navigation signals), <code>ThumbCache</code> (64 MiB pixel budget and 4,000-entry cap), model/delegate/grid, Preview, Viewer, confirmation/message dialogs and Toast.</td></tr>
+  <tr><td><code>pages/base</code></td><td>131</td><td><code>Page</code>: header, stale/refresh lifecycle, busy handling, <code>run</code>, <code>apply_actions</code> (the shared Confirm → Apply → Toast/Undo flow).</td></tr>
   <tr><td><code>cropcanvas</code></td><td>237</td><td><code>CropCanvas</code>: draws the preview, eight drag handles, rule-of-thirds grid and aspect lock; emits a crop normalised to the transformed image. <code>rotate_crop</code>/<code>flip_crop</code> keep the crop on the same content when rotating or mirroring.</td></tr>
-  <tr><td><code>pages/*</code></td><td>5660</td><td>One per tool; preview work and Insights aggregates use workers. Photos uses SQL paging rather than full-catalogue Python filtering.</td></tr>
+  <tr><td><code>pages/*</code></td><td>5667</td><td>One per tool; preview work and Insights aggregates use workers. Photos uses SQL paging rather than full-catalogue Python filtering.</td></tr>
   <tr><td><code>insight_charts</code></td><td>159</td><td>Accessible bar lists and a QPainter map with bounded markers and wheel zoom.</td></tr>
   <tr><td><code>library_filters</code></td><td>239</td><td>Shared folder/type/format/date/size/GPS/face/person controls and validation.</td></tr>
   <tr><td><code>storage_dialog</code></td><td>84</td><td>Safe defaults, selective clearing, hard-reset acknowledgement and low-space resume option.</td></tr>
@@ -618,6 +622,31 @@ selections are discarded. Reset does not delete <code>.memoria</code> or recover
 </ul>
 </section>
 
+<section id="diagnostics">
+<h2>Opt-in aggregate diagnostics</h2>
+<p><code>engine.diagnostics</code> reads a SQLite transaction snapshot using aggregate queries; no media analysis or
+file-content reads are requested. Unknown formats/codecs/statuses are grouped into fixed categories in SQL before
+reaching the report. Camera, lens, names, paths, GPS coordinates, capture dates, hashes and face vectors are never
+selected for export. Error messages are reduced to a fixed category, not scrubbed and copied.</p>
+<p><code>Metrics</code> retains bounded per-operation counters, total/mean/max wall time and process-CPU deltas.
+TaskRunner emits only fixed operation keys/outcomes and numbers, never task titles or traceback text. Browse-page,
+preview and Insights scopes use the same collector. Windows process-memory counters provide working set and lifetime
+peak for the app process only; unavailable counters are explicit. CPU deltas can include concurrent app work.</p>
+<p><code>ui.diagnostics.DiagnosticsController</code> keeps consent in per-device QSettings for each library. It
+coalesces updates, periodically captures an in-progress main task and uses one background report worker. Each
+recording session/library has a random report filename under the source checkout's diagnostics/reports folder.
+No hostname, username, drive letter/serial, absolute activity timestamp or personal identifier is exported.</p>
+<p>Publication writes a temporary JSON file, flushes/fsyncs, checks the opt-in generation under a lock, and atomically
+replaces the session report. Opt-out/library changes invalidate pending publication. Failures are surfaced without
+writing raw exception strings into diagnostics. Normal close flushes a final aggregate; abrupt termination retains
+the previous snapshot. Temporary staging files are gitignored; reports require manual review/staging/push.</p>
+<p>Cached catalogues work immediately, but old unrecorded timings cannot be inferred. Reports can be incomplete during
+indexing, unavailable on a disconnected catalogue, and are not guaranteed anonymous. Packaged installations without
+a source checkout cannot use repository-local recording. No network service, dependency or schema migration is added.</p>
+<p>Main-task completion/catalogue changes request a snapshot; heartbeat/manual/close snapshots include browsing and
+preview timings accumulated in memory. Individual browse clicks do not trigger repeated whole-catalogue aggregation.</p>
+</section>
+
 <section id="concurrency">
 <h2>Concurrency model</h2>
 <table>
@@ -690,7 +719,7 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>196 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. See the generated
+<p><b>205 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. See the generated
 <a href="report.html">quality report</a> for current outcomes and timings.</p>
 <table>
   <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
@@ -713,6 +742,8 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
     saved-album links, India/world switching, bounded 10,000-row paging, mouse clicks and wheel zoom in both themes.</td></tr>
   <tr><td><code>test_metadata.py</code></td><td>21</td><td>Real EXIF/video fields, schema-5 migration, legacy retained rows,
     partial refresh/resume, missing-last numeric sorting, metadata range validation and preview/filter UI.</td></tr>
+  <tr><td><code>test_diagnostics.py</code></td><td>9</td><td>Injected private-value exclusion, cached-only reports, bounded
+    timing aggregation, native memory sampling, atomic failures, opt-in, live tasks and library-switch publication guards.</td></tr>
 </table>
 <h3>Ground-truth library</h3>
 <p><code>memoria/samplelib.py</code> deterministically generates procedural landscape photos (sky gradient, sun, ridges,

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Local diagnostics
+- Added opt-in, per-library/device recording of aggregate catalogue statistics and bounded timing metrics.
+- Reports work from existing caches without rescanning media, and include periodic in-progress snapshots and
+  app-process memory/CPU measurements. Previous unrecorded timings cannot be recovered.
+- Aggregate JSON is written atomically inside the source checkout's diagnostics/reports folder for manual review
+  and git sharing. No raw metadata, paths, coordinates, names, biometric vectors or file hashes are exported.
+- Consent is stored locally, not in the repository. Disabling or switching libraries prevents stale reports from
+  being published; write failures are visible and leave prior reports intact. No automatic uploads or git actions.
+
 ### Extended metadata
 - Added ascending/descending video-duration, pixel-resolution, estimated overall bitrate and FPS sorting.
 - Added codec, format, modified-date, camera/lens and EXIF ISO, aperture, exposure-time and focal-length sorting.
