@@ -54,7 +54,7 @@ class HealthPage(Page):
 
     def check(self) -> None:
         lib = self.lib
-        self.run("Checking every file", lambda p: health.run_health(lib, p), self._show)
+        self.run("Checking every file", lambda p: health.run_health(lib, p), self._show, notify_success=False)
 
     def _show(self, rep: health.HealthReport) -> None:
         for k, t in self.tiles.items():
@@ -80,3 +80,4 @@ class HealthPage(Page):
         self.ctx.toast_requested.emit(f"Checked {fmt_n(rep.checked, 'file')} ({fmt_size(rep.bytes)}). "
                                       + ("No problems found in the files checked." if not problems else
                                          f"{fmt_n(problems, 'file')} need attention; see the results."), "")
+        self.ctx.notification_requested.emit("health_problems" if problems else "results_ready", problems)

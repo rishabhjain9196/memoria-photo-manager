@@ -603,7 +603,8 @@ class VideoPage(Page):
             self.ctx.toast_requested.emit("Compression stopped. Videos that had already finished were kept "
                                           f"in {out}.", "")
 
-        if not self.run(f"Compressing {fmt_n(len(files), 'video')}", work, self._show_results, cancelled):
+        if not self.run(f"Compressing {fmt_n(len(files), 'video')}", work, self._show_results, cancelled,
+                        notify_success=False):
             self.ctx.toast_requested.emit("Another task is still running. Try again when it has finished.", "")
 
     def _show_results(self, results: list[videotools.CompressResult]) -> None:
@@ -647,6 +648,8 @@ class VideoPage(Page):
         self.results_summary.setText(msg + " Double-click a row to show the file.")
         self.results_card.show()
         self.ctx.toast_requested.emit(msg, "")
+        self.ctx.notification_requested.emit("operation_partial" if failed else "compression_complete",
+                                              failed if failed else len(ok))
 
     def _show_result(self) -> None:
         rows = {i.row() for i in self.results.selectedItems()}

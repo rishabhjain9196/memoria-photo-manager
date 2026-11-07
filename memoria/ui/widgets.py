@@ -245,6 +245,7 @@ class AppContext(QObject):
     album_requested = Signal(int)
     indexing_changed = Signal(bool)
     index_progress = Signal()
+    notification_requested = Signal(str, int)
 
     def __init__(self, runner):
         super().__init__()

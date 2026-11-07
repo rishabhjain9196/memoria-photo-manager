@@ -800,6 +800,7 @@ class StoryPage(Page):
             self.show_btn.setVisible(bool(res))
             self.ctx.library_modified.emit()
             self.ctx.toast_requested.emit(msg, created[0].batch_id if created[0] and created[0].done else "")
+            self.ctx.notification_requested.emit("story_complete", len(res))
 
         def cancelled():
             self.result_label.setText("Stopped. Nothing was saved.")
@@ -818,7 +819,7 @@ class StoryPage(Page):
                 created[0] = batch
                 return export(prog)
 
-        if not self.run(title, journaled_work, done, cancelled):
+        if not self.run(title, journaled_work, done, cancelled, notify_success=False):
             self.ctx.toast_requested.emit("Another task is still running. Try again when it has finished.", "")
 
     def _show_outputs(self) -> None:

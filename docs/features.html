@@ -42,6 +42,7 @@
   <a href="#history">History &amp; recovery</a>
   <a href="#reset">Storage &amp; reset</a>
   <a href="#diagnostics">Local diagnostics</a>
+  <a href="#notifications">Notifications</a>
   <a href="#progress">Progress &amp; cancelling</a>
   <a href="#themes">Themes</a>
   <a href="#shortcuts">Keyboard shortcuts</a>
@@ -612,6 +613,30 @@ history remain after disabling/resetting. Do not copy <code>.memoria</code> or r
 <p>Interrupted writes leave the previous complete snapshot intact. Reports may be partial during indexing or unavailable
 when the catalogue/checkout cannot be read or written; failures are shown in Diagnostics. See the
 <a href="../diagnostics/README.md">report contents and sharing guide</a>.</p>
+</section>
+
+<section id="notifications">
+<h2>Notifications</h2>
+<p>Open <b>Notifications</b> below the library name. By default, desktop messages appear only while Memoria is
+backgrounded or minimised. Viewing a photo or using a Memoria dialog counts as foreground, not as leaving the app.</p>
+<ul>
+  <li>Indexing or a catalogue rebuild finishes; unreadable items produce a warning instead of an unconditional success.</li>
+  <li>Utility results, cleanup, sync, album exports, edited copies, story exports and compressed videos are ready.</li>
+  <li>A task fails or some items fail/are skipped. A compression copy refused because it is not smaller is a
+      review-results warning, not a claim that the original was damaged.</li>
+  <li>Health check finds missing, unreadable or possibly damaged files.</li>
+  <li>A task is cancelled, indexing stops, or a rebuild is paused. Completed work is not automatically undone.</li>
+</ul>
+<p>Turn categories on/off, or select background-only, always-desktop, in-app-only or off. Preferences are saved
+locally for this device/user, across libraries. Turning notifications off does not suppress safety dialogs or Undo
+toasts. The recent-event list retains at most <b>50</b> enabled events in memory; changing libraries, rebuilding the
+window for a theme change or exiting clears it. It is not the persistent History &amp; recovery journal.</p>
+<p>Desktop text contains only generic messages and optional counts, never filenames, library paths/names, people,
+locations or raw errors. Clicking a message brings the current Memoria window (or its open dialog) forward; it does
+not perform a file operation or switch libraries. The tray menu also opens notification settings.</p>
+<div class="callout">Windows notification/Focus Assist settings can suppress delivery. If tray messages are unsupported,
+enabled events still appear in the sidebar's recent list. <b>Closing Memoria exits it</b>, rather than hiding it in the tray.
+Offscreen automated tests verify routing with a fake tray, not actual Windows popup appearance.</div>
 </section>
 
 <section id="themes">

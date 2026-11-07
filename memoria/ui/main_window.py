@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings, QTimer, Qt, Signal
 from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
-from PySide6.QtWidgets import (QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
                                QProgressBar, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import __version__
@@ -144,10 +144,19 @@ class MainWindow(QMainWindow):
         self._index_refresh.setInterval(2000)
         self._index_refresh.timeout.connect(self._publish_index_progress)
         self._build()
+        from .notifications import NotificationManager
+        self.notifications = NotificationManager(self, self.settings)
+        self._notification_dialog = None
+        self.ctx.notification_requested.connect(self.notifications.notify)
+        self.notifications.changed.connect(self._notifications_updated)
+        self.notifications.restore_requested.connect(self._restore_from_notification)
+        self.notifications.settings_requested.connect(self.manage_notifications)
+        self.ctx.library_opened.connect(self.notifications.clear)
         from .diagnostics import DiagnosticsController
         self.diagnostics = DiagnosticsController(self.ctx, self.settings, self)
         self.diagnostics.updated.connect(self._diagnostics_updated)
         self.diagnostics.problem.connect(lambda message: self.toast.show_message(message, seconds=12))
+        self.diagnostics.problem.connect(lambda _: self.ctx.notification_requested.emit("diagnostics_failed", 0))
         self._shortcuts()
         self.runner.started.connect(self._task_started)
         self.runner.progressed.connect(self._task_progress)
@@ -191,6 +200,8 @@ class MainWindow(QMainWindow):
         sl.addLayout(hbox(8, self.storage_btn, None))
         self.diagnostics_btn = button("Diagnostics…", "link", self.manage_diagnostics)
         sl.addLayout(hbox(8, self.diagnostics_btn, None))
+        self.notifications_btn = button("Notifications…", "link", self.manage_notifications)
+        sl.addLayout(hbox(8, self.notifications_btn, None))
         sl.addSpacing(6)
         group = QButtonGroup(self)
         group.setExclusive(True)
@@ -420,6 +431,11 @@ class MainWindow(QMainWindow):
                 bits.append(f"{fmt_n(s.unreadable_files, 'file')} couldn't be read (catalogue entries kept)")
             if bits:
                 self.toast.show_message("Library updated: " + ", ".join(bits) + ".", seconds=6)
+            else:
+                self.toast.show_message("Library indexing finished.", seconds=4)
+            self.ctx.notification_requested.emit(
+                "index_issues" if s.unreadable_folders or s.unreadable_files or a.errors else
+                "index_complete" if live else "rebuild_complete", 0)
 
         if live:
             self._index_notified = False
@@ -460,6 +476,38 @@ class MainWindow(QMainWindow):
     def _diagnostics_updated(self):
         self.diagnostics_btn.setText("Diagnostics (recording)" if self.diagnostics.enabled else "Diagnostics…")
         self.diagnostics_btn.setToolTip(self.diagnostics.status)
+
+    def _notifications_updated(self):
+        count = self.notifications.unread
+        self.notifications_btn.setText(f"Notifications ({count})" if count else "Notifications…")
+
+    def _restore_from_notification(self):
+        if self._closing:
+            return
+        if self.isMinimized():
+            self.showNormal()
+        else:
+            self.show()
+        target = QApplication.activeModalWidget() or self
+        if target.isMinimized():
+            target.showNormal()
+        else:
+            target.show()
+        target.raise_()
+        target.activateWindow()
+
+    def manage_notifications(self):
+        if self._notification_dialog is not None:
+            self._notification_dialog.raise_()
+            self._notification_dialog.activateWindow()
+            return
+        from .notifications import NotificationsDialog
+        dialog = self._notification_dialog = NotificationsDialog(self, self.notifications)
+        try:
+            dialog.exec()
+        finally:
+            self._notification_dialog = None
+            dialog.deleteLater()
 
     def manage_diagnostics(self):
         from .diagnostics import DiagnosticsDialog
@@ -532,6 +580,8 @@ class MainWindow(QMainWindow):
                             "could not be read. Check Problems or reconnect the drive and rescan.")
             message += " Run People, Albums, Health check or Similar videos again if you cleared them."
             self.toast.show_message(message, seconds=15)
+            self.ctx.notification_requested.emit(
+                "index_issues" if issues or scan_result.unreadable_folders else "rebuild_complete", 0)
 
         self.runner.run("Rebuilding library storage", work, done,
                         on_cancel=self.ctx.library_modified.emit, diagnostic_key="reset")
@@ -554,6 +604,7 @@ class MainWindow(QMainWindow):
                      fmt_n(groups, "similar group"), fmt_n(c.counts.get("blurry", 0), "blurry photo"),
                      f"{fmt_n(c.counts.get('tidy', 0), 'item')} to tidy"]
             self.toast.show_message("Check-up complete: " + ", ".join(parts) + ". Nothing was changed.", seconds=12)
+            self.ctx.notification_requested.emit("results_ready", 0)
 
         self.runner.run("Checking everything", lambda prog: checkup.run(lib, prog), done, diagnostic_key="checkup")
 
@@ -609,6 +660,9 @@ class MainWindow(QMainWindow):
         def done(res):
             self.ctx.library_modified.emit()
             msg = f"Undone: {fmt_n(res.done, 'change')} reversed."
+            self.ctx.notification_requested.emit(
+                "operation_partial" if res.failed else "task_cancelled" if res.cancelled else "operation_complete",
+                res.failed if res.failed else res.done)
             if res.failed:
                 MessageDialog(self, "Some changes could not be undone", "Those files were left where they are.",
                               "\n".join(res.messages)).exec()
@@ -658,14 +712,18 @@ class MainWindow(QMainWindow):
         if self.ctx.maintenance:
             self.toast.show_message("Rebuild is unfinished. Use Resume rebuild, or reopen this library. "
                                     "Originals and Recovery are untouched.", seconds=15)
+            if outcome != "failed":
+                self.ctx.notification_requested.emit("rebuild_paused", 0)
             return
         if self.ctx.library is not None and not self.pages:
             self.go("overview")
         if outcome == "cancelled":
             self.toast.show_message("Indexing stopped. Completed analysis is kept; F5 resumes."
                                     if was_indexing else "Stopped. Anything already done is recorded in History.", seconds=6)
+            self.ctx.notification_requested.emit("index_paused" if was_indexing else "task_cancelled", 0)
 
     def _task_error(self, title: str, msg: str, details: str) -> None:
+        self.ctx.notification_requested.emit("rebuild_failed" if self.ctx.maintenance else "task_failed", 0)
         advice = ("Completed analysis is kept. Reconnect the drive if needed and press F5 to resume."
                   if self.ctx.indexing else
                   "Use Resume rebuild to finish safely. If space is low, choose Skip shrinking storage files."
@@ -680,6 +738,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e) -> None:
         self._closing = True
+        self.notifications.close()
         self._index_refresh.stop()
         self.ctx.indexing = False
         if self.runner.busy:

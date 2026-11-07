@@ -336,6 +336,12 @@ offers Undo.</figcaption></figure>
   <tr><td>Library changed elsewhere</td><td>Pages are marked stale and refresh when shown, never while a task runs.</td></tr>
 </table>
 
+<p><b>Key-event notifications</b> complement, rather than replace, existing progress, Undo toasts and safety dialogs.
+Background-only desktop delivery is the default; Memoria's own viewer/dialogs count as foreground. Fixed messages
+and optional counts keep filenames, paths, people, GPS and raw errors out of OS notifications. Failures/skips and
+cancelled results must not also generate a generic success. A message click only restores the current window or
+modal dialog. Per-device settings and a 50-event in-memory recent list are available from the sidebar; unsupported
+desktops fall back to that list. Closing still exits. See <a href="features.html#notifications">Notifications</a>.</p>
 <h3 id="explain">Explaining decisions</h3>
 <p>Automatic choices are only acceptable if the user can see why they were made. Every engine heuristic therefore
 returns a reason alongside its result:</p>

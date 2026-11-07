@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Key-event notifications
+- Desktop notifications default to background/minimised delivery; an active Memoria dialog/viewer counts as foreground.
+- Sidebar Notifications offers per-device delivery/category settings and a bounded, in-memory recent-event list.
+- Covers indexing/rebuild, analysis, cleanup/sync/export/compression, failures/skips, health problems and cancellation.
+  Returned partial/cancelled batch results are classified separately from worker exceptions, without duplicate success messages.
+- Desktop text uses fixed templates and optional counts, never paths, filenames, library names or raw error details.
+  Existing Undo toasts and safety dialogs are unchanged. Clicking a message restores Memoria without applying actions.
+- Unsupported desktops retain in-app events; Windows settings may suppress popups. Closing still exits and disarms
+  notification delivery. No new dependency, catalogue migration, media scan or notification-history file.
+- Notification/live-index/end-to-end UI regression run: 18 tests passed. Desktop routing uses a fake tray;
+  actual Windows popup appearance/delivery is not asserted by the offscreen tests.
+
 ### Live browsing during indexing
 - Photos & videos can browse completed catalogue entries before indexing finishes, including search, sort,
   paging and the viewer. Other utilities stay locked during active indexing.

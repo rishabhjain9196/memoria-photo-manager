@@ -46,6 +46,7 @@ AREAS = {
     "test_metadata": "Extended photo/video metadata, migration, filters and numeric sorting",
     "test_diagnostics": "Aggregate diagnostic privacy, cached reports, opt-in and publication",
     "test_live_index": "Live browsing during indexing and utility safety",
+    "test_notifications": "Key-event notification routing, privacy, preferences and shutdown",
 }
 
 

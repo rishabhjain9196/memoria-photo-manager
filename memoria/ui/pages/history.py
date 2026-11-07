@@ -179,5 +179,6 @@ class HistoryPage(Page):
         def done(n):
             self.ctx.library_modified.emit()
             self.ctx.toast_requested.emit(f"Recovery emptied: {fmt_n(n, 'file')} deleted.", "")
+            self.ctx.notification_requested.emit("operation_complete", n)
 
-        self.run("Emptying Recovery", lambda p: actions.empty_recovery(lib, progress=p), done)
+        self.run("Emptying Recovery", lambda p: actions.empty_recovery(lib, progress=p), done, notify_success=False)

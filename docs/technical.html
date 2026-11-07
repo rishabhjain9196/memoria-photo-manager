@@ -40,6 +40,7 @@
   <a href="#p-insights">Catalogue queries &amp; maps</a>
   <a href="#p-reset">Selective storage reset</a>
   <a href="#diagnostics">Aggregate diagnostics</a>
+  <a href="#notifications">Key-event notifications</a>
   <a href="#executor">Action executor &amp; journal</a>
   <a href="#integrity">Catalogue integrity</a>
   <a href="#ui">UI architecture</a>
@@ -654,6 +655,22 @@ a source checkout cannot use repository-local recording. No network service, dep
 preview timings accumulated in memory. Individual browse clicks do not trigger repeated whole-catalogue aggregation.</p>
 </section>
 
+<section id="notifications">
+<h2>Key-event notifications</h2>
+<p><code>ui.notifications.NotificationManager</code> consumes <code>AppContext.notification_requested(str, int)</code>
+on the UI thread. Only registered event keys and nonnegative counts are accepted; fixed templates, not task titles
+or error bodies, reach <code>QSystemTrayIcon.showMessage</code>. No network service, dependency or schema change is needed.</p>
+<p>Background-only delivery uses application activation plus the main window's minimised state, so a focused viewer
+or modal dialog does not accidentally count as background. QSettings stores delivery mode and selected categories.
+The in-memory list retains at most 50 enabled events, resets with a library/window change, and is not included in
+diagnostic reports. Missing tray/message support retains the list; offscreen platforms never create a native tray.</p>
+<p>Index/rebuild success is emitted from the result callback, not a progress percentage. Common read-only Page tasks
+emit results-ready; result-aware callers disable that default and classify batch failures/skips, handled cancellation,
+editor failures, compression refusals and health findings. MainWindow handles worker failure/cancellation, avoiding
+a second paused event on rebuild failure. Messages do not overwrite Undo toasts. Tray clicks only restore the current
+window/dialog because Qt's message-click signal has no event ID. Close disarms delivery before cancelling/draining workers.</p>
+</section>
+
 <section id="concurrency">
 <h2>Concurrency model</h2>
 <table>
@@ -726,8 +743,10 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>209 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. See the generated
-<a href="report.html">quality report</a> for current outcomes and timings.</p>
+<p><b>219 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
+<a href="report.html">quality report</a> records the last full-suite snapshot (209 tests, before notifications).
+The notification update was separately verified with 18 notification, live-index and end-to-end UI tests; all passed.
+Fake-tray/offscreen tests do not verify actual Windows popup appearance or OS delivery policy.</p>
 <table>
   <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
   <tr><td><code>test_engine.py</code></td><td>29</td><td>Hash pre-filter semantics; incremental scan; counts, errors, dates and date sources; EXIF rotation; HEIC and video analysis; duplicate groups vs ground truth incl. the &gt;1.28 MB regression; removal + undo restores an identical tree; changed keeper/copy are skipped; user keeper override/exclusion; bursts and best frame; near-duplicates prefer original; exact copies and screenshots excluded from Similar; blur detection; organise plan/apply/undo and uncertain dates; tidy categories and apply/undo (folders recreated); health baseline, bit-flip damage, edit detection; compare read-only + two-way sync + undo; overlapping folder rejection; verified copy failure leaves nothing; never overwrites; crash reconciliation; cancellation; Empty Recovery.</td></tr>
@@ -753,6 +772,9 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
     timing aggregation, native memory sampling, atomic failures, opt-in, live tasks and library-switch publication guards.</td></tr>
   <tr><td><code>test_live_index.py</code></td><td>4</td><td>Blocked-analysis proof of live browsing, viewer availability,
     disabled utilities/context menus, stable selected previews, normal/cancelled completion and thumbnail accounting.</td></tr>
+  <tr><td><code>test_notifications.py</code></td><td>10</td><td>Delivery modes, per-device preferences, modal foreground,
+    minimised delivery, unsupported-desktop fallback, bounded history, private-detail exclusion, real task outcome
+    routing without duplicate success, Undo preservation, click-to-restore and shutdown suppression.</td></tr>
 </table>
 <h3>Ground-truth library</h3>
 <p><code>memoria/samplelib.py</code> deterministically generates procedural landscape photos (sky gradient, sun, ridges,

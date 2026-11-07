@@ -801,13 +801,15 @@ class EditorPage(Page):
             self.last_btn.show()
             names = outputs[0].name if len(outputs) == 1 else f"{fmt_n(len(outputs), 'file')}"
             self.ctx.toast_requested.emit(f"Saved {names}. The original is unchanged.", batch.batch_id if batch else "")
+            self.ctx.notification_requested.emit("operation_partial" if failures else "edits_complete",
+                                                  len(failures) if failures else len(outputs))
             if failures:
                 from ..widgets import MessageDialog
                 MessageDialog(self, "Some files could not be edited",
                               f"{fmt_n(len(failures), 'file')} could not be saved. The originals were not touched.",
                               "\n".join(f"{Path(f).name}: {m}" for f, m in failures)).exec()
 
-        self.run(title, work, done, on_cancel=self.ctx.library_modified.emit)
+        self.run(title, work, done, on_cancel=self.ctx.library_modified.emit, notify_success=False)
 
     @staticmethod
     def _inside(lib, p: Path) -> bool:

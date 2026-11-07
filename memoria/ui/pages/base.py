@@ -81,7 +81,7 @@ class Page(QWidget):
         return not self.busy or (self.live_index_view and self.ctx.indexing and not self.ctx.maintenance)
 
     def run(self, title: str, fn: Callable[[Progress], Any], on_done: Optional[Callable[[Any], None]] = None,
-            on_cancel: Optional[Callable[[], None]] = None) -> bool:
+            on_cancel: Optional[Callable[[], None]] = None, *, notify_success: bool = True) -> bool:
         if self.ctx.maintenance:
             self.ctx.toast_requested.emit("Finish the library rebuild using Resume rebuild first.", "")
             return False
@@ -90,7 +90,12 @@ class Page(QWidget):
             return False
         from ...engine.diagnostics import OPERATIONS
         key = self.__class__.__module__.rsplit(".", 1)[-1]
-        ok = self.ctx.runner.run(title, fn, on_done, on_cancel, diagnostic_key=key if key in OPERATIONS else "other")
+        def completed(result):
+            if on_done:
+                on_done(result)
+            if notify_success:
+                self.ctx.notification_requested.emit("results_ready", 0)
+        ok = self.ctx.runner.run(title, fn, completed, on_cancel, diagnostic_key=key if key in OPERATIONS else "other")
         if not ok:
             self.ctx.toast_requested.emit(f"Please wait for “{self.ctx.runner.title}” to finish first.", "")
         return ok
@@ -123,6 +128,12 @@ class Page(QWidget):
             if res.cancelled:
                 msg = "Stopped part-way. " + msg
             self.ctx.toast_requested.emit(msg, res.batch_id if res.done else "")
+            if res.failed or res.skipped:
+                self.ctx.notification_requested.emit("operation_partial", res.failed + res.skipped)
+            elif res.cancelled:
+                self.ctx.notification_requested.emit("task_cancelled", 0)
+            elif res.done:
+                self.ctx.notification_requested.emit("export_complete" if kind == "albums" else "operation_complete", res.done)
             if res.failed:
                 MessageDialog(self, "Some files could not be changed",
                               f"{fmt_n(res.failed, 'file')} could not be processed. They were left exactly where they were.",
@@ -130,7 +141,7 @@ class Page(QWidget):
             if after:
                 after(res)
 
-        self.run(title, work, done, on_cancel=lambda: self.ctx.library_modified.emit())
+        self.run(title, work, done, on_cancel=lambda: self.ctx.library_modified.emit(), notify_success=False)
 
 
 def recovery_note() -> str:

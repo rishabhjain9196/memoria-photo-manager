@@ -63,6 +63,10 @@ the rendered page).
 - **Light, dark or Match Windows** themes, keyboard shortcuts, a built-in viewer, and thumbnail zoom.
 - **Progress for long operations**: percentage, elapsed time and time left where available, with cooperative Cancel
   (Esc). Insights has a separate background loading indicator.
+- **Key-event notifications**: desktop messages only while Memoria is backgrounded/minimised by default. Indexing,
+  file operations, exports, warnings, health problems and cancellation are covered. **Notifications** in the sidebar
+  offers per-device delivery/category settings and up to 50 recent events. Messages never include filenames or paths;
+  existing Undo toasts remain. Windows may suppress desktop delivery; closing Memoria still exits.
 - **Best-shot picker** for bursts and WhatsApp-style copies. It scores sharpness, exposure, faces and resolution, and
   shows the reasoning (e.g. "sharpest (20× the softest)").
 - **Editor** for photos and videos: crop with aspect presets, rotate, mirror/flip, straighten, brightness, contrast,
@@ -84,8 +88,8 @@ the rendered page).
   aperture, exposure time, focal length and lens; plus camera, orientation, format and modified dates.
 - **Live browsing during indexing:** completed entries appear periodically in Photos & videos. Search, filters,
   paging and the viewer work while indexing; utilities stay locked until indexing stops.
-- **Tested** against generated libraries and synthetic catalogues: 209 automated tests, including UI tests in both
-  themes.
+- **Tested** against generated libraries and synthetic catalogues, including UI tests in both themes and fake-tray
+  tests for notification privacy, focus, cancellation and partial failures.
 
 ## Quick start
 
