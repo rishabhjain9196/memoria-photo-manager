@@ -119,8 +119,20 @@ MIGRATIONS: dict[int, list[str]] = {
         "CREATE TABLE IF NOT EXISTS storage_reset (id INTEGER PRIMARY KEY CHECK(id=1), "
         "options TEXT NOT NULL, phase TEXT NOT NULL, forgotten TEXT NOT NULL)",
     ],
+    6: [
+        "ALTER TABLE files ADD COLUMN metadata_version INTEGER DEFAULT 0",
+        "ALTER TABLE files ADD COLUMN fps REAL",
+        "ALTER TABLE files ADD COLUMN video_codec TEXT",
+        "ALTER TABLE files ADD COLUMN audio_codec TEXT",
+        "ALTER TABLE files ADD COLUMN iso INTEGER",
+        "ALTER TABLE files ADD COLUMN aperture REAL",
+        "ALTER TABLE files ADD COLUMN exposure_seconds REAL",
+        "ALTER TABLE files ADD COLUMN focal_length_mm REAL",
+        "ALTER TABLE files ADD COLUMN lens TEXT",
+    ],
 }
 SCHEMA_VERSION = max(MIGRATIONS)
+METADATA_VERSION = 1
 
 THUMB_SCHEMA = """CREATE TABLE IF NOT EXISTS thumbs (file_id INTEGER PRIMARY KEY, data BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS face_thumbs (face_id INTEGER PRIMARY KEY, data BLOB NOT NULL);"""
@@ -128,7 +140,8 @@ CREATE TABLE IF NOT EXISTS face_thumbs (face_id INTEGER PRIMARY KEY, data BLOB N
 # Columns derived from file content; cleared whenever a file's size or mtime changes.
 DERIVED = ("qhash", "chash", "analyzed", "error", "width", "height", "taken_at", "date_source",
            "camera", "lat", "lon", "duration", "dhash", "sharpness", "brightness", "contrast",
-           "clipped", "faces")
+           "clipped", "faces", "metadata_version", "fps", "video_codec", "audio_codec",
+           "iso", "aperture", "exposure_seconds", "focal_length_mm", "lens")
 
 
 def _connect(path: Path, durable: bool = False) -> sqlite3.Connection:
@@ -306,11 +319,11 @@ class Library:
                    SUM(kind='image') AS images,
                    SUM(kind='video') AS videos,
                    SUM(kind='other') AS others,
-                   SUM(kind!='other' AND analyzed=0) AS pending,
+                   SUM(kind!='other' AND (analyzed=0 OR COALESCE(metadata_version,0)<?)) AS pending,
                    SUM(error IS NOT NULL) AS errors,
                    MIN(CASE WHEN kind!='other' AND error IS NULL THEN taken_at END) AS first,
                    MAX(CASE WHEN kind!='other' AND error IS NULL THEN taken_at END) AS last
-            FROM files""").fetchone()
+            FROM files""", (METADATA_VERSION,)).fetchone()
         return {k: (r[k] or 0) if k not in ("first", "last") else r[k] for k in r.keys()}
 
     def remove_rows(self, file_ids: list[int]) -> None:

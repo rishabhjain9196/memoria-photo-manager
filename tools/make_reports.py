@@ -43,6 +43,7 @@ AREAS = {
     "test_ui_smoke": "Desktop UI — end to end",
     "test_storage": "Selective reset, interruption recovery and storage",
     "test_insights": "Storage charts, timeline, offline map and filtered browsing",
+    "test_metadata": "Extended photo/video metadata, migration, filters and numeric sorting",
 }
 
 
@@ -103,13 +104,10 @@ def run_bench(tmp: Path, photos: int) -> dict | None:
 
 
 def ground_truth() -> dict | None:
-    for p in (ROOT / "test-library" / "expected.json",):
-        if p.exists():
-            return json.loads(p.read_text(encoding="utf-8"))
     sys.path.insert(0, str(ROOT))
     from memoria.samplelib import build
     with tempfile.TemporaryDirectory() as d:
-        return build(Path(d) / "lib", small=False, videos=True)
+        return build(Path(d) / "lib", small=True, videos=True)
 
 
 def versions() -> list[tuple[str, str]]:
@@ -141,6 +139,8 @@ def refresh_images(tmp: Path) -> None:
     for name in ("dark-overview", "dark-photos", "dark-similar", "insights-storage", "insights-timeline",
                  "insights-india", "insights-world", "dark-insights", "photos-largest", "library-filters",
                  "storage-reset", "storage-reset-hard"):
+        names[name] = name
+    for name in ("library-filters-video", "library-filters-camera", "photos-video-metadata"):
         names[name] = name
     sources = {dest: shots / f"{source}.png" for dest, source in names.items()}
     sources["confirm"] = next(shots.glob("dialog-Move*.png"))
@@ -225,8 +225,9 @@ td.num{{text-align:right;white-space:nowrap}} details summary{{cursor:pointer;fo
                 ("Non-media files", len(gt["non_media"])), ("EXIF-rotated photos", len(gt["rotated"])),
                 ("Files with a known date and source", len(gt["dates"])), ("Files with no reliable date", len(gt["uncertain_dates"])),
                 ("Videos", len(gt["videos"])), ("HEIC photos", len(gt["heic"]))]
-        parts.append("<p>The full test library (<code>tools/make_test_library.py</code>) contains these known cases; "
-                     "the test suite uses a smaller variant with the same scenarios.</p><table><tr><th>Scenario</th><th>Count</th></tr>")
+        parts.append("<p>The small generated library used by the tests and documentation screenshots contains "
+                     "these known cases. <code>tools/make_test_library.py</code> can also generate a larger variant."
+                     "</p><table><tr><th>Scenario</th><th>Count</th></tr>")
         parts += [f"<tr><td>{k}</td><td class='num'>{v}</td></tr>" for k, v in rows]
         parts.append("</table>")
     parts.append("</section><section id='env'><h2>Environment</h2><table><tr><th>Component</th><th>Version</th></tr>")

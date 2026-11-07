@@ -130,6 +130,11 @@ def exif_bytes(dt: datetime, cam: int | None, place: str | None, orientation: in
     sub = ex.get_ifd(0x8769)
     sub[0x9003] = dt.strftime("%Y:%m:%d %H:%M:%S")
     sub[0x9004] = dt.strftime("%Y:%m:%d %H:%M:%S")
+    if cam is not None:
+        sub.update({0x8827: 100 * 2**cam, 0x829D: IFDRational(28 + cam * 12, 10),
+                    0x829A: IFDRational(1, 125 * (cam + 1)), 0x920A: IFDRational(24 + cam * 11, 1),
+                    0xA434: f"Sample {24 + cam * 11} mm lens"})
+        ex[0x8769] = sub
     if place:
         lat, lon = PLACES[place]
         gps = ex.get_ifd(0x8825)

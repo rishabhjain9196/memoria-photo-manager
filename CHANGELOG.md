@@ -2,9 +2,18 @@
 
 ## Unreleased
 
+### Extended metadata
+- Added ascending/descending video-duration, pixel-resolution, estimated overall bitrate and FPS sorting.
+- Added codec, format, modified-date, camera/lens and EXIF ISO, aperture, exposure-time and focal-length sorting.
+- Tabbed metadata filters combine numeric ranges, minimum dimensions, displayed orientation and exact camera/codecs;
+  preview details and grid captions show units and distinguish missing metadata from zero/no audio.
+- Schema v6 adds extended metadata with a per-file analysis version. A one-time resumable refresh preserves original
+  files, IDs, albums, people, journal and health baselines; older retained rows refresh on return.
+- Compression still uses bundled FFmpeg with CPU libx264/AAC; HandBrakeCLI has not been added.
+
 ### Documentation
 - Updated the complete HTML documentation set and README for the current source, including safety limits,
-  selective reset, insights, filters, paging, schema v5 and offline map attribution.
+  selective reset, insights, filters, paging, schema v6 and offline map attribution.
 - Regenerated the quality report and screenshots from disposable test media; large media benchmarks are explicitly
   not rerun. Existing executable/package measurements are labelled historical rather than current build verification.
 

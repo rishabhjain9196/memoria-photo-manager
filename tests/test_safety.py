@@ -111,11 +111,12 @@ def test_lock_is_reentrant_in_process_and_released_on_close(library):
 
 # ------------------------------------------------------------------------- schema
 def test_schema_version_and_migration_from_v1(tmp_path):
-    lib = Library(tmp_path)
-    assert lib.db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-    lib.db.execute("DROP TABLE parked_files")
-    lib.db.execute("PRAGMA user_version=0")      # what a 1.0 catalogue looks like
-    lib.close()
+    from memoria.engine.db import SCHEMA
+    app_dir = tmp_path / ".memoria"
+    app_dir.mkdir()
+    db = sqlite3.connect(app_dir / "memoria.db")
+    db.executescript(SCHEMA)
+    db.close()
     lib = Library(tmp_path)
     assert lib.db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     lib.db.execute("SELECT COUNT(*) FROM parked_files")

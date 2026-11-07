@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import io
+import logging
+import math
 import re
 import threading
 from datetime import datetime
@@ -31,6 +33,8 @@ _DT = 0x0132
 _MAKE = 0x010F
 _MODEL = 0x0110
 _ORIENTATION = 0x0112
+PHOTO_METADATA = {"iso": 0x8827, "aperture": 0x829D, "exposure_seconds": 0x829A, "focal_length_mm": 0x920A}
+_log = logging.getLogger(__name__)
 
 _FILENAME_DATE = re.compile(
     r"(?<!\d)(?P<y>(?:19|20)\d{2})[-_.]?(?P<m>0[1-9]|1[0-2])[-_.]?(?P<d>0[1-9]|[12]\d|3[01])"
@@ -99,6 +103,28 @@ def read_exif(img: Image.Image) -> dict:
     elif make:
         out["camera"] = make
     out["orientation"] = exif.get(_ORIENTATION, 1)
+    for key, tag in PHOTO_METADATA.items():
+        value = sub.get(tag, exif.get(tag))
+        if key == "iso":
+            value = sub.get(0x8833, value)  # Extended ISO speed, when present.
+        if value is None:
+            continue
+        try:
+            if isinstance(value, (tuple, list)):
+                value = value[0]
+            number = float(value)
+            if not math.isfinite(number) or number <= 0 or (key == "iso" and
+                    (not number.is_integer() or number > 2**63 - 1)):
+                raise ValueError("Invalid metadata number")
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError, IndexError):
+            _log.warning("Invalid optional EXIF field %s; omitted from catalogue", key)
+            continue
+        out[key] = int(number) if key == "iso" else number
+    lens = sub.get(0xA434, exif.get(0xA434))
+    if lens:
+        if isinstance(lens, bytes):
+            lens = lens.decode("utf-8", "replace")
+        out["lens"] = str(lens).strip(" \x00")
     try:
         gps = exif.get_ifd(_GPS_IFD)
         if gps and 2 in gps and 4 in gps:
@@ -178,7 +204,7 @@ def analyze_image(path: str | Path) -> dict:
     gray = work.convert("L")
     result = {"width": w, "height": h, "dhash": dhash(gray), "thumb": thumbnail_bytes(work)}
     result.update(quality_metrics(gray))
-    for key in ("camera", "lat", "lon"):
+    for key in ("camera", "lat", "lon", "iso", "aperture", "exposure_seconds", "focal_length_mm", "lens"):
         if key in info:
             result[key] = info[key]
     if "taken_at" in info:

@@ -133,9 +133,14 @@ similar videos, blurry photos, leftovers and the date-folder plan — with a sin
   <li><b>Timeline</b> on the left: All, then years and months with counts. Click to filter.</li>
   <li><b>Search</b> literal text in names, folders, camera models and named people. Type filters include photos/videos,
       individual media types, Problems, other files and all files.</li>
-  <li><b>Sort:</b> newest, oldest, largest, smallest or name. Largest first puts the biggest files at the top and shows sizes under thumbnails.</li>
+  <li><b>Sort:</b> dates, size/name/format, modified time, resolution, video length, estimated overall bitrate, FPS,
+      codecs, camera/lens, ISO, f-number, shutter time and focal length. Numeric options have both directions;
+      unknown/inapplicable values sort last. Captions follow the chosen sort.</li>
   <li><b>Filters…:</b> folder with optional subfolders, format, inclusive capture-date range, minimum/maximum MiB,
       GPS availability or a map-selected area, detected faces and named people. Run Find people first for face filters.</li>
+  <li><b>Metadata tabs:</b> Dimensions &amp; video adds displayed orientation, minimum width/height, MP, duration in
+      seconds, overall Mbps, FPS and codecs. Camera &amp; exposure adds camera/lens and ISO, f-number, exposure seconds
+      and actual focal-length ranges. Missing values are excluded only for fields you constrain.</li>
   <li><b>Preview</b> on the right: the photo, when it was taken and <i>how Memoria knows</i> (camera, video metadata, file
       name, or file date — may be inaccurate), size and resolution, camera, GPS coordinates, its location in the library, and
       any problem in plain words.</li>
@@ -168,6 +173,15 @@ currently shown, <b>Open in default app</b>, <b>Show in folder</b>, and Esc to c
 <figure><img src="images/viewer.png" alt="Viewer"><figcaption>The built-in viewer.</figcaption></figure>
 <figure><img src="images/photos-largest.png" alt="Largest files first"><figcaption>Size sorting makes large files easy to review without reading their contents again.</figcaption></figure>
 <figure><img src="images/library-filters.png" alt="Combined library filters"><figcaption>Filters combine rather than replacing one another. Clear a selected map area before choosing files without GPS.</figcaption></figure>
+<figure><img src="images/library-filters-video.png" alt="Video and dimension filters"><figcaption>Inclusive ranges with explicit units. Resolution uses pixel count, not a quality judgement.</figcaption></figure>
+<figure><img src="images/library-filters-camera.png" alt="Camera and exposure filters"><figcaption>Photographic fields are available only when present in standard EXIF metadata.</figcaption></figure>
+<figure><img src="images/photos-video-metadata.png" alt="Video length sorting and metadata preview"><figcaption>Length sorting with reported frame rate, codecs and estimated overall bitrate in the preview.</figcaption></figure>
+<p>Opening an older catalogue upgrades it to schema v6 and refreshes media analysis once. This reads originals in place,
+preserves identities and health fingerprints, and resumes after cancellation. Older files in Recovery or missing
+records refresh when restored. The preview details scroll when many metadata fields are available.</p>
+<p><b>Interpretation:</b> bitrate is file bytes × 8 ÷ duration, including audio/container overhead, not a video-quality
+score. FPS is reported and may be approximate for variable-frame-rate files. Focal length is actual mm, not a 35 mm
+equivalent. Aperture is an f-number; exposure is seconds (short exposures display as fractions).</p>
 </section>
 
 <section id="insights">
@@ -472,6 +486,12 @@ If not, the copy is discarded and the result says why. Copies are named <i>&lt;n
 <p>Completed copies are journaled when a library is open, including those kept when a later item is cancelled.
 Use History to undo them; changed or unverified copies are not deleted.</p>
 <figure><img src="images/video.png" alt="Video compressor"><figcaption>Results with savings and quality scores.</figcaption></figure>
+<h3>FFmpeg versus HandBrake</h3>
+<p>Memoria uses bundled FFmpeg with CPU <b>libx264/H.264 + AAC</b>, CRF presets or two-pass target-size encoding,
+verification and optional SSIM. HandBrake is another transcoding application with software and hardware encoders
+(<a href="https://handbrake.fr/docs/en/latest/technical/video-codecs.html">official encoder list</a>).
+Both can use x264, so changing to HandBrake alone is not a guaranteed quality/size improvement.
+HandBrakeCLI is not integrated in this version.</p>
 </section>
 
 <section id="health">

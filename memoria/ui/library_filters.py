@@ -1,16 +1,93 @@
 """Reusable catalogue filter dialog; all filters are read-only."""
 from dataclasses import replace
+from datetime import datetime
 
 from PySide6.QtCore import QDate
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDateEdit, QDialog, QDoubleSpinBox, QFormLayout
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QDoubleSpinBox, QFormLayout,
+                               QSpinBox, QTabWidget, QWidget)
 
 from ..engine import catalogue
-from .widgets import MessageDialog, button, hbox, label, vbox
+from .widgets import MessageDialog, button, fmt_date, fmt_duration, fmt_size, hbox, label, scroll, vbox
 
 KINDS = [("media", "Photos & videos"), ("image", "Photos"), ("video", "Videos"),
          ("problems", "Problems"), ("other", "Other files"), ("all", "All files")]
 SORTS = [("newest", "Newest first"), ("oldest", "Oldest first"), ("largest", "Largest first"),
-         ("smallest", "Smallest first"), ("name", "Name")]
+         ("smallest", "Smallest first"), ("name", "Name"), ("format", "File format"),
+         ("modified_newest", "Recently modified"), ("modified_oldest", "Least recently modified"),
+         ("megapixels_desc", "Resolution: highest first"), ("megapixels_asc", "Resolution: lowest first"),
+         ("duration_desc", "Video: longest first"), ("duration_asc", "Video: shortest first"),
+         ("bitrate_desc", "Overall bitrate: highest first"), ("bitrate_asc", "Overall bitrate: lowest first"),
+         ("fps_desc", "Frame rate: highest first"), ("fps_asc", "Frame rate: lowest first"),
+         ("video_codec", "Video codec"), ("audio_codec", "Audio codec"), ("camera", "Camera"), ("lens", "Lens"),
+         ("iso_asc", "ISO: lowest first"), ("iso_desc", "ISO: highest first"),
+         ("aperture_asc", "F-number: lowest first"), ("aperture_desc", "F-number: highest first"),
+         ("exposure_asc", "Shutter: fastest first"), ("exposure_desc", "Shutter: slowest first"),
+         ("focal_asc", "Focal length: shortest first"), ("focal_desc", "Focal length: longest first")]
+RANGES = {
+    "megapixels": ("Resolution (MP)", " MP", 4, 1_000_000),
+    "duration": ("Video length (seconds)", " s", 2, 1_000_000_000),
+    "bitrate": ("Overall bitrate (Mbps, estimated)", " Mbps", 3, 1_000_000),
+    "fps": ("Reported frame rate (fps)", " fps", 3, 1_000_000),
+    "iso": ("ISO sensitivity", "", 0, 1_000_000_000),
+    "aperture": ("Aperture (f-number)", "", 2, 1000),
+    "exposure": ("Exposure / shutter time (seconds)", " s", 6, 86400),
+    "focal": ("Focal length (actual mm)", " mm", 2, 100000),
+}
+
+
+def sort_caption(row: dict, key: str) -> str:
+    if key in ("largest", "smallest"):
+        return fmt_size(row["size"])
+    if key.startswith("modified_"):
+        return fmt_date(datetime.fromtimestamp(row["mtime"]).isoformat())
+    if key == "format":
+        return row["ext"].lstrip(".").upper() or "No extension"
+    if key == "name":
+        return row["name"]
+    if key in ("camera", "lens", "video_codec", "audio_codec"):
+        value = row.get(key)
+        if key == "audio_codec" and value == "":
+            return "No audio"
+        return value or "Unknown"
+    metric = key.rsplit("_", 1)[0]
+    if metric in ("duration", "fps", "bitrate") and row["kind"] != "video":
+        return "Not a video"
+    if metric == "megapixels":
+        w, h = row.get("width"), row.get("height")
+        return f"{w}×{h} · {w*h/1_000_000:.2f} MP" if w and h else "Unknown resolution"
+    if metric == "duration":
+        value = row.get("duration")
+        return fmt_duration(value) or "Unknown duration"
+    if metric == "bitrate":
+        value = catalogue.overall_bitrate(row)
+        return f"≈{value:.3f} Mbps" if value is not None else "Unknown bitrate"
+    if metric in RANGES:
+        field = {"exposure": "exposure_seconds", "focal": "focal_length_mm"}.get(metric, metric)
+        value = row.get(field)
+        if value is None or value <= 0:
+            return "Unknown"
+        if metric == "exposure" and value < 1:
+            return f"1/{1/value:g} s"
+        return f"{'f/' if metric == 'aperture' else ''}{value:g}{RANGES[metric][1]}"
+    return fmt_date(row["taken_at"]) if row.get("taken_at") else row["name"]
+
+
+def metadata_filter_notes(filters: catalogue.Filters) -> list[str]:
+    notes = []
+    for key in ("camera", "lens", "video_codec", "audio_codec"):
+        value = getattr(filters, key)
+        if value is not None:
+            notes.append(f"{key.replace('_', ' ').capitalize()}: {value or 'No audio'}")
+    if filters.orientation != "all":
+        notes.append(filters.orientation.capitalize())
+    if filters.min_width or filters.min_height:
+        notes.append(f"Minimum dimensions: {filters.min_width}×{filters.min_height} px")
+    for key, (title, unit, _, _) in RANGES.items():
+        low, high = getattr(filters, f"min_{key}"), getattr(filters, f"max_{key}")
+        if low is not None or high is not None:
+            notes.append(f"{title}: {f'{low:g}' if low is not None else 'any'}–"
+                         f"{f'{high:g}' if high is not None else 'any'}{unit}")
+    return notes
 
 
 class FilterDialog(QDialog):
@@ -18,7 +95,8 @@ class FilterDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Filter library")
         self.current = current
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(600)
+        self.resize(660, 650)
         form = QFormLayout()
         self.folder = QComboBox()
         for folder in catalogue.folders(lib):
@@ -77,13 +155,69 @@ class FilterDialog(QDialog):
                               ("Location", self.location), ("", self.keep_area), ("Faces", self.faces),
                               ("Person", self.person)):
             form.addRow(title, widget)
-        self.setLayout(vbox(form, label("Dates use the catalogue's best available date, including filename or modified "
-                                       "date when camera metadata is unavailable. Face filters use Find people results.",
+        self.tabs = QTabWidget()
+        general = QWidget()
+        general.setLayout(form)
+        self.tabs.addTab(scroll(general), "Files && dates")
+        self.metadata_text = {}
+        self.ranges = {}
+        dimensions_form, camera_form = QFormLayout(), QFormLayout()
+        self.orientation = QComboBox()
+        for key in ("all", "landscape", "portrait", "square"):
+            self.orientation.addItem("Any orientation" if key == "all" else key.capitalize(), key)
+        self.orientation.setCurrentIndex(self.orientation.findData(current.orientation))
+        dimensions_form.addRow("Orientation (displayed)", self.orientation)
+        self.min_width, self.min_height = QSpinBox(), QSpinBox()
+        for key, widget in (("min_width", self.min_width), ("min_height", self.min_height)):
+            widget.setRange(0, 1_000_000)
+            widget.setSpecialValueText("Any")
+            widget.setSuffix(" px")
+            widget.setValue(getattr(current, key))
+        dimensions_form.addRow("Minimum width / height (px)", hbox(self.min_width, self.min_height))
+        for key in ("video_codec", "audio_codec", "camera", "lens"):
+            box = QComboBox()
+            box.addItem("Any", None)
+            if key == "audio_codec":
+                box.addItem("No audio stream", "")
+            for row in lib.db.execute(f"SELECT DISTINCT {key} FROM files WHERE {key} IS NOT NULL AND "
+                                      f"{key}!='' ORDER BY {key} COLLATE NOCASE"):
+                box.addItem(row[0], row[0])
+            value = getattr(current, key)
+            if value is not None and box.findData(value) < 0:
+                box.addItem(value, value)
+            box.setCurrentIndex(max(0, box.findData(value)))
+            self.metadata_text[key] = box
+            (dimensions_form if key.endswith("codec") else camera_form).addRow(key.replace("_", " ").capitalize(), box)
+        for key, (title, unit, decimals, maximum) in RANGES.items():
+            low, high = QDoubleSpinBox(), QDoubleSpinBox()
+            for side, box in (("min", low), ("max", high)):
+                box.setRange(0, maximum)
+                box.setDecimals(decimals)
+                box.setSuffix(unit)
+                box.setSpecialValueText("Any")
+                box.setValue(getattr(current, f"{side}_{key}") or 0)
+                box.setAccessibleName(f"{title}: {side}")
+            self.ranges[key] = (low, high)
+            (dimensions_form if key in ("megapixels", "duration", "bitrate", "fps") else camera_form).addRow(
+                title + " (min / max)", hbox(low, high))
+        for title, layout in (("Dimensions && video", dimensions_form), ("Camera && exposure", camera_form)):
+            panel = QWidget()
+            panel.setLayout(layout)
+            self.tabs.addTab(scroll(panel), title)
+        outer = vbox(self.tabs, label("Missing metadata is excluded only when that field is filtered. Video ranges "
+                                       "match videos; EXIF ranges match photos. Bitrate includes audio/container overhead "
+                                       "and is not a quality score. Dates may be filename/modified-date fallbacks; "
+                                       "face filters use Find people results.",
                                        "small", wrap=True),
                             hbox(None, button("Cancel", on_click=self.reject),
-                                 button("Apply filters", "primary", self._accept)), margins=(20, 18, 20, 18)))
+                                 button("Apply filters", "primary", self._accept)), margins=(20, 18, 20, 18))
+        outer.setStretchFactor(self.tabs, 1)
+        self.setLayout(outer)
 
     def selected(self):
+        technical = {key: box.currentData() for key, box in self.metadata_text.items()}
+        technical.update({f"{side}_{key}": box.value() or None for key, boxes in self.ranges.items()
+                          for side, box in zip(("min", "max"), boxes)})
         return replace(self.current, folder=self.folder.currentData(), recursive=self.recursive.isChecked(),
                        kind=self.kind.currentData(), extension=self.ext.currentData(), undated=False,
                        start=self.start.date().toString("yyyy-MM-dd") if self.use_dates.isChecked() else None,
@@ -92,7 +226,9 @@ class FilterDialog(QDialog):
                        max_bytes=int(self.maximum.value() * 1024**2) if self.maximum.value() else None,
                        location=self.location.currentData(),
                        bbox=self.current.bbox if self.keep_area.isChecked() else None,
-                       faces=self.faces.currentData(), person=self.person.currentData())
+                       faces=self.faces.currentData(), person=self.person.currentData(),
+                       orientation=self.orientation.currentData(), min_width=self.min_width.value(),
+                       min_height=self.min_height.value(), **technical)
 
     def _accept(self):
         try:

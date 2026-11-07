@@ -56,7 +56,9 @@ def test_every_page_runs_without_errors(pristine_library, tmp_path):
     assert {"13-people", "13-people-lookalike", "14-albums", "14-albums-make"} <= shots
     assert {"insights-storage", "insights-timeline", "insights-india", "insights-world",
             "dark-insights", "photos-largest", "library-filters", "storage-reset", "storage-reset-hard"} <= shots
+    assert {"library-filters-video", "library-filters-camera", "photos-video-metadata"} <= shots
     check = Library(lib)
+    assert check.db.execute("SELECT COUNT(*) FROM files WHERE iso>0 AND aperture>0 AND exposure_seconds>0").fetchone()[0] > 0
     names = {r[0] for r in check.db.execute("SELECT name FROM people")}
     assert names == {"Abraham Lincoln", "Mark Twain"}                     # named in the People page
     saved = {r[0] for r in check.db.execute("SELECT name FROM albums")}

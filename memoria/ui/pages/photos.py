@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QHeaderView, QInp
                                QSplitter, QTreeWidget, QTreeWidgetItem, QWidget)
 
 from ...engine import albums, batch, catalogue
-from ..library_filters import FilterDialog, KINDS, SORTS
+from ..library_filters import FilterDialog, KINDS, SORTS, metadata_filter_notes, sort_caption
 from ..widgets import (MessageDialog, PhotoGrid, Preview, Viewer, button, fmt_date, fmt_n, fmt_size, hbox, label,
                        open_path, show_in_explorer, vbox)
 from .base import Page, recovery_note, recycle_summary
@@ -48,7 +48,11 @@ class PhotosPage(Page):
         self.sort = QComboBox()
         for key, text in SORTS:
             self.sort.addItem(text, key)
+        self.sort.setMaxVisibleItems(16)
+        self.sort.setToolTip("Unknown metadata sorts last. Resolution means pixel count; bitrate is an overall estimate. "
+                             "Choose Videos to exclude photos when sorting video metadata.")
         self.filter_note = label("", "small", wrap=True)
+        self.filter_note.setTextFormat(Qt.TextFormat.PlainText)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setColumnCount(2)
@@ -204,8 +208,7 @@ class PhotosPage(Page):
             self.count.setText("Could not load matching files")
             self.ctx.toast_requested.emit(str(e), "")
             return
-        items = [{**r, "caption": fmt_size(r["size"]) if self.sort.currentData() in ("largest", "smallest")
-                  else fmt_date(r["taken_at"]) if r["taken_at"] else r["name"],
+        items = [{**r, "caption": sort_caption(r, self.sort.currentData()),
                   "tip": f"{r['rel_path']}\n{fmt_size(r['size'])}"} for r in self.rows]
         self.grid.set_items(items)
         self.count.setText(f"{self.offset + 1 if total else 0:,}–{self.offset + len(items):,} of {total:,} · {fmt_size(size)}")
@@ -225,7 +228,9 @@ class PhotosPage(Page):
             active.append("Map area" if filters.bbox else filters.location)
         if filters.person is not None or filters.faces != "all":
             active.append("People / face filter")
-        self.filter_note.setText("\n".join(active))
+        active.extend(metadata_filter_notes(filters))
+        self.filter_note.setText("\n".join(active[:5]) + (f"\n+{len(active)-5} more (see Filters…)" if len(active) > 5 else ""))
+        self.filter_note.setToolTip("\n".join(active))
         self.preview.clear()
         self._sel_changed()
 

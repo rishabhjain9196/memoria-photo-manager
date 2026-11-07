@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import calendar
+import math
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Optional
@@ -10,9 +11,29 @@ from . import geography
 from .db import Library
 
 PAGE_SIZE = 500
-SORTS = {"newest": "f.taken_at DESC, f.rel_path, f.id", "oldest": "f.taken_at, f.rel_path, f.id",
+SORTS = {"newest": "NULLIF(f.taken_at,'') IS NULL, f.taken_at DESC, f.rel_path, f.id",
+         "oldest": "NULLIF(f.taken_at,'') IS NULL, f.taken_at, f.rel_path, f.id",
          "largest": "f.size DESC, f.rel_path, f.id", "smallest": "f.size, f.rel_path, f.id",
-         "name": "f.name COLLATE NOCASE, f.rel_path, f.id"}
+         "name": "f.name COLLATE NOCASE, f.rel_path, f.id",
+         "modified_newest": "f.mtime DESC, f.rel_path, f.id", "modified_oldest": "f.mtime, f.rel_path, f.id",
+         "format": "f.ext COLLATE NOCASE, f.rel_path, f.id"}
+METRICS = {
+    "duration": "CASE WHEN f.kind='video' AND f.duration>0 THEN f.duration END",
+    "megapixels": "CASE WHEN f.width>0 AND f.height>0 THEN f.width*1.0*f.height/1000000 END",
+    "bitrate": "CASE WHEN f.kind='video' AND f.duration>0 THEN f.size*8.0/f.duration/1000000 END",
+    "fps": "CASE WHEN f.kind='video' AND f.fps>0 THEN f.fps END",
+    "iso": "CASE WHEN f.kind='image' AND f.iso>0 THEN f.iso END",
+    "aperture": "CASE WHEN f.kind='image' AND f.aperture>0 THEN f.aperture END",
+    "exposure": "CASE WHEN f.kind='image' AND f.exposure_seconds>0 THEN f.exposure_seconds END",
+    "focal": "CASE WHEN f.kind='image' AND f.focal_length_mm>0 THEN f.focal_length_mm END",
+}
+for key, expression in METRICS.items():
+    for direction in ("asc", "desc"):
+        SORTS[f"{key}_{direction}"] = f"({expression}) IS NULL, ({expression}) {direction.upper()}, f.rel_path, f.id"
+for key in ("camera", "lens", "video_codec", "audio_codec"):
+    SORTS[key] = f"NULLIF(f.{key},'') IS NULL, f.{key} COLLATE NOCASE, f.rel_path, f.id"
+SORTS["audio_codec"] = ("(f.kind!='video' OR f.audio_codec IS NULL), "
+                        "f.audio_codec COLLATE NOCASE, f.rel_path, f.id")
 GPS = "f.lat BETWEEN -90 AND 90 AND f.lon BETWEEN -180 AND 180"
 
 
@@ -32,6 +53,29 @@ class Filters:
     bbox: Optional[tuple[float, float, float, float]] = None
     faces: str = "all"  # all / any / none / unscanned
     person: Optional[int] = None
+    orientation: str = "all"
+    camera: Optional[str] = None
+    lens: Optional[str] = None
+    video_codec: Optional[str] = None
+    audio_codec: Optional[str] = None
+    min_width: int = 0
+    min_height: int = 0
+    min_duration: Optional[float] = None
+    max_duration: Optional[float] = None
+    min_megapixels: Optional[float] = None
+    max_megapixels: Optional[float] = None
+    min_bitrate: Optional[float] = None
+    max_bitrate: Optional[float] = None
+    min_fps: Optional[float] = None
+    max_fps: Optional[float] = None
+    min_iso: Optional[float] = None
+    max_iso: Optional[float] = None
+    min_aperture: Optional[float] = None
+    max_aperture: Optional[float] = None
+    min_exposure: Optional[float] = None
+    max_exposure: Optional[float] = None
+    min_focal: Optional[float] = None
+    max_focal: Optional[float] = None
 
 
 def where(filters: Filters) -> tuple[str, list]:
@@ -107,7 +151,43 @@ def where(filters: Filters) -> tuple[str, list]:
     if f.person is not None:
         clauses.append("EXISTS (SELECT 1 FROM faces x WHERE x.file_id=f.id AND x.person_id=? AND x.ignored=0)")
         params.append(f.person)
+    for key in ("camera", "lens", "video_codec", "audio_codec"):
+        value = getattr(f, key)
+        if value is not None:
+            clauses.append(f"f.{key}=? COLLATE NOCASE")
+            params.append(value)
+            if key.endswith("codec"):
+                clauses.append("f.kind='video'")
+    for key in ("width", "height"):
+        value = getattr(f, f"min_{key}")
+        if value < 0:
+            raise ValueError("Minimum dimensions cannot be negative.")
+        if value:
+            clauses.append(f"f.{key}>=?")
+            params.append(value)
+    if f.orientation != "all":
+        if f.orientation not in ("landscape", "portrait", "square"):
+            raise ValueError("Unknown orientation.")
+        operator = {"landscape": ">", "portrait": "<", "square": "="}[f.orientation]
+        clauses += ["f.width>0 AND f.height>0", f"f.width {operator} f.height"]
+    for key, expression in METRICS.items():
+        low, high = getattr(f, f"min_{key}"), getattr(f, f"max_{key}")
+        if any(value is not None and (not math.isfinite(value) or value < 0) for value in (low, high)) or (
+                low is not None and high is not None and low > high):
+            raise ValueError(f"Choose a valid minimum/maximum for {key}.")
+        for value, operator in ((low, ">="), (high, "<=")):
+            if value is not None:
+                clauses.append(f"({expression}) {operator} ?")
+                params.append(value)
     return " AND ".join(clauses), params
+
+
+def overall_bitrate(row) -> Optional[float]:
+    """Estimated overall Mbps, including audio/container bytes, not a video quality score."""
+    duration = row.get("duration")
+    if row.get("kind") == "video" and duration and duration > 0:
+        return row["size"] * 8 / duration / 1_000_000
+    return None
 
 
 def page(lib: Library, filters: Filters, sort: str = "newest", offset: int = 0) -> tuple[list[dict], int, int]:

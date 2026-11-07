@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from html import escape
 import subprocess
 from collections import OrderedDict
 from datetime import datetime
@@ -47,8 +48,10 @@ def fmt_date(s: Optional[str], with_time: bool = False) -> str:
 
 
 def fmt_duration(sec: Optional[float]) -> str:
-    if not sec:
+    if not sec or sec <= 0:
         return ""
+    if sec < 1:
+        return f"{sec:g} s"
     sec = int(round(sec))
     return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}" if sec >= 3600 else f"{sec // 60}:{sec % 60:02d}"
 
@@ -544,9 +547,13 @@ class Preview(QFrame):
         self.facts.setWordWrap(True)
         self.facts.setTextFormat(Qt.TextFormat.RichText)
         self.facts.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.facts.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.open_btn = button("Open", on_click=self._open)
         self.show_btn = button("Show in folder", on_click=self._show)
-        lay = vbox(self.image, self.title, self.facts, hbox(self.open_btn, self.show_btn, None), None, spacing=10)
+        details = scroll(self.facts)
+        details.setMinimumHeight(100)
+        lay = vbox(self.image, self.title, details, hbox(self.open_btn, self.show_btn, None), spacing=10)
+        lay.setStretchFactor(details, 1)
         lay.setContentsMargins(14, 14, 14, 14)
         self.setLayout(lay)
         self.row: Optional[dict] = None
@@ -596,15 +603,41 @@ class Preview(QFrame):
             facts.append(f"<b>Size</b> {row['width']}×{row['height']} · {fmt_size(row.get('size'))}")
         else:
             facts.append(f"<b>Size</b> {fmt_size(row.get('size'))}")
-        if row.get("duration"):
+        if row.get("duration") and row["duration"] > 0:
             facts.append(f"<b>Length</b> {fmt_duration(row['duration'])}")
+        if row.get("ext"):
+            facts.append(f"<b>Format</b> {escape(row['ext'].lstrip('.').upper())}")
+        if row.get("mtime") is not None:
+            facts.append(f"<b>Modified</b> {fmt_date(datetime.fromtimestamp(row['mtime']).isoformat(), True)}")
+        if row.get("kind") == "video":
+            from ..engine.catalogue import overall_bitrate
+            rate = overall_bitrate(row)
+            if rate is not None:
+                facts.append(f"<b>Overall bitrate</b> ≈{rate:.3f} Mbps <span style='color:{theme.MUTED}'>(incl. audio/overhead)</span>")
+            if row.get("fps"):
+                facts.append(f"<b>Frame rate</b> {row['fps']:g} fps (reported)")
+            if row.get("video_codec"):
+                facts.append(f"<b>Video codec</b> {escape(row['video_codec'])}")
+            if row.get("audio_codec") is not None:
+                facts.append(f"<b>Audio</b> {escape(row['audio_codec']) or 'No audio stream'}")
         if row.get("camera"):
-            facts.append(f"<b>Camera</b> {row['camera']}")
+            facts.append(f"<b>Camera</b> {escape(row['camera'])}")
+        if row.get("lens"):
+            facts.append(f"<b>Lens</b> {escape(row['lens'])}")
+        if row.get("iso"):
+            facts.append(f"<b>ISO</b> {row['iso']:g}")
+        if row.get("aperture"):
+            facts.append(f"<b>Aperture</b> f/{row['aperture']:g}")
+        if row.get("exposure_seconds"):
+            sec = row["exposure_seconds"]
+            facts.append(f"<b>Exposure</b> " + (f"1/{1/sec:g} s" if sec < 1 else f"{sec:g} s"))
+        if row.get("focal_length_mm"):
+            facts.append(f"<b>Focal length</b> {row['focal_length_mm']:g} mm (actual)")
         if row.get("lat") is not None:
             facts.append(f"<b>Location</b> {row['lat']:.4f}, {row['lon']:.4f}")
         if row.get("error"):
             facts.append(f"<span style='color:{theme.DANGER}'><b>Problem</b> {friendly_error(row['error'])}</span>")
-        facts.append(f"<span style='color:{theme.MUTED}'>{row['rel_path']}</span>")
+        facts.append(f"<span style='color:{theme.MUTED}'>{escape(row['rel_path'])}</span>")
         if extra:
             facts.append(extra)
         self.facts.setText("<br>".join(facts))

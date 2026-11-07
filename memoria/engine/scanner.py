@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 from . import config, ffmpeg, media
-from .db import DERIVED, Library, LibraryUnavailable
+from .db import DERIVED, METADATA_VERSION, Library, LibraryUnavailable
 from .progress import Progress
 
 
@@ -164,7 +164,9 @@ def _analyze_one(path: Path, kind: str, name: str, mtime: float) -> dict:
             out = media.analyze_image(path)
         else:
             info = ffmpeg.probe(path)
-            out = {"width": info.width, "height": info.height, "duration": round(info.duration, 2)}
+            out = {"width": info.width, "height": info.height, "duration": info.duration,
+                   "fps": info.fps if info.fps > 0 else None, "video_codec": info.vcodec,
+                   "audio_codec": info.acodec}
             if info.creation_time:
                 out["taken_at"], out["date_source"] = info.creation_time, "metadata"
             frame = ffmpeg.video_frame(path, at=min(1.0, info.duration / 2), max_side=config.ANALYSIS_SIZE)
@@ -186,14 +188,16 @@ def _analyze_one(path: Path, kind: str, name: str, mtime: float) -> dict:
 
 
 _COLS = ("width", "height", "taken_at", "date_source", "camera", "lat", "lon", "duration", "dhash",
-         "sharpness", "brightness", "contrast", "clipped", "error")
+         "sharpness", "brightness", "contrast", "clipped", "error", "fps", "video_codec", "audio_codec",
+         "iso", "aperture", "exposure_seconds", "focal_length_mm", "lens")
 
 
 def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = config.WORKERS) -> AnalyzeResult:
     """Analyse every un-analysed image and video. Resumable: results are committed in batches."""
     progress = progress or Progress()
     rows = lib.db.execute("SELECT id, rel_path, kind, name, mtime FROM files "
-                          "WHERE analyzed=0 AND kind!='other' ORDER BY kind, rel_path").fetchall()
+                          "WHERE (analyzed=0 OR COALESCE(metadata_version,0)<?) AND kind!='other' "
+                          "ORDER BY kind, rel_path", (METADATA_VERSION,)).fetchall()
     total = len(rows)
     res = AnalyzeResult()
     others = lib.db.execute("SELECT id, name, mtime FROM files WHERE analyzed=0 AND kind='other'").fetchall()
@@ -217,8 +221,8 @@ def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = co
                 for c in _COLS:
                     v = out.get(c)
                     vals.append(v.isoformat(sep=" ") if isinstance(v, datetime) else v)
-                db.execute(f"UPDATE files SET {', '.join(c + '=?' for c in _COLS)}, analyzed=1 WHERE id=?",
-                           (*vals, fid))
+                db.execute(f"UPDATE files SET {', '.join(c + '=?' for c in _COLS)}, analyzed=1, metadata_version=? WHERE id=?",
+                           (*vals, METADATA_VERSION, fid))
         thumbs = [(fid, out["thumb"]) for fid, out in pending if out.get("thumb")]
         if thumbs:
             t = lib.thumbs_db

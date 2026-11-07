@@ -79,7 +79,9 @@ the rendered page).
 - **Health check** fingerprints every file and flags silent damage, such as bit rot or bad copies.
 - **Bounded browsing**: 500-row pages, a 64 MiB thumbnail pixel cache, bounded analysis submission and aggregated maps.
   Similarity is still quadratic; old random-hash microbenchmarks are not end-to-end photo-library timings.
-- **Tested** against generated libraries and synthetic catalogues: 175 automated tests, including UI tests in both
+- **Extended metadata**: sort/filter video length, resolution, estimated overall bitrate, FPS and codecs; photo ISO,
+  aperture, exposure time, focal length and lens; plus camera, orientation, format and modified dates.
+- **Tested** against generated libraries and synthetic catalogues: 196 automated tests, including UI tests in both
   themes.
 
 ## Quick start
@@ -204,7 +206,7 @@ memoria-photo-manager/
 ├── memoria/                    application package
 │   ├── engine/                 UI-independent engine (testable without Qt)
 │   │   ├── actions.py          journaled executor: apply · undo · reconcile · Recovery
-│   │   ├── db.py               Library + schema v5 (files, journal, missing/parked rows, reset state)
+│   │   ├── db.py               Library + schema v6 (files, extended metadata, journal, retained rows, reset state)
 │   │   ├── catalogue.py · geography.py · storage.py  filters/aggregates, offline map, selective reset
 │   │   ├── scanner.py          incremental scan + parallel analysis
 │   │   ├── media.py · ffmpeg.py · hashing.py · config.py · progress.py
@@ -235,7 +237,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 175 tests; runtime depends on the machine
+.\.venv\Scripts\python -m pytest -q                       # 196 tests; runtime depends on the machine
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 .\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + documentation screenshots
@@ -257,6 +259,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_ui_smoke.py` | 4 | Drives every page in both themes; checks Undo, thumbnails, opt-in cleanup, reset confirmations and the resumable reset UI. |
 | `tests/test_storage.py` | 13 | Safe/custom/hard reset, retained media and Undo, atomic rollback, abrupt process exit, cancellation/retry, updated media and low-space compaction. |
 | `tests/test_insights.py` | 6 | Folder/type totals, literal search, combined filters, leap-day boundaries, album links, India/world GPS selection, bounded 10,000-file browsing and interactive charts in both themes. |
+| `tests/test_metadata.py` | 21 | Real EXIF/video extraction, schema-5 backfill, retained-row migration, cancellation/resume, numeric sorting with unknowns last, combined metadata filters and preview UI. |
 
 The **test library** (`tools\make_test_library.py [DEST] [--small]`) is a deterministic library of generated photos. It
 includes camera, phone and backup folders; exact duplicates (including 6 MB files); a nested album copied whole to an old
@@ -313,7 +316,7 @@ remain quadratic; very large collections can still take time.
   explicit "Keep only best in every group" shortcut remains available.
 - Editor, Story maker and Video compressor outputs are recorded in History when a library is open,
   including completed outputs kept after cancellation.
-- Opening an older catalogue upgrades it to schema v5. The upgraded catalogue requires this version
+- Opening an older catalogue upgrades it to schema v6. The upgraded catalogue requires this version
   or newer; keep a backup of the catalogue before upgrading if you need to return to an older release.
 - Unified multi-folder libraries are not included in this update.
 
@@ -374,6 +377,36 @@ Browsing uses pages of up to **500 files**, with matching count and total size s
 actions apply only to the current page**, not unseen matches. Clear filters to leave a chart's selection.
 Insights queries run in the background and coalesce rapid requests; neither charts nor sorting re-read
 the media contents. Results describe the last scan; use F5 after external file changes.
+
+### Extended metadata
+
+The sort menu now includes video length, pixel resolution, estimated overall Mbps, reported FPS, video/audio
+codec, camera, lens, file format, modified date, ISO, f-number, shutter/exposure time and focal length.
+Numeric sorts offer both directions. Unknown/inapplicable values sort last; they are not treated as zero.
+Resolution compares width × height, so portrait and landscape videos with equal pixel counts tie.
+
+**Filters** has three tabs: Files & dates, Dimensions & video, and Camera & exposure. Use inclusive numeric
+ranges, minimum width/height, displayed orientation, exact camera/lens and codec selections. Video ranges match
+videos; EXIF ranges match photos. Missing fields are excluded only when you constrain that field.
+The preview shows the metadata and the grid caption follows the selected sort.
+
+Schema v6 triggers a **one-time, resumable media-analysis refresh** to populate FPS/codecs and standard EXIF
+ISO, f-number, exposure seconds, actual focal length (not 35 mm equivalent), and lens model where present.
+Existing originals, identities, albums, people, journal and health fingerprints are retained.
+Old parked/missing rows refresh when restored. The refresh reads originals in place and does not copy the library.
+
+Bitrate is **estimated overall average Mbps = file bytes × 8 ÷ duration ÷ 1,000,000**, including audio/container
+overhead; it is not the video stream's bitrate or a quality score. Reported FPS may describe variable-frame-rate
+material approximately. Invalid optional EXIF numbers are logged and omitted rather than making up values.
+
+### FFmpeg and HandBrake
+
+Memoria currently compresses with its bundled **FFmpeg → libx264 (CPU H.264) + AAC** pipeline:
+CRF quality presets or two-pass target-size encoding, output verification, optional SSIM and journaled publication.
+HandBrake is a transcoding application, not a separate codec. It offers x264, x265, SVT-AV1 and hardware encoders
+depending on the platform/build ([official encoder list](https://handbrake.fr/docs/en/latest/technical/video-codecs.html)).
+HandBrakeCLI could be integrated, but has not been added; switching applications alone does not guarantee better
+compression when both use x264. Codec/preset/hardware choices and compatibility matter more.
 
 **Historical results, not rerun for this update:** `tools\benchmark.py --photos 1000`, 1,050 files of 6 MP JPEG,
 1.02 GB, on a 32-core machine with an SSD. The 100,000-hash result is a random-hash microbenchmark, not a full photo search.

@@ -58,7 +58,7 @@
   <h1>Technical document</h1>
   <p>How Memoria is built: architecture, modules, data model, algorithms, the journaled executor that makes every
   file operations recoverable, concurrency, performance, testing and packaging.</p>
-  <div class="meta"><span class="pill">Python 3.11+</span><span class="pill">PySide6 6.7+</span><span class="pill">SQLite schema 5 · WAL</span>
+  <div class="meta"><span class="pill">Python 3.11+</span><span class="pill">PySide6 6.7+</span><span class="pill">SQLite schema 6 · WAL</span>
   <span class="pill">NumPy · Pillow · OpenCV 4 · FFmpeg</span><span class="pill">Unreleased updates after 1.4</span></div>
 </header>
 
@@ -154,12 +154,12 @@ Insights uses read-only background queries and reset uses its own journaled phas
 <table>
   <tr><th>Module</th><th>Lines</th><th>Responsibility · key API</th></tr>
   <tr><td><code>config</code></td><td>80</td><td>Extension sets (<code>IMAGE_EXT</code>, <code>RAW_EXT</code>, <code>VIDEO_EXT</code>), junk names, tuning constants, <code>kind_for_ext</code>, <code>app_dir/ensure_app_dir</code> (creates hidden <code>.memoria</code>), <code>recovery_dir</code>, <code>default_export_dir</code>.</td></tr>
-  <tr><td><code>db</code></td><td>414</td><td><code>Library(root)</code>: cross-process lock, versioned schema + migrations, parked rows (<code>park_rows</code>, <code>restore_parked</code>, <code>drop_parked</code>), <code>close_thread</code>; schema creation, thread-local connections (<code>.db</code>, <code>.thumbs_db</code>), <code>files(where, params, order)</code>, <code>file</code>, <code>file_by_rel</code>, <code>set_hashes</code>, <code>thumbnail</code>, <code>stats</code>, <code>remove_rows</code>, <code>transaction()</code>, <code>abspath/rel</code>.</td></tr>
+  <tr><td><code>db</code></td><td>427</td><td><code>Library(root)</code>: cross-process lock, versioned schema + migrations, parked rows (<code>park_rows</code>, <code>restore_parked</code>, <code>drop_parked</code>), <code>close_thread</code>; schema creation, thread-local connections (<code>.db</code>, <code>.thumbs_db</code>), <code>files(where, params, order)</code>, <code>file</code>, <code>file_by_rel</code>, <code>set_hashes</code>, <code>thumbnail</code>, <code>stats</code>, <code>remove_rows</code>, <code>transaction()</code>, <code>abspath/rel</code>.</td></tr>
   <tr><td><code>progress</code></td><td>69</td><td><code>Progress(callback, cancel_event, interval)</code> — throttled reporting; <code>update()</code>/<code>check()</code> raise <code>Cancelled</code> when the event is set. <code>progress.step(i, n, label)</code> → <code>StepProgress</code> maps a sub-task onto its slice of a 0–1000 scale ("Step 2 of 6 · …").</td></tr>
   <tr><td><code>hashing</code></td><td>49</td><td><code>full_hash(path)</code> xxh3-128 over 1 MiB <code>readinto</code> chunks; <code>quick_hash(path, size)</code> five 64 KiB samples + size (pre-filter only).</td></tr>
-  <tr><td><code>media</code></td><td>214</td><td><code>open_oriented</code> (JPEG draft decode, EXIF transpose, RGB), <code>read_exif</code> (date, camera, GPS), <code>date_from_filename</code>, <code>dhash</code>, <code>quality_metrics</code>, <code>thumbnail_bytes</code>, <code>analyze_image</code>, <code>load_for_display</code>, <code>count_faces</code> (OpenCV Haar, thread-local).</td></tr>
+  <tr><td><code>media</code></td><td>240</td><td><code>open_oriented</code> (JPEG draft decode, EXIF transpose, RGB), <code>read_exif</code> (date, camera, GPS), <code>date_from_filename</code>, <code>dhash</code>, <code>quality_metrics</code>, <code>thumbnail_bytes</code>, <code>analyze_image</code>, <code>load_for_display</code>, <code>count_faces</code> (OpenCV Haar, thread-local).</td></tr>
   <tr><td><code>ffmpeg</code></td><td>104</td><td><code>ffmpeg_exe()</code> (imageio-ffmpeg), <code>run_ffmpeg</code> (no console window), <code>probe()</code> → <code>VideoInfo</code> (parses <code>ffmpeg -i</code>), <code>video_frame()</code> → JPEG bytes.</td></tr>
-  <tr><td><code>scanner</code></td><td>273</td><td><code>walk_files/walk_dirs</code> (iterative <code>os.scandir</code>, long-path aware, reports unreadable folders), <code>scan</code> (incremental diff; raises <code>LibraryUnavailable</code>; never removes rows under unreadable folders), <code>analyze</code> (parallel, batched commits), <code>index</code>.</td></tr>
+  <tr><td><code>scanner</code></td><td>277</td><td><code>walk_files/walk_dirs</code> (iterative <code>os.scandir</code>, long-path aware, reports unreadable folders), <code>scan</code> (incremental diff; raises <code>LibraryUnavailable</code>; never removes rows under unreadable folders), <code>analyze</code> (parallel, batched commits), <code>index</code>.</td></tr>
   <tr><td><code>actions</code></td><td>469</td><td><code>Action</code>, <code>BatchResult</code>, <code>apply</code>, <code>created_batch</code>, <code>record_output</code>, legacy <code>record_created</code>, <code>undo</code>, <code>reconcile</code>, journal queries, verified copy/move and Recovery management.</td></tr>
   <tr><td><code>duplicates</code></td><td>474</td><td><code>confirm_identical</code> (size→quick→full funnel with hash caching), <code>find_all</code> → <code>DuplicateReport</code> (<code>groups</code>, <code>folders</code>, <code>loose_groups</code>), <code>find_duplicate_folders</code> → <code>FolderMatch</code>/<code>FolderInfo</code>, <code>plan_cleanup</code>, <code>keeper_score/keeper_reason</code>, <code>find_duplicates</code> → <code>DuplicateGroup</code>, <code>plan_removal</code>.</td></tr>
   <tr><td><code>similar</code></td><td>252</td><td><code>similar_pairs</code> (threaded blocked Hamming + burst window), <code>find_similar</code> → <code>SimilarGroup</code>, <code>rank_group</code>, <code>find_blurry</code>, <code>BLUR_PRESETS</code>, <code>plan_recycle</code>.</td></tr>
@@ -177,7 +177,7 @@ Insights uses read-only background queries and reset uses its own journaled phas
   <tr><td><code>places</code></td><td>81</td><td><code>nearest(lat, lon)</code> → <code>Place</code> (<code>label</code>, <code>distance_km</code>) from the bundled GeoNames list; <code>distance_km</code>.</td></tr>
   <tr><td><code>checkup</code></td><td>67</td><td><code>run(lib, progress)</code> → <code>Checkup(results, counts, summary)</code>: index + every read-only finder with step progress.</td></tr>
   <tr><td><code>story</code></td><td>623</td><td><code>StyleOptions</code>, <code>TEMPLATES</code>, <code>render_story</code>, <code>render_carousel</code>, <code>export_stories</code>, <code>export_carousel</code>, <code>make_story_video</code>, <code>story_video_duration</code>.</td></tr>
-  <tr><td><code>catalogue</code></td><td>209</td><td>Immutable <code>Filters</code>, parameterised predicates, paged/sorted browsing, distributions, calendar periods, timeline counts, album links and bounded GPS cells.</td></tr>
+  <tr><td><code>catalogue</code></td><td>289</td><td>Immutable <code>Filters</code>, parameterised predicates, paged/sorted browsing, distributions, calendar periods, timeline counts, album links and bounded GPS cells.</td></tr>
   <tr><td><code>geography</code></td><td>30</td><td>Cached public-domain Natural Earth outlines; approximate point-in-polygon India coverage. No online geocoding.</td></tr>
   <tr><td><code>storage</code></td><td>159</td><td><code>ResetOptions</code>, <code>usage</code>, <code>pending</code>, <code>reset</code>, <code>resume</code>; selective clearing, optional compaction, resumable indexing.</td></tr>
 </table>
@@ -187,12 +187,12 @@ Insights uses read-only background queries and reset uses its own journaled phas
   <tr><td><code>main_window</code></td><td>630</td><td>Sidebar (<code>NAV</code> groups, count badges, theme selector), lazily created pages (<code>page(key)</code>), <code>WelcomePage</code>, task bar (% · elapsed · time left · Cancel), toast, shortcuts, drag &amp; drop, saved geometry; <code>open_library</code> (lock → reconcile → set context → index), <code>run_checkup</code>, <code>open_sample</code> (with progress), <code>undo_last</code>, <code>undo_batch</code>, <code>restore_last</code>.</td></tr>
   <tr><td><code>theme</code></td><td>193</td><td>Light/dark palettes, <code>use(mode)</code> (system | light | dark), stylesheet builder, <code>qpalette()</code>, <code>badge_colors</code>, <code>settings()</code> (profile via <code>MEMORIA_PROFILE</code>).</td></tr>
   <tr><td><code>tasks</code></td><td>165</td><td><code>TaskRunner.run(title, fn(progress), on_done, on_cancel)</code>; signals <code>started/progressed/finished/error/busy_changed</code>. <code>BackgroundCall</code>: latest-wins read-only computations off the UI thread (page insights).</td></tr>
-  <tr><td><code>widgets</code></td><td>843</td><td>Formatting/layout helpers, tiles/banners/cards, <code>AppContext</code> (generations, cached results, maintenance state, navigation signals), <code>ThumbCache</code> (64 MiB pixel budget and 4,000-entry cap), model/delegate/grid, Preview, Viewer, confirmation/message dialogs and Toast.</td></tr>
+  <tr><td><code>widgets</code></td><td>876</td><td>Formatting/layout helpers, tiles/banners/cards, <code>AppContext</code> (generations, cached results, maintenance state, navigation signals), <code>ThumbCache</code> (64 MiB pixel budget and 4,000-entry cap), model/delegate/grid, Preview, Viewer, confirmation/message dialogs and Toast.</td></tr>
   <tr><td><code>pages/base</code></td><td>129</td><td><code>Page</code>: header, stale/refresh lifecycle, busy handling, <code>run</code>, <code>apply_actions</code> (the shared Confirm → Apply → Toast/Undo flow).</td></tr>
   <tr><td><code>cropcanvas</code></td><td>237</td><td><code>CropCanvas</code>: draws the preview, eight drag handles, rule-of-thirds grid and aspect lock; emits a crop normalised to the transformed image. <code>rotate_crop</code>/<code>flip_crop</code> keep the crop on the same content when rotating or mirroring.</td></tr>
-  <tr><td><code>pages/*</code></td><td>5655</td><td>One per tool; preview work and Insights aggregates use workers. Photos uses SQL paging rather than full-catalogue Python filtering.</td></tr>
+  <tr><td><code>pages/*</code></td><td>5660</td><td>One per tool; preview work and Insights aggregates use workers. Photos uses SQL paging rather than full-catalogue Python filtering.</td></tr>
   <tr><td><code>insight_charts</code></td><td>159</td><td>Accessible bar lists and a QPainter map with bounded markers and wheel zoom.</td></tr>
-  <tr><td><code>library_filters</code></td><td>103</td><td>Shared folder/type/format/date/size/GPS/face/person controls and validation.</td></tr>
+  <tr><td><code>library_filters</code></td><td>239</td><td>Shared folder/type/format/date/size/GPS/face/person controls and validation.</td></tr>
   <tr><td><code>storage_dialog</code></td><td>84</td><td>Safe defaults, selective clearing, hard-reset acknowledgement and low-space resume option.</td></tr>
 </table>
 </section>
@@ -219,6 +219,8 @@ Insights uses read-only background queries and reset uses its own journaled phas
   <tr><td><code>width, height</code></td><td>INTEGER</td><td>Upright (EXIF orientation applied).</td></tr>
   <tr><td><code>taken_at, date_source</code></td><td>TEXT</td><td>ISO datetime; source ∈ exif | metadata | filename | modified.</td></tr>
   <tr><td><code>camera, lat, lon, duration</code></td><td>TEXT, REAL</td><td>From EXIF / FFmpeg.</td></tr>
+  <tr><td><code>metadata_version, fps, video_codec, audio_codec</code></td><td>INTEGER, REAL, TEXT</td><td>Versioned extended analysis; reported FPS and first video/audio stream codec. Empty audio codec means a probed video without audio; NULL means unavailable.</td></tr>
+  <tr><td><code>iso, aperture, exposure_seconds, focal_length_mm, lens</code></td><td>INTEGER, REAL, TEXT</td><td>Standard EXIF values: ISO sensitivity, f-number, exposure seconds, actual focal length and lens model.</td></tr>
   <tr><td><code>dhash</code></td><td>INTEGER</td><td>64-bit difference hash stored signed.</td></tr>
   <tr><td><code>sharpness, brightness, contrast, clipped, faces</code></td><td>REAL / INTEGER</td><td>Quality metrics at 512 px; faces computed lazily (−1 = unavailable).</td></tr>
   <tr><td><code>baseline_hash, baseline_size, baseline_mtime, checked_at</code></td><td>TEXT, INTEGER, REAL, TEXT</td><td>Health fingerprints — <i>not</i> cleared on change, so damage stays visible.</td></tr>
@@ -227,8 +229,12 @@ Insights uses read-only background queries and reset uses its own journaled phas
 <h3>Schema versioning</h3>
 <p><code>PRAGMA user_version</code> records the schema version. The v1 schema is frozen; later changes are numbered
 steps in <code>db.MIGRATIONS</code>, applied in transactions on open. A catalogue with a higher version than the app
-raises <code>LibraryTooNew</code> rather than being misread. Current version: <b>5</b>. Back up the catalogue before upgrading
+raises <code>LibraryTooNew</code> rather than being misread. Current version: <b>6</b>. Back up the catalogue before upgrading
 if you need to return to an older application build.</p>
+<p>Version 6 adds the metadata fields and defaults <code>metadata_version</code> to 0. Scanner analysis includes media
+with an older/missing marker even when <code>analyzed=1</code>; each completed batch stores the new fields and current
+marker. Cancelled refreshes resume incrementally. Legacy parked/missing snapshots inherit default 0 when restored.
+IDs, relationships and health baselines are not reset. Invalid optional EXIF numbers are logged and left NULL.</p>
 <table>
   <tr><th>Table</th><th>Since</th><th>Purpose</th></tr>
   <tr><td><code>parked_files</code> (<code>op_id</code>, <code>file_id</code>, <code>data</code> JSON)</td><td>v2</td><td>Catalogue rows of files in Recovery, restored on undo; dropped when Recovery is emptied.</td></tr>
@@ -554,6 +560,9 @@ expressions come from a fixed whitelist. Folder matching has a separator boundar
 <ul>
   <li><code>page</code> returns at most 500 rows plus matching count/bytes. Sorting has path/ID tie-breakers. Ctrl+A
       and batch actions are page-scoped.</li>
+  <li>Metadata sorts use NULL-last guards and numeric expressions: megapixels = width × height / 10⁶; overall estimated
+      Mbps = size × 8.0 / duration / 10⁶ for positive-duration videos. Zero/unknown duration is never divided by.
+      Video-only and photo-EXIF ranges exclude inapplicable rows, while unconstrained missing metadata remains visible.</li>
   <li>Storage aggregates exact indexed folders, then rolls up immediate children once per file; format counts use SQL GROUP BY.</li>
   <li>Calendar periods use inclusive starts/exclusive ends, including leap days. Inclusive UI range endpoints convert
       to an exclusive next day. Album links count only matching members.</li>
@@ -681,7 +690,7 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>175 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. See the generated
+<p><b>196 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. See the generated
 <a href="report.html">quality report</a> for current outcomes and timings.</p>
 <table>
   <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
@@ -702,6 +711,8 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
     process termination, cancellation/resume, changed media, low-space and compaction recovery.</td></tr>
   <tr><td><code>test_insights.py</code></td><td>6</td><td>Folder/type totals, literal search, combined filters, leap dates,
     saved-album links, India/world switching, bounded 10,000-row paging, mouse clicks and wheel zoom in both themes.</td></tr>
+  <tr><td><code>test_metadata.py</code></td><td>21</td><td>Real EXIF/video fields, schema-5 migration, legacy retained rows,
+    partial refresh/resume, missing-last numeric sorting, metadata range validation and preview/filter UI.</td></tr>
 </table>
 <h3>Ground-truth library</h3>
 <p><code>memoria/samplelib.py</code> deterministically generates procedural landscape photos (sky gradient, sun, ridges,
