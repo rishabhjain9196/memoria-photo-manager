@@ -82,7 +82,9 @@ the rendered page).
   Similarity is still quadratic; old random-hash microbenchmarks are not end-to-end photo-library timings.
 - **Extended metadata**: sort/filter video length, resolution, estimated overall bitrate, FPS and codecs; photo ISO,
   aperture, exposure time, focal length and lens; plus camera, orientation, format and modified dates.
-- **Tested** against generated libraries and synthetic catalogues: 205 automated tests, including UI tests in both
+- **Live browsing during indexing:** completed entries appear periodically in Photos & videos. Search, filters,
+  paging and the viewer work while indexing; utilities stay locked until indexing stops.
+- **Tested** against generated libraries and synthetic catalogues: 209 automated tests, including UI tests in both
   themes.
 
 ## Quick start
@@ -240,7 +242,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 205 tests; runtime depends on the machine
+.\.venv\Scripts\python -m pytest -q                       # 209 tests; runtime depends on the machine
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 .\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + documentation screenshots
@@ -264,6 +266,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_insights.py` | 6 | Folder/type totals, literal search, combined filters, leap-day boundaries, album links, India/world GPS selection, bounded 10,000-file browsing and interactive charts in both themes. |
 | `tests/test_metadata.py` | 21 | Real EXIF/video extraction, schema-5 backfill, retained-row migration, cancellation/resume, numeric sorting with unknowns last, combined metadata filters and preview UI. |
 | `tests/test_diagnostics.py` | 9 | Cached-only summaries, sensitive-field exclusion, opt-in and bounded metrics, real Windows memory counters, atomic writes, task timing and library-switch/disable safety. |
+| `tests/test_live_index.py` | 4 | Completed pictures visible before indexing finishes, stable selected previews, locked utilities/context menus, timed commits, cancellation/resume and thumbnail invalidation. |
 
 The **test library** (`tools\make_test_library.py [DEST] [--small]`) is a deterministic library of generated photos. It
 includes camera, phone and backup folders; exact duplicates (including 6 MB files); a nested album copied whole to an old
@@ -331,6 +334,24 @@ The test suite exercises a 10,000-entry catalogue representing 300 GB using synt
 without creating 300 GB of files. It also checks dense similarity matches and failure recovery.
 These checks do not replace real-drive throughput or long-video testing. Similarity comparisons
 remain quadratic; very large collections can still take time.
+
+### Browse while indexing
+
+You do not have to wait for the full library to finish. Open **Photos & videos** while indexing:
+completed catalogue entries are available for filtering, sorting, paging and viewing. New analysis is
+committed at 200 results or approximately one-second intervals; the view checks for updates every two seconds.
+Unprocessed entries are not shown as blank photo tiles. Previously analysed cached entries remain browsable
+even if their extended metadata is being refreshed.
+
+The banner shows how many photos/videos are ready and how many still need analysis/metadata. While you have
+a selection, are scrolled down, or are on a later page, the view is held so it does not jump. **Update view**
+loads the latest results, clears selection and returns to page 1. Search/sort/page changes are still available.
+
+Cleanup, moving/copying, editing, album changes and other utilities remain disabled during active indexing.
+After a normal cancel, committed results are kept; F5 resumes unfinished work. Progress is based on file count,
+not equal work per file, so a later video-heavy portion can take longer than the earlier photo portion.
+To update a running installation, let indexing finish or cancel normally, close the app, pull the update and
+restart. Do not reset/delete the catalogue to install this change.
 
 ### Safety and review
 

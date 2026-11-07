@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 from . import geography
-from .db import Library
+from .db import Library, METADATA_VERSION
 
 PAGE_SIZE = 500
 SORTS = {"newest": "NULLIF(f.taken_at,'') IS NULL, f.taken_at DESC, f.rel_path, f.id",
@@ -53,6 +53,7 @@ class Filters:
     bbox: Optional[tuple[float, float, float, float]] = None
     faces: str = "all"  # all / any / none / unscanned
     person: Optional[int] = None
+    ready_only: bool = False
     orientation: str = "all"
     camera: Optional[str] = None
     lens: Optional[str] = None
@@ -81,6 +82,8 @@ class Filters:
 def where(filters: Filters) -> tuple[str, list]:
     f = filters
     clauses, params = [], []
+    if f.ready_only:
+        clauses.append("f.analyzed=1")
     if f.kind in ("media", "image", "video"):
         clauses += ["f.kind IN ('image','video')" if f.kind == "media" else "f.kind=?",
                     "f.error IS NULL"]
@@ -188,6 +191,15 @@ def overall_bitrate(row) -> Optional[float]:
     if row.get("kind") == "video" and duration and duration > 0:
         return row["size"] * 8 / duration / 1_000_000
     return None
+
+
+def browse_progress(lib: Library) -> dict[str, int]:
+    row = lib.db.execute(
+        "SELECT SUM(kind IN ('image','video') AND analyzed=1 AND error IS NULL) AS ready,"
+        "SUM(kind!='other' AND (analyzed=0 OR COALESCE(metadata_version,0)<?)) AS pending,"
+        "SUM(kind!='other' AND analyzed=1 AND error IS NOT NULL) AS problems FROM files",
+        (METADATA_VERSION,)).fetchone()
+    return {key: int(row[key] or 0) for key in row.keys()}
 
 
 def page(lib: Library, filters: Filters, sort: str = "newest", offset: int = 0) -> tuple[list[dict], int, int]:

@@ -160,7 +160,7 @@ Insights uses read-only background queries and reset uses its own journaled phas
   <tr><td><code>hashing</code></td><td>49</td><td><code>full_hash(path)</code> xxh3-128 over 1 MiB <code>readinto</code> chunks; <code>quick_hash(path, size)</code> five 64 KiB samples + size (pre-filter only).</td></tr>
   <tr><td><code>media</code></td><td>240</td><td><code>open_oriented</code> (JPEG draft decode, EXIF transpose, RGB), <code>read_exif</code> (date, camera, GPS), <code>date_from_filename</code>, <code>dhash</code>, <code>quality_metrics</code>, <code>thumbnail_bytes</code>, <code>analyze_image</code>, <code>load_for_display</code>, <code>count_faces</code> (OpenCV Haar, thread-local).</td></tr>
   <tr><td><code>ffmpeg</code></td><td>104</td><td><code>ffmpeg_exe()</code> (imageio-ffmpeg), <code>run_ffmpeg</code> (no console window), <code>probe()</code> → <code>VideoInfo</code> (parses <code>ffmpeg -i</code>), <code>video_frame()</code> → JPEG bytes.</td></tr>
-  <tr><td><code>scanner</code></td><td>277</td><td><code>walk_files/walk_dirs</code> (iterative <code>os.scandir</code>, long-path aware, reports unreadable folders), <code>scan</code> (incremental diff; raises <code>LibraryUnavailable</code>; never removes rows under unreadable folders), <code>analyze</code> (parallel, batched commits), <code>index</code>.</td></tr>
+  <tr><td><code>scanner</code></td><td>286</td><td><code>walk_files/walk_dirs</code> (iterative <code>os.scandir</code>, long-path aware, reports unreadable folders), <code>scan</code> (incremental diff; raises <code>LibraryUnavailable</code>; never removes rows under unreadable folders), <code>analyze</code> (parallel, batched commits), <code>index</code>.</td></tr>
   <tr><td><code>actions</code></td><td>469</td><td><code>Action</code>, <code>BatchResult</code>, <code>apply</code>, <code>created_batch</code>, <code>record_output</code>, legacy <code>record_created</code>, <code>undo</code>, <code>reconcile</code>, journal queries, verified copy/move and Recovery management.</td></tr>
   <tr><td><code>duplicates</code></td><td>474</td><td><code>confirm_identical</code> (size→quick→full funnel with hash caching), <code>find_all</code> → <code>DuplicateReport</code> (<code>groups</code>, <code>folders</code>, <code>loose_groups</code>), <code>find_duplicate_folders</code> → <code>FolderMatch</code>/<code>FolderInfo</code>, <code>plan_cleanup</code>, <code>keeper_score/keeper_reason</code>, <code>find_duplicates</code> → <code>DuplicateGroup</code>, <code>plan_removal</code>.</td></tr>
   <tr><td><code>similar</code></td><td>252</td><td><code>similar_pairs</code> (threaded blocked Hamming + burst window), <code>find_similar</code> → <code>SimilarGroup</code>, <code>rank_group</code>, <code>find_blurry</code>, <code>BLUR_PRESETS</code>, <code>plan_recycle</code>.</td></tr>
@@ -178,7 +178,7 @@ Insights uses read-only background queries and reset uses its own journaled phas
   <tr><td><code>places</code></td><td>81</td><td><code>nearest(lat, lon)</code> → <code>Place</code> (<code>label</code>, <code>distance_km</code>) from the bundled GeoNames list; <code>distance_km</code>.</td></tr>
   <tr><td><code>checkup</code></td><td>67</td><td><code>run(lib, progress)</code> → <code>Checkup(results, counts, summary)</code>: index + every read-only finder with step progress.</td></tr>
   <tr><td><code>story</code></td><td>623</td><td><code>StyleOptions</code>, <code>TEMPLATES</code>, <code>render_story</code>, <code>render_carousel</code>, <code>export_stories</code>, <code>export_carousel</code>, <code>make_story_video</code>, <code>story_video_duration</code>.</td></tr>
-  <tr><td><code>catalogue</code></td><td>289</td><td>Immutable <code>Filters</code>, parameterised predicates, paged/sorted browsing, distributions, calendar periods, timeline counts, album links and bounded GPS cells.</td></tr>
+  <tr><td><code>catalogue</code></td><td>301</td><td>Immutable <code>Filters</code>, parameterised predicates, paged/sorted browsing, distributions, calendar periods, timeline counts, album links and bounded GPS cells.</td></tr>
   <tr><td><code>geography</code></td><td>30</td><td>Cached public-domain Natural Earth outlines; approximate point-in-polygon India coverage. No online geocoding.</td></tr>
   <tr><td><code>storage</code></td><td>159</td><td><code>ResetOptions</code>, <code>usage</code>, <code>pending</code>, <code>reset</code>, <code>resume</code>; selective clearing, optional compaction, resumable indexing.</td></tr>
 </table>
@@ -188,13 +188,13 @@ native memory sampling and atomic publication) and <code>ui/diagnostics.py</code
 plain-text JSON preview). See <a href="#diagnostics">Aggregate diagnostics</a> for the privacy and lifecycle contract.</p>
 <table>
   <tr><th>Module</th><th>Lines</th><th>Responsibility</th></tr>
-  <tr><td><code>main_window</code></td><td>651</td><td>Sidebar (<code>NAV</code> groups, count badges, theme selector), lazily created pages (<code>page(key)</code>), <code>WelcomePage</code>, task bar (% · elapsed · time left · Cancel), toast, shortcuts, drag &amp; drop, saved geometry; <code>open_library</code> (lock → reconcile → set context → index), <code>run_checkup</code>, <code>open_sample</code> (with progress), <code>undo_last</code>, <code>undo_batch</code>, <code>restore_last</code>.</td></tr>
+  <tr><td><code>main_window</code></td><td>700</td><td>Sidebar (<code>NAV</code> groups, count badges, theme selector), lazily created pages (<code>page(key)</code>), <code>WelcomePage</code>, task bar (% · elapsed · time left · Cancel), toast, shortcuts, drag &amp; drop, saved geometry; <code>open_library</code> (lock → reconcile → set context → index), <code>run_checkup</code>, <code>open_sample</code> (with progress), <code>undo_last</code>, <code>undo_batch</code>, <code>restore_last</code>.</td></tr>
   <tr><td><code>theme</code></td><td>193</td><td>Light/dark palettes, <code>use(mode)</code> (system | light | dark), stylesheet builder, <code>qpalette()</code>, <code>badge_colors</code>, <code>settings()</code> (profile via <code>MEMORIA_PROFILE</code>).</td></tr>
   <tr><td><code>tasks</code></td><td>197</td><td><code>TaskRunner.run(title, fn(progress), on_done, on_cancel)</code>; signals <code>started/progressed/finished/error/busy_changed</code>. <code>BackgroundCall</code>: latest-wins read-only computations off the UI thread (page insights).</td></tr>
-  <tr><td><code>widgets</code></td><td>882</td><td>Formatting/layout helpers, tiles/banners/cards, <code>AppContext</code> (generations, cached results, maintenance state, navigation signals), <code>ThumbCache</code> (64 MiB pixel budget and 4,000-entry cap), model/delegate/grid, Preview, Viewer, confirmation/message dialogs and Toast.</td></tr>
-  <tr><td><code>pages/base</code></td><td>131</td><td><code>Page</code>: header, stale/refresh lifecycle, busy handling, <code>run</code>, <code>apply_actions</code> (the shared Confirm → Apply → Toast/Undo flow).</td></tr>
+  <tr><td><code>widgets</code></td><td>897</td><td>Formatting/layout helpers, tiles/banners/cards, <code>AppContext</code> (generations, cached results, maintenance state, navigation signals), <code>ThumbCache</code> (64 MiB pixel budget and 4,000-entry cap), model/delegate/grid, Preview, Viewer, confirmation/message dialogs and Toast.</td></tr>
+  <tr><td><code>pages/base</code></td><td>142</td><td><code>Page</code>: header, stale/refresh lifecycle, busy handling, <code>run</code>, <code>apply_actions</code> (the shared Confirm → Apply → Toast/Undo flow).</td></tr>
   <tr><td><code>cropcanvas</code></td><td>237</td><td><code>CropCanvas</code>: draws the preview, eight drag handles, rule-of-thirds grid and aspect lock; emits a crop normalised to the transformed image. <code>rotate_crop</code>/<code>flip_crop</code> keep the crop on the same content when rotating or mirroring.</td></tr>
-  <tr><td><code>pages/*</code></td><td>5667</td><td>One per tool; preview work and Insights aggregates use workers. Photos uses SQL paging rather than full-catalogue Python filtering.</td></tr>
+  <tr><td><code>pages/*</code></td><td>5735</td><td>One per tool; preview work and Insights aggregates use workers. Photos uses SQL paging rather than full-catalogue Python filtering.</td></tr>
   <tr><td><code>insight_charts</code></td><td>159</td><td>Accessible bar lists and a QPainter map with bounded markers and wheel zoom.</td></tr>
   <tr><td><code>library_filters</code></td><td>239</td><td>Shared folder/type/format/date/size/GPS/face/person controls and validation.</td></tr>
   <tr><td><code>storage_dialog</code></td><td>84</td><td>Safe defaults, selective clearing, hard-reset acknowledgement and low-space resume option.</td></tr>
@@ -276,7 +276,8 @@ IDs, relationships and health baselines are not reset. Invalid optional EXIF num
       256 px thumbnail. Per video: <code>probe</code> + one frame at min(1 s, duration/2).</li>
   <li><b>Date resolution:</b> EXIF <code>DateTimeOriginal</code> → <code>DateTimeDigitized</code> → <code>DateTime</code> →
       video <code>creation_time</code> → regex on file name → file mtime (<code>modified</code>).</li>
-  <li><b>Commit</b> every 200 results (catalogue + thumbnails) so cancelled runs keep their progress.</li>
+  <li><b>Commit</b> every 200 results or approximately one second, including when waiting for a slow remaining future,
+      so completed work becomes available and cancelled runs keep committed progress.</li>
 </ol>
 <p>Errors (truncated, unidentified, no video stream) are stored per file and never abort the run.</p>
 
@@ -600,8 +601,14 @@ selections are discarded. Reset does not delete <code>.memoria</code> or recover
 <h2>UI architecture</h2>
 <ul>
   <li><b>Page lifecycle:</b> pages listen to <code>library_opened</code>/<code>library_modified</code>, mark themselves stale and
-      refresh when visible and the runner is idle (never mid-task). <code>refresh()</code> does cheap catalogue reads;
+      normally refresh when visible and the runner is idle. Photos also refreshes committed rows during read-only
+      indexing as described below. <code>refresh()</code> does cheap catalogue reads;
       expensive work goes through <code>run()</code>.</li>
+  <li><b>Live index view:</b> AppContext tracks normal read-only indexing separately. Photos opts into live refresh;
+      other pages are disabled. A two-second timer emits index-specific updates without invalidating diagnostics or
+      launching other finders. Photos queries <code>analyzed=1</code> (not metadata-version readiness), holds active
+      selections/scroll/later pages, and invalidates only refreshed rows' pixmaps. Final notifications run after worker
+      callbacks; close/library-change guards reject obsolete completion callbacks. Maintenance resets remain gated.</li>
   <li><b>Shared change flow:</b> <code>Page.apply_actions</code> → <code>ConfirmDialog</code> → <code>runner.run(apply [+ index])</code>
       → <code>library_modified</code> → toast with Undo (batch id) → failure dialog if needed.</li>
   <li><b>PhotoGrid:</b> <code>QListView</code> (icon mode, uniform sizes, batched layout) + <code>PhotoModel</code> holding plain
@@ -719,7 +726,7 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>205 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. See the generated
+<p><b>209 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. See the generated
 <a href="report.html">quality report</a> for current outcomes and timings.</p>
 <table>
   <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
@@ -744,6 +751,8 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
     partial refresh/resume, missing-last numeric sorting, metadata range validation and preview/filter UI.</td></tr>
   <tr><td><code>test_diagnostics.py</code></td><td>9</td><td>Injected private-value exclusion, cached-only reports, bounded
     timing aggregation, native memory sampling, atomic failures, opt-in, live tasks and library-switch publication guards.</td></tr>
+  <tr><td><code>test_live_index.py</code></td><td>4</td><td>Blocked-analysis proof of live browsing, viewer availability,
+    disabled utilities/context menus, stable selected previews, normal/cancelled completion and thumbnail accounting.</td></tr>
 </table>
 <h3>Ground-truth library</h3>
 <p><code>memoria/samplelib.py</code> deterministically generates procedural landscape photos (sky gradient, sun, ridges,

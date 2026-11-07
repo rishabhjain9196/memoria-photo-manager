@@ -22,6 +22,7 @@ MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 
 class PhotosPage(Page):
     title = "Photos & videos"
+    live_index_view = True
     subtitle = ("Browse by date. Double-click to view. Select several (Ctrl/Shift-click, Ctrl+A) to act on them "
                 "together. Selection applies to the current page (up to 500 items).")
 
@@ -29,6 +30,8 @@ class PhotosPage(Page):
         super().__init__(ctx)
         self.filters = catalogue.Filters()
         self.offset = 0
+        self._live_deferred = False
+        self._progress_counts = {"ready": 0, "pending": 0, "problems": 0}
         self.zoom = QSlider(Qt.Orientation.Horizontal)
         self.zoom.setRange(110, 280)
         self.zoom.setValue(156)
@@ -112,6 +115,15 @@ class PhotosPage(Page):
         split.addWidget(self.preview)
         split.setStretchFactor(1, 1)
         split.setChildrenCollapsible(False)
+        self.index_note = label("", "small", wrap=True)
+        self.update_view = button("Update view", on_click=lambda: self.refresh(force=True),
+                                  tip="Load the latest ready items; clears the current selection and returns to page 1")
+        self.index_notice = QWidget()
+        notice_layout = hbox(self.index_note, self.update_view)
+        notice_layout.setStretch(0, 1)
+        self.index_notice.setLayout(notice_layout)
+        self.index_notice.hide()
+        self.body.addWidget(self.index_notice)
         self.body.addWidget(split, 1)
 
         self._debounce = QTimer(self)
@@ -130,12 +142,41 @@ class PhotosPage(Page):
                       self.grid.currentIndex().data(Qt.ItemDataRole.UserRole)))
         self.rows: list[dict] = []
         ctx.people_changed.connect(self._mark_stale)
+        ctx.index_progress.connect(self._mark_stale)
 
     # --------------------------------------------------------------------------- data
-    def refresh(self) -> None:
-        problems = self.lib.stats()["errors"]
+    def refresh(self, force: bool = False) -> None:
+        try:
+            self._progress_counts = catalogue.browse_progress(self.lib)
+        except sqlite3.Error as error:
+            self.index_note.setText(f"Could not read the catalogue: {error}. Reconnect the drive and rescan.")
+            self.index_notice.show()
+            return
+        active_view = bool(self.selected()) or self.offset > 0 or self.grid.verticalScrollBar().value() > 0
+        if not force and (self.ctx.indexing or self.ctx.index_update) and active_view:
+            self._live_deferred = True
+            self._update_index_notice()
+            return
+        self.stale = False
+        problems = self._progress_counts["problems"]
         self.kind.setItemText(3, f"Problems ({problems:,})" if problems else "Problems")
         self._apply_filter()
+
+    def _update_index_notice(self):
+        counts = self._progress_counts
+        if self.ctx.indexing:
+            text = (f"Indexing continues · {counts['ready']:,} ready to browse · "
+                    f"{counts['pending']:,} awaiting analysis/metadata. Utilities are temporarily locked.")
+        elif counts["pending"]:
+            text = (f"Ready photos/videos: {counts['ready']:,}. Awaiting analysis/metadata: {counts['pending']:,}; "
+                    "F5 resumes without starting over.")
+        else:
+            text = "Indexing finished."
+        if self._live_deferred:
+            text += " View held to preserve your selection/position. Update view clears the selection."
+        self.index_note.setText(text)
+        self.update_view.setVisible(self._live_deferred)
+        self.index_notice.setVisible(self.ctx.indexing or bool(counts["pending"]) or self._live_deferred)
 
     def _build_tree(self) -> None:
         cur = self.tree.currentItem()
@@ -143,7 +184,8 @@ class PhotosPage(Page):
         self.tree.blockSignals(True)
         self.tree.clear()
         counts: dict[str, dict[str, int]] = {}
-        sql, params = catalogue.where(replace(self.filters, kind=self.kind.currentData(), search=self.search.text()))
+        sql, params = catalogue.where(replace(self.filters, kind=self.kind.currentData(),
+                                              search=self.search.text(), ready_only=True))
         for r in self.lib.db.execute(f"SELECT substr(taken_at,1,7) AS month,COUNT(*) AS n FROM files f "
                                      f"WHERE {sql} GROUP BY month", params):
             t = r["month"] or ""
@@ -180,6 +222,8 @@ class PhotosPage(Page):
     def _apply_filter(self, *_args) -> None:
         self._debounce.stop()
         self.offset = 0
+        self._live_deferred = False
+        self._update_index_notice()
         try:
             if self.lib is not None:
                 self._build_tree()
@@ -199,7 +243,7 @@ class PhotosPage(Page):
             return
         cur = self.tree.currentItem()
         prefix = cur.data(0, Qt.ItemDataRole.UserRole) if cur else ""
-        filters = replace(self.filters, kind=self.kind.currentData(), search=self.search.text().strip())
+        filters = replace(self.filters, kind=self.kind.currentData(), search=self.search.text().strip(), ready_only=True)
         if prefix == "Unknown":
             filters = replace(filters, undated=True)
         elif prefix:
@@ -214,6 +258,8 @@ class PhotosPage(Page):
             return
         items = [{**r, "caption": sort_caption(r, self.sort.currentData()),
                   "tip": f"{r['rel_path']}\n{fmt_size(r['size'])}"} for r in self.rows]
+        if self.ctx.indexing or self.ctx.index_update:
+            self.ctx.thumbs.invalidate(r["id"] for r in self.rows)
         self.grid.set_items(items)
         self.count.setText(f"{self.offset + 1 if total else 0:,}–{self.offset + len(items):,} of {total:,} · {fmt_size(size)}")
         self.count.setToolTip("Selection and Ctrl+A apply to this page only (up to 500 items).")
@@ -239,6 +285,8 @@ class PhotosPage(Page):
         self._sel_changed()
 
     def _turn_page(self, direction: int):
+        self._live_deferred = False
+        self._update_index_notice()
         self.offset = max(0, self.offset + direction * catalogue.PAGE_SIZE)
         self._load_page()
 
@@ -304,9 +352,9 @@ class PhotosPage(Page):
         videos = [r for r in sel if r["kind"] == "video" and not r.get("error")]
         self.sel_label.setText(f"{n:,} selected · {fmt_size(size)}")
         idle = not self.busy
-        for w in (self.b_recycle, self.a_copy, self.a_move):
+        for w in (self.b_recycle, self.a_copy, self.a_move, self.a_edit, self.a_album, self.a_video):
             w.setEnabled(idle)
-        self.a_story.setEnabled(bool(photos))
+        self.a_story.setEnabled(idle and bool(photos))
         self.a_story.setText(f"Add {len(photos)} photos to Story maker" if len(photos) > 1 else "Add to Story maker")
         self.a_video.setVisible(bool(videos))
         self.a_video.setText(f"Compress {fmt_n(len(videos), 'video')}")
@@ -385,18 +433,24 @@ class PhotosPage(Page):
             show_in_explorer(self.lib.abspath(sel[0]["rel_path"]))
 
     def _to_story(self) -> None:
+        if self.busy:
+            return
         ids = [i["id"] for i in self.selected() if i["kind"] == "image" and not i.get("error")]
         if ids:
             self.ctx.story_selection.extend(ids)
             self.ctx.navigate.emit("story")
 
     def _to_editor(self) -> None:
+        if self.busy:
+            return
         ids = [i["id"] for i in self.selected() if i["kind"] in ("image", "video") and not i.get("error")]
         if ids:
             self.ctx.edit_selection[:] = ids
             self.ctx.navigate.emit("editor")
 
     def add_to_album(self, name: str | None = None) -> None:
+        if self.busy:
+            return
         sel = [i for i in self.selected() if i["kind"] in ("image", "video")]
         if not sel:
             return
@@ -425,6 +479,8 @@ class PhotosPage(Page):
         self.ctx.toast_requested.emit(msg + " No files were moved or copied.", "")
 
     def _to_video(self) -> None:
+        if self.busy:
+            return
         paths = [str(self.lib.abspath(i["rel_path"])) for i in self.selected() if i["kind"] == "video" and not i.get("error")]
         if paths:
             self.ctx.video_selection[:] = paths
@@ -445,6 +501,7 @@ class PhotosPage(Page):
             m.addAction("Open in default app", lambda: open_path(self.lib.abspath(it["rel_path"])))
         m.addAction("Show in folder", lambda: show_in_explorer(self.lib.abspath(it["rel_path"])))
         m.addSeparator()
+        utility_start = len(m.actions())
         if any(i["kind"] in ("image", "video") and not i.get("error") for i in sel):
             m.addAction("Edit…", self._to_editor)
         if any(i["kind"] == "image" and not i.get("error") for i in sel):
@@ -456,6 +513,6 @@ class PhotosPage(Page):
         m.addAction("Move to folder…", self.move_selected)
         m.addSeparator()
         m.addAction(f"Move {fmt_n(len(sel), 'item')} to Recovery", self.recycle_selected)
-        for a in m.actions()[-4:]:
+        for a in m.actions()[utility_start:]:
             a.setEnabled(not self.busy)
         m.exec(self.grid.viewport().mapToGlobal(pos))

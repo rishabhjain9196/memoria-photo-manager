@@ -267,6 +267,10 @@ cards worth visiting.</p>
 
 <section id="explore-reset">
 <h2>Exploration and recovery without surprises</h2>
+<p>Indexing is a read-only background phase, not a reason to block browsing. Photos can read committed analysed rows
+while other utilities remain locked. Updates are throttled and do not replace an active selection or scrolled/later
+page; the user explicitly updates that view. Ready and pending counts distinguish what can be viewed from unfinished
+analysis. Index completion/cancellation is published after worker callbacks to avoid starting overlapping operations.</p>
 <p>Diagnostics is opt-in per library and device, with local-only reports inside the source checkout. It uses
 allowlisted aggregate categories rather than raw logs or catalogue exports. The user can preview JSON and must stop
 recording and review it before committing; the app never uploads or runs git mutations. Existing cached libraries

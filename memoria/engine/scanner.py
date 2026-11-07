@@ -5,6 +5,7 @@ Scanning never modifies anything outside ``.memoria``.
 from __future__ import annotations
 
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from dataclasses import dataclass
 from datetime import datetime
@@ -210,9 +211,12 @@ def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = co
                            (dt.isoformat(sep=" "), "filename" if fn_dt else "modified", r["id"]))
     if not total:
         return res
+    progress.update(0, total, "Analysing photos and videos…", force=True)
     pending: list[tuple[int, dict]] = []
+    last_flush = time.monotonic()
 
     def flush():
+        nonlocal last_flush
         if not pending:
             return
         with lib.transaction() as db:
@@ -230,6 +234,7 @@ def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = co
             t.executemany("INSERT OR REPLACE INTO thumbs (file_id, data) VALUES (?,?)", thumbs)
             t.execute("COMMIT")
         pending.clear()
+        last_flush = time.monotonic()
 
     video_workers = max(1, min(4, workers // 2))
     with ThreadPoolExecutor(max_workers=workers) as pool, ThreadPoolExecutor(max_workers=video_workers) as vpool:
@@ -261,6 +266,10 @@ def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = co
                     r = next(remaining, None)
                     if r is not None:
                         submit(r)
+                if pending and time.monotonic() - last_flush >= 1.0:
+                    flush()
+                    progress.update(res.analyzed, total,
+                                    f"Analysing photos and videos… {res.analyzed:,} of {total:,}", force=True)
         except BaseException:
             for f in futures:
                 f.cancel()

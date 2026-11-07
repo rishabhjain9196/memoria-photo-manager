@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Live browsing during indexing
+- Photos & videos can browse completed catalogue entries before indexing finishes, including search, sort,
+  paging and the viewer. Other utilities stay locked during active indexing.
+- Analysis flushes at 200 results or approximately one-second intervals; UI refresh is throttled to two seconds.
+- Analysis progress starts at zero for its own phase and updates on timed commits, avoiding stale "scan complete" progress.
+- Selected previews, scrolled views and later pages are held until explicitly updated, preventing background jumps.
+- Cancelling retains committed work; resume uses existing analysis. No schema change or full rebuild is required.
+
 ### Local diagnostics
 - Added opt-in, per-library/device recording of aggregate catalogue statistics and bounded timing metrics.
 - Reports work from existing caches without rescanning media, and include periodic in-progress snapshots and

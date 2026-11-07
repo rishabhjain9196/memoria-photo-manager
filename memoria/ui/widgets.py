@@ -243,6 +243,8 @@ class AppContext(QObject):
     albums_changed = Signal()         # albums created, edited or deleted
     browse_requested = Signal(object)
     album_requested = Signal(int)
+    indexing_changed = Signal(bool)
+    index_progress = Signal()
 
     def __init__(self, runner):
         super().__init__()
@@ -251,6 +253,8 @@ class AppContext(QObject):
         self.diagnostics = Metrics()
         self.library: Optional[Library] = None
         self.maintenance = False
+        self.indexing = False
+        self.index_update = False
         self.thumbs = ThumbCache(self)
         self.story_selection: list[int] = []
         self.video_selection: list[str] = []
@@ -266,6 +270,7 @@ class AppContext(QObject):
         if self.library is not None and self.library is not lib:
             self.library.close()
         self.library = lib
+        self.indexing = False
         from ..engine import storage
         self.maintenance = lib is not None and storage.pending(lib) is not None
         self.thumbs.clear()
@@ -273,6 +278,10 @@ class AppContext(QObject):
         self.generation += 1
         self.set_badges({})
         self.library_opened.emit()
+
+    def set_indexing(self, value: bool) -> None:
+        self.indexing = value
+        self.indexing_changed.emit(value)
 
     def _on_modified(self) -> None:
         self.thumbs.clear()
@@ -312,6 +321,12 @@ class ThumbCache:
     def clear(self) -> None:
         self._cache.clear()
         self.bytes = 0
+
+    def invalidate(self, file_ids) -> None:
+        for file_id in file_ids:
+            pixmap = self._cache.pop(file_id, None)
+            if pixmap is not None:
+                self.bytes -= pixmap.width() * pixmap.height() * max(1, pixmap.depth() // 8)
 
     def get(self, file_id: int) -> Optional[QPixmap]:
         if file_id in self._cache:

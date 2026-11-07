@@ -7,7 +7,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, Signal
+from PySide6.QtCore import QSettings, QTimer, Qt, Signal
 from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
                                QProgressBar, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
@@ -138,6 +138,11 @@ class MainWindow(QMainWindow):
         self.nav_badges: dict[str, QLabel] = {}
         self.current_key = ""
         self._task_started_at = 0.0
+        self._closing = False
+        self._index_notified = False
+        self._index_refresh = QTimer(self)
+        self._index_refresh.setInterval(2000)
+        self._index_refresh.timeout.connect(self._publish_index_progress)
         self._build()
         from .diagnostics import DiagnosticsController
         self.diagnostics = DiagnosticsController(self.ctx, self.settings, self)
@@ -342,7 +347,7 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------------------------------- library
     def choose_library(self) -> None:
-        if self.runner.busy:
+        if self.runner.busy or self.ctx.indexing:
             return
         start = str(self.ctx.library.root) if self.ctx.library else str(Path.home() / "Pictures")
         path = QFileDialog.getExistingDirectory(self, "Choose the folder that holds your photos", start)
@@ -350,7 +355,7 @@ class MainWindow(QMainWindow):
             self.open_library(path)
 
     def open_library(self, path: str, page: str = "overview") -> None:
-        if self.runner.busy:
+        if self.runner.busy or self.ctx.indexing:
             return
         try:
             lib = Library(path)
@@ -394,12 +399,14 @@ class MainWindow(QMainWindow):
 
     def index_library(self) -> None:
         lib = self.ctx.library
-        if lib is None or self.runner.busy:
+        if lib is None or self.runner.busy or self.ctx.indexing:
             return
+        live = not self.ctx.maintenance
 
         def done(res):
             s, a = res
-            self.ctx.library_modified.emit()
+            if not live:
+                self.ctx.library_modified.emit()
             bits = []
             if s.added:
                 bits.append(f"{s.added:,} new")
@@ -414,10 +421,41 @@ class MainWindow(QMainWindow):
             if bits:
                 self.toast.show_message("Library updated: " + ", ".join(bits) + ".", seconds=6)
 
-        self.runner.run("Resuming library rebuild" if self.ctx.maintenance else "Reading your library",
-                        lambda prog: storage.resume(lib, prog), done,
-                        on_cancel=self.ctx.library_modified.emit,
-                        diagnostic_key="reset" if self.ctx.maintenance else "index")
+        if live:
+            self._index_notified = False
+            self.ctx.set_indexing(True)
+            self._index_refresh.start()
+        started = self.runner.run("Resuming library rebuild" if self.ctx.maintenance else "Reading your library",
+                                  lambda prog: storage.resume(lib, prog), done,
+                                  on_cancel=None if live else self.ctx.library_modified.emit,
+                                  diagnostic_key="reset" if self.ctx.maintenance else "index")
+        if not started and live:
+            self._index_refresh.stop()
+            self.ctx.set_indexing(False)
+
+    def _publish_index_progress(self) -> None:
+        if not self.ctx.indexing or self._closing:
+            return
+        if not self._index_notified:
+            self._index_notified = True
+            if self.current_key != "photos":
+                self.toast.show_message("Open Photos & videos to browse completed items while indexing continues. "
+                                        "Utilities unlock when indexing stops.", seconds=10)
+        self.ctx.index_update = True
+        try:
+            self.ctx.index_progress.emit()
+        finally:
+            self.ctx.index_update = False
+
+    def _finish_index_refresh(self, lib) -> None:
+        if self._closing or self.ctx.library is not lib or not self.ctx.indexing or self.runner.busy:
+            return
+        self.ctx.index_update = True
+        try:
+            self.ctx.set_indexing(False)
+            self.ctx.library_modified.emit()
+        finally:
+            self.ctx.index_update = False
 
     def _diagnostics_updated(self):
         self.diagnostics_btn.setText("Diagnostics (recording)" if self.diagnostics.enabled else "Diagnostics…")
@@ -457,7 +495,7 @@ class MainWindow(QMainWindow):
 
     def manage_storage(self) -> None:
         lib = self.ctx.library
-        if lib is None or self.runner.busy:
+        if lib is None or self.runner.busy or self.ctx.indexing:
             return
         from .storage_dialog import StorageDialog
         try:
@@ -501,7 +539,7 @@ class MainWindow(QMainWindow):
     def run_checkup(self) -> None:
         """Run every finder in one read-only pass; pages and sidebar badges use the results."""
         lib = self.ctx.library
-        if lib is None or self.runner.busy or self.ctx.maintenance:
+        if lib is None or self.runner.busy or self.ctx.maintenance or self.ctx.indexing:
             return
         from ..engine import checkup
 
@@ -520,7 +558,7 @@ class MainWindow(QMainWindow):
         self.runner.run("Checking everything", lambda prog: checkup.run(lib, prog), done, diagnostic_key="checkup")
 
     def open_sample(self) -> None:
-        if self.runner.busy:
+        if self.runner.busy or self.ctx.indexing:
             return
         dest = _sample_dir()
 
@@ -545,7 +583,7 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------------------------- undo
     def undo_last(self) -> None:
         lib = self.ctx.library
-        if lib is None or self.runner.busy or self.ctx.maintenance:
+        if lib is None or self.runner.busy or self.ctx.maintenance or self.ctx.indexing:
             return
         last = next((b for b in actions.batches(lib) if b["status"] in ("applied", "partial")), None)
         if last is None:
@@ -560,7 +598,7 @@ class MainWindow(QMainWindow):
 
     def undo_batch(self, batch_id: str) -> None:
         lib = self.ctx.library
-        if lib is None or self.ctx.maintenance:
+        if lib is None or self.ctx.maintenance or self.ctx.indexing:
             return
 
         def work(prog):
@@ -611,6 +649,11 @@ class MainWindow(QMainWindow):
 
     def _task_finished(self, outcome: str) -> None:
         self.task_bar.hide()
+        was_indexing = self.ctx.indexing
+        if was_indexing:
+            self._index_refresh.stop()
+            lib = self.ctx.library
+            QTimer.singleShot(0, lambda: self._finish_index_refresh(lib))
         self._reset_state()
         if self.ctx.maintenance:
             self.toast.show_message("Rebuild is unfinished. Use Resume rebuild, or reopen this library. "
@@ -619,10 +662,13 @@ class MainWindow(QMainWindow):
         if self.ctx.library is not None and not self.pages:
             self.go("overview")
         if outcome == "cancelled":
-            self.toast.show_message("Stopped. Anything already done is recorded in History.", seconds=6)
+            self.toast.show_message("Indexing stopped. Completed analysis is kept; F5 resumes."
+                                    if was_indexing else "Stopped. Anything already done is recorded in History.", seconds=6)
 
     def _task_error(self, title: str, msg: str, details: str) -> None:
-        advice = ("Use Resume rebuild to finish safely. If space is low, choose Skip shrinking storage files."
+        advice = ("Completed analysis is kept. Reconnect the drive if needed and press F5 to resume."
+                  if self.ctx.indexing else
+                  "Use Resume rebuild to finish safely. If space is low, choose Skip shrinking storage files."
                   if self.ctx.maintenance else
                   "Some steps may have completed. Check History & recovery before trying again.")
         MessageDialog(self, f"{title} didn't finish", msg + "\n\n" + advice, details).exec()
@@ -633,6 +679,9 @@ class MainWindow(QMainWindow):
         self.runner.cancel()
 
     def closeEvent(self, e) -> None:
+        self._closing = True
+        self._index_refresh.stop()
+        self.ctx.indexing = False
         if self.runner.busy:
             self.runner.cancel()
             self.runner.wait()

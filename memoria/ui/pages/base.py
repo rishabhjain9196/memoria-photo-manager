@@ -17,6 +17,7 @@ class Page(QWidget):
     subtitle = ""
     glyph = "\uE80F"
     needs_library = True
+    live_index_view = False
 
     def __init__(self, ctx: AppContext):
         super().__init__()
@@ -34,6 +35,7 @@ class Page(QWidget):
         ctx.library_opened.connect(self._mark_stale)
         ctx.library_modified.connect(self._mark_stale)
         ctx.runner.busy_changed.connect(self._busy_changed)
+        ctx.indexing_changed.connect(self._busy_changed)
 
     # lifecycle ---------------------------------------------------------------------------
     @property
@@ -41,19 +43,21 @@ class Page(QWidget):
         return self.ctx.library
 
     def _busy_changed(self, busy: bool) -> None:
-        self.on_busy_changed(busy)
-        if not busy and self.stale and self.isVisible():
+        self.setEnabled(not self.ctx.indexing or self.live_index_view)
+        self.on_busy_changed(self.busy)
+        if self.can_refresh and self.stale and self.isVisible():
             self._refresh_now()
 
     def _mark_stale(self) -> None:
         self.stale = True
-        if self.isVisible() and not self.busy:
+        if self.isVisible() and self.can_refresh:
             self._refresh_now()
 
     def showEvent(self, e) -> None:
         super().showEvent(e)
+        self.setEnabled(not self.ctx.indexing or self.live_index_view)
         self.on_busy_changed(self.busy)
-        if self.stale and not self.busy:
+        if self.stale and self.can_refresh:
             self._refresh_now()
 
     def _refresh_now(self) -> None:
@@ -70,12 +74,19 @@ class Page(QWidget):
     # helpers -----------------------------------------------------------------------------
     @property
     def busy(self) -> bool:
-        return self.ctx.runner.busy or self.ctx.maintenance
+        return self.ctx.runner.busy or self.ctx.maintenance or self.ctx.indexing
+
+    @property
+    def can_refresh(self) -> bool:
+        return not self.busy or (self.live_index_view and self.ctx.indexing and not self.ctx.maintenance)
 
     def run(self, title: str, fn: Callable[[Progress], Any], on_done: Optional[Callable[[Any], None]] = None,
             on_cancel: Optional[Callable[[], None]] = None) -> bool:
         if self.ctx.maintenance:
             self.ctx.toast_requested.emit("Finish the library rebuild using Resume rebuild first.", "")
+            return False
+        if self.ctx.indexing:
+            self.ctx.toast_requested.emit("Photos can be browsed while indexing. Utilities unlock when indexing stops.", "")
             return False
         from ...engine.diagnostics import OPERATIONS
         key = self.__class__.__module__.rsplit(".", 1)[-1]

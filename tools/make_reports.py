@@ -45,6 +45,7 @@ AREAS = {
     "test_insights": "Storage charts, timeline, offline map and filtered browsing",
     "test_metadata": "Extended photo/video metadata, migration, filters and numeric sorting",
     "test_diagnostics": "Aggregate diagnostic privacy, cached reports, opt-in and publication",
+    "test_live_index": "Live browsing during indexing and utility safety",
 }
 
 
@@ -145,6 +146,7 @@ def refresh_images(tmp: Path) -> None:
         names[name] = name
     sources = {dest: shots / f"{source}.png" for dest, source in names.items()}
     sources["confirm"] = next(shots.glob("dialog-Move*.png"))
+    sources["live-index"] = next(tmp.rglob("live-index.png"))
     for path in sources.values():
         if not path.is_file():
             raise FileNotFoundError(f"Expected documentation screenshot was not generated: {path.name}")
