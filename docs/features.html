@@ -17,12 +17,13 @@
 <aside class="toc">
   <b>FEATURES GUIDE</b>
   <a href="#start">Getting started</a>
-  <a href="#safety">Your files are safe</a>
+  <a href="#safety">Safety and its limits</a>
   <a href="#checkup">Check everything</a>
   <a href="#overview">Overview</a>
   <a href="#photos">Photos &amp; videos</a>
   <a class="sub" href="#batch">Batch actions</a>
   <a class="sub" href="#viewer">Viewer</a>
+  <a href="#insights">Library insights</a>
   <a href="#people">People</a>
   <a href="#duplicates">Duplicates</a>
   <a href="#similar">Similar &amp; best shots</a>
@@ -39,6 +40,7 @@
   <a href="#health">Health check</a>
   <a href="#compare">Compare &amp; sync</a>
   <a href="#history">History &amp; recovery</a>
+  <a href="#reset">Storage &amp; reset</a>
   <a href="#progress">Progress &amp; cancelling</a>
   <a href="#themes">Themes</a>
   <a href="#shortcuts">Keyboard shortcuts</a>
@@ -51,14 +53,14 @@
 <header class="hero">
   <h1>Features guide</h1>
   <p>Everything Memoria can do, how to use each tool, and exactly what each one will — and won't — change on your PC.</p>
-  <div class="meta"><span class="pill">Version 1.4</span><span class="pill">14 pages</span><span class="pill">Light &amp; dark</span><span class="pill">Works offline</span><span class="pill">Windows 10/11</span></div>
+  <div class="meta"><span class="pill">Unreleased updates after 1.4</span><span class="pill">15 pages</span><span class="pill">Light &amp; dark</span><span class="pill">Works offline</span><span class="pill">Windows 10/11</span></div>
 </header>
 
 <section id="start">
 <h2>Getting started</h2>
 <ol>
   <li>Start Memoria: run <code>run.ps1</code> (first run installs what it needs) or open <code>Memoria.exe</code> from the built
-      app folder.</li>
+      app folder. Existing executables must be rebuilt to include the unreleased changes described here.</li>
   <li>Click <b>Choose photo folder…</b> and pick the folder that holds your photos (for example <code>Pictures</code> or a
       backup drive). Or click <b>Try it on a sample library</b> to explore safely with generated photos.</li>
   <li>Memoria reads the library in the background: it notes every file, reads photo dates and camera details, and makes
@@ -74,9 +76,10 @@ screen; use <b>Change library…</b> in the sidebar to switch.</p>
 </section>
 
 <section id="safety">
-<h2>Your files are safe</h2>
-<div class="callout ok"><b>Memoria never deletes your photos.</b> Anything you "remove" goes into the library's Recovery
-folder, every change is listed in History, and every change can be undone.</div>
+<h2>Safety and its limits</h2>
+<div class="callout info"><b>Recovery is not a backup.</b> Clean-up moves originals to Recovery until you explicitly
+empty it. File moves, copies and generated outputs are journaled for Undo. Undo may delete an unchanged generated
+copy; clearing albums, people or health baselines is not undoable. Keep a separate backup.</div>
 <ul>
   <li><b>Looking is harmless.</b> Finding duplicates, similar photos, tidy-up items, organise plans, health checks and
       comparisons only read files.</li>
@@ -87,10 +90,11 @@ folder, every change is listed in History, and every change can be undone.</div>
       History and Recovery), and the output folders you choose for stories and compressed videos.</li>
   <li><b>One window per library.</b> A library can only be open in one Memoria window at a time, so two windows can
       never change the same files at once.</li>
-  <li><b>Unplugged drives are safe.</b> If the library's drive disconnects, Memoria stops and changes nothing. Folders
-      it can't read are left as they were in the catalogue — never treated as deleted.</li>
+  <li><b>Unreadable is not deleted.</b> An unreachable scan root aborts the scan; inaccessible files/folders retain
+      their entries. Interrupted file operations may already have completed steps; check History before retrying.</li>
   <li><b>Undo keeps everything.</b> Undoing a change restores files together with their thumbnails, dates and health
-      fingerprints.</li>
+      fingerprints, except metadata you deliberately cleared using Storage &amp; reset.</li>
+  <li><b>Verified Undo:</b> edited copies and legacy copies without a recorded fingerprint are left in place for manual review.</li>
   <li><b>Nothing leaves your PC.</b> No account, no upload, no tracking.</li>
 </ul>
 </section>
@@ -113,7 +117,7 @@ similar videos, blurry photos, leftovers and the date-folder plan — with a sin
 <p>A dashboard for the open library.</p>
 <ul>
   <li><b>Tiles:</b> number of photos and videos, total library size, and the years it covers.</li>
-  <li><b>Safety banner:</b> how many files are in Recovery and a reminder that every change can be undone.</li>
+  <li><b>Safety banner:</b> how many files are in Recovery, why it is not a backup, and where to check file health.</li>
   <li><b>Tool cards:</b> one sentence per tool about this library — e.g. "25 files might have exact copies", "12 photos look
       blurry", "5 leftover files, 2 empty files and 3 empty folders can be tidied away", "Never checked". Cards worth
       visiting have a blue <b>Open</b> button.</li>
@@ -127,20 +131,26 @@ similar videos, blurry photos, leftovers and the date-folder plan — with a sin
 <p>Browse the whole library by date.</p>
 <ul>
   <li><b>Timeline</b> on the left: All, then years and months with counts. Click to filter.</li>
-  <li><b>Search</b> by file name, folder or camera model; <b>filter</b> Everything / Photos / Videos / Problems (files that can't be opened).</li>
+  <li><b>Search</b> literal text in names, folders, camera models and named people. Type filters include photos/videos,
+      individual media types, Problems, other files and all files.</li>
+  <li><b>Sort:</b> newest, oldest, largest, smallest or name. Largest first puts the biggest files at the top and shows sizes under thumbnails.</li>
+  <li><b>Filters…:</b> folder with optional subfolders, format, inclusive capture-date range, minimum/maximum MiB,
+      GPS availability or a map-selected area, detected faces and named people. Run Find people first for face filters.</li>
   <li><b>Preview</b> on the right: the photo, when it was taken and <i>how Memoria knows</i> (camera, video metadata, file
       name, or file date — may be inaccurate), size and resolution, camera, GPS coordinates, its location in the library, and
       any problem in plain words.</li>
-  <li>Double-click to open in your default viewer; right-click for <b>Open</b>, <b>Show in folder</b> and <b>Add to Story maker</b>.</li>
+  <li>Double-click a photo for the built-in viewer; videos use the default player. Right-click for additional actions.</li>
   <li>Select several photos (Ctrl/Shift-click) and press <b>Add N to Story maker</b>.</li>
 </ul>
 <ul>
-  <li><b>Thumbnail size:</b> the Size slider, or Ctrl + mouse wheel over the grid.</li>
+  <li><b>Thumbnail size:</b> the Thumbnails slider, or Ctrl + mouse wheel over the grid.</li>
+  <li><b>Paging:</b> at most 500 files are loaded per page. Previous/Next navigate results; the header shows matching
+      count and total size. Changing filters clears the current selection. Clear leaves a chart's filter selection.</li>
   <li>The <b>Problems</b> filter shows how many photos and videos can't be opened.</li>
 </ul>
 <h3 id="batch">Batch actions</h3>
-<p>Select several items (Ctrl/Shift-click, or Ctrl+A for everything shown) and a selection bar appears with the count
-and total size:</p>
+<p>Select one or more items (Ctrl/Shift-click, or Ctrl+A for the <b>current page only</b>) and a selection bar appears
+with count and size. Unseen pages are not included in batch actions:</p>
 <table>
   <tr><th>Action</th><th>What happens</th><th>Undo</th></tr>
   <tr><td><b>Move to Recovery</b> (or Delete key)</td><td>Selected items move to Recovery after a confirmation that shows their thumbnails.</td><td>Yes</td></tr>
@@ -156,6 +166,31 @@ Move to Recovery and More actions. Videos show a ▶ duration tag.</figcaption><
 <p>Double-click a photo (or press Enter) to view it large. Use ← / → (or Space / Backspace) to move through the photos
 currently shown, <b>Open in default app</b>, <b>Show in folder</b>, and Esc to close. Videos open in your default player.</p>
 <figure><img src="images/viewer.png" alt="Viewer"><figcaption>The built-in viewer.</figcaption></figure>
+<figure><img src="images/photos-largest.png" alt="Largest files first"><figcaption>Size sorting makes large files easy to review without reading their contents again.</figcaption></figure>
+<figure><img src="images/library-filters.png" alt="Combined library filters"><figcaption>Filters combine rather than replacing one another. Clear a selected map area before choosing files without GPS.</figcaption></figure>
+</section>
+
+<section id="insights">
+<h2>Library insights</h2>
+<p>Read-only charts of the <b>last indexed catalogue</b>. Choose a folder or apply the same filters as Photos &amp; videos.
+Use F5 after changes outside Memoria. Counts exclude Recovery and the cache; sizes are logical file sizes, not allocated disk clusters.</p>
+<h3>Storage</h3>
+<p>Bars show immediate subfolders, files directly in the selected folder, and file formats. Every matching file is
+counted once. Click a subfolder to drill down, a format to browse its files, or <b>Browse selected folder</b>.</p>
+<figure><img src="images/insights-storage.png" alt="Folder and format storage bars"><figcaption>Folder-wise and format-wise counts and sizes.</figcaption></figure>
+<h3>Timeline and album links</h3>
+<p>Click a year, then a month, then a day. A day opens its files; <b>Browse this period</b> opens the selected
+year/month. Saved albums containing matching files are linked beside the chart; no albums are created automatically.
+Undated files are excluded. Dates can come from camera metadata, filenames or modified dates, so check date sources.</p>
+<figure><img src="images/insights-timeline.png" alt="Monthly counts and saved album links"><figcaption>Drill down through dates and open an existing album directly.</figcaption></figure>
+<h3>Offline GPS map</h3>
+<p>Auto starts with India for Indian coverage or an empty map, and switches to world coverage when coordinates fall
+outside the bundled approximate India outline. India/World buttons override the view. Wheel to zoom; click a marker
+or its keyboard-accessible list entry to browse its files. Markers cluster nearby coordinates to keep rendering bounded.</p>
+<p>No GPS is uploaded and no online tiles are fetched. Missing/invalid GPS is not plotted. The Natural Earth outlines
+are approximate and not authoritative country geocoding; borders and coastlines can affect automatic coverage.</p>
+<figure><img src="images/insights-india.png" alt="Offline India GPS map"><figcaption>India view with catalogue GPS clusters.</figcaption></figure>
+<figure><img src="images/insights-world.png" alt="Offline world map"><figcaption>World view is also available manually. The sample library uses generated locations.</figcaption></figure>
 </section>
 
 <section id="people">
@@ -244,7 +279,7 @@ WhatsApp forwards — and picks the best one.</p>
 <h3>How to use</h3>
 <ol>
   <li>Click <b>Find similar photos</b>. Groups appear on the left, labelled <b>Burst</b> (taken seconds apart) or <b>Similar</b>.</li>
-  <li>In each group the best photo has a green <b>BEST</b> badge and is unticked; the others are ticked to move.</li>
+  <li>The suggested best photo has a green <b>BEST</b> badge. <b>Nothing starts ticked</b>, in either the photo or video tab.</li>
   <li>Click tick boxes to change what moves. Select a photo and click <b>Make this the best pick</b> to switch.</li>
   <li>Use <b>Keep only best in every group</b> or <b>Untick everything</b> for all groups at once.</li>
   <li>Click <b>Move selected to Recovery</b>. A group can never be emptied completely — the best pick always stays.</li>
@@ -262,7 +297,7 @@ results are remembered, so later searches are quick.</p>
 <figure><img src="images/similar-videos.png" alt="Similar videos"><figcaption>An original and its WhatsApp-sized copy.</figcaption></figure>
 
 <h3 id="blurry">Blurry photos</h3>
-<p>The second tab lists photos with little fine detail. Choose a sensitivity — <b>Only very blurry</b>, <b>Blurry
+<p>The Blurry photos tab lists photos with little fine detail. Choose a sensitivity — <b>Only very blurry</b>, <b>Blurry
 (recommended)</b> or <b>Slightly soft too</b>. Nothing is ticked until you choose, because night shots, fog or intentionally
 soft photos can appear here. Tick the ones you don't want and click <b>Move ticked to Recovery</b>.</p>
 <figure><img src="images/blurry.png" alt="Blurry photos"><figcaption>Each photo shows its sharpness score and folder.</figcaption></figure>
@@ -407,6 +442,8 @@ a smart crop centred on the interesting part), caption text and position.</p>
       <b>Open folder</b> to find them.</li>
 </ol>
 <p>Your photos are only read. Photos rotated by the camera appear upright, and iPhone HEIC photos are supported.</p>
+<p>With a library open, published outputs appear in History. Undo removes them only if their recorded fingerprints
+still match. Cancelled story exports roll back the outputs created by that export.</p>
 <figure><img src="images/story.png" alt="Story maker"><figcaption>A four-photo grid story with a caption on a blurred
 background.</figcaption></figure>
 </section>
@@ -432,12 +469,15 @@ background.</figcaption></figure>
 <div class="callout info">Every copy is checked: it must play, be the same length as the original and be smaller.
 If not, the copy is discarded and the result says why. Copies are named <i>&lt;name&gt; (compressed).mp4</i> and saved to
 <code>Pictures\Memoria Exports\Compressed videos</code> by default.</div>
+<p>Completed copies are journaled when a library is open, including those kept when a later item is cancelled.
+Use History to undo them; changed or unverified copies are not deleted.</p>
 <figure><img src="images/video.png" alt="Video compressor"><figcaption>Results with savings and quality scores.</figcaption></figure>
 </section>
 
 <section id="health">
 <h2>Health check</h2>
-<p>Proves your files are intact and catches silent damage from failing drives, bad copies or sync errors.</p>
+<p>Checks files against earlier fingerprints and flags possible silent damage. A first fingerprint is a baseline,
+not proof that an already-damaged original was healthy.</p>
 <ol>
   <li>The first check records a <b>fingerprint</b> of every file (click <b>Record fingerprints now</b>).</li>
   <li>Each later check re-reads every file and compares it with its fingerprint, and opens every photo to confirm it still
@@ -447,13 +487,13 @@ If not, the copy is discarded and the result says why. Copies are named <i>&lt;n
   <tr><th>Result</th><th>Meaning</th><th>What to do</th></tr>
   <tr><td>Intact</td><td>Content matches the fingerprint.</td><td>Nothing.</td></tr>
   <tr><td>Newly fingerprinted</td><td>First check for this file.</td><td>Nothing.</td></tr>
-  <tr><td>Edited since last check</td><td>The file's date changed — someone edited or replaced it on purpose. The fingerprint is updated.</td><td>Nothing, if expected.</td></tr>
-  <tr><td><b>Possibly damaged</b></td><td>Content changed but size and date did not — nobody edited it.</td><td>Restore it from a backup (Compare &amp; sync helps find a good copy) and check the drive.</td></tr>
+  <tr><td>Edited since last check</td><td>Size or modified time changed; the fingerprint is refreshed. This does not prove the change was intentional.</td><td>Check whether the change was expected.</td></tr>
+  <tr><td><b>Possibly damaged</b></td><td>Content changed without a size/time change. This can indicate damage or an edit that preserved timestamps.</td><td>Compare with a known-good backup and check the drive.</td></tr>
   <tr><td>Can't be opened</td><td>The photo no longer decodes (e.g. it was cut off during a copy).</td><td>Restore from backup or tidy it away.</td></tr>
-  <tr><td>Missing</td><td>Was in the catalogue, no longer on disk.</td><td>Check whether it was moved or deleted outside Memoria.</td></tr>
+  <tr><td>Missing</td><td>Not found at its last known path; retained across rescans with its metadata.</td><td>Check for an external move/deletion. Returning to the same path restores the catalogue identity.</td></tr>
 </table>
 <p>A damaged file stays flagged on later checks until it is fixed. Double-click a row to show the file in Explorer.</p>
-<figure><img src="images/health.png" alt="Health check"><figcaption>First run on the sample library: three unreadable files found.</figcaption></figure>
+<figure><img src="images/health.png" alt="Health check"><figcaption>The generated sample includes intentionally unreadable files.</figcaption></figure>
 </section>
 
 <section id="compare">
@@ -469,19 +509,21 @@ or re-organised copies still count as backed up.</p>
 </ol>
 <p>Each copy is written to a temporary file, checked byte for byte, then named. Existing files are never overwritten.
 Undo removes only the copies made, and only if they are still unchanged.</p>
-<figure><img src="images/compare.png" alt="Compare and sync"><figcaption>Seventy-nine files are not yet in the backup.</figcaption></figure>
+<p>An unavailable backup, unreadable subfolder or failed required hash stops comparison with an error; incomplete
+results are not presented as a complete backup inventory.</p>
+<figure><img src="images/compare.png" alt="Compare and sync"><figcaption>Content-based comparison against a generated partial backup.</figcaption></figure>
 </section>
 
 <section id="history">
 <h2>History &amp; recovery</h2>
 <ul>
-  <li><b>History</b> lists every change: when, what, how many files, size and status (Done, Partly done, Undone, or Recovery
+  <li><b>History</b> lists file-operation batches: when, what, how many files, size and status (Done, Partly done, Undone, or Recovery
       emptied). Select one to see each step — what moved, from where, to where.</li>
   <li><b>Undo this change</b> puts files back where they were. If a file with that name has appeared in the meantime, the
       restored file gets a new name. Copies are removed only if unchanged.</li>
   <li><b>Recovery folder</b> shows how many files and how much space it holds. <b>Open Recovery folder</b> opens it in Explorer.</li>
-  <li><b>Empty Recovery…</b> is the only permanent deletion in Memoria. It asks you to tick "I understand these files cannot be
-      recovered". Changes whose files were emptied can no longer be undone.</li>
+  <li><b>Empty Recovery…</b> permanently deletes the originals held there after acknowledgement. Those deletions cannot be
+      undone. Undo can separately remove unchanged generated copies. Deletion failures are reported, not silently counted as success.</li>
 </ul>
 <figure><img src="images/history.png" alt="History and recovery"><figcaption>Every step of a change is listed with its
 current location.</figcaption></figure>
@@ -489,13 +531,37 @@ current location.</figcaption></figure>
 library it checks which steps finished and records them in History, so the change can still be undone.</div>
 </section>
 
+<section id="reset">
+<h2>Storage &amp; reset</h2>
+<p>Open it below the library name in the sidebar. For normal new/changed files, try F5 first.</p>
+<ul>
+  <li><b>Safe rebuild (soft):</b> clear thumbnails, file analysis and similar-video caches, then re-index originals
+      in place. Albums, people/corrections, health fingerprints and missing records remain.</li>
+  <li><b>Custom:</b> choose individual categories. Clearing people, saved albums, health baselines or missing records
+      requires acknowledgement and cannot be undone. Forgetting missing records also removes their album/face links.</li>
+  <li><b>Start fresh (hard):</b> select all catalogue-data categories. Stable file identities, operation history,
+      original media, exports and Recovery remain. This is not deletion of the database folder.</li>
+  <li><b>Shrink storage files:</b> optional compaction with a free-space check. Without it, cleared pages are reused
+      but the database files may not get smaller. No second copy of the media library is made.</li>
+  <li>Thumbnails/analysis rebuild now; run People, album suggestions, Health check or Similar videos separately when cleared.</li>
+</ul>
+<figure><img src="images/storage-reset.png" alt="Safe rebuild selections"><figcaption>The safe default preserves personal catalogue organisation.</figcaption></figure>
+<figure><img src="images/storage-reset-hard.png" alt="Acknowledgement before hard reset"><figcaption>Personal-data clearing requires an explicit acknowledgement.</figcaption></figure>
+<p>After cancellation, process termination or shutdown, reopening resumes unfinished phases without clearing personal
+data twice. Other library actions pause until the reset completes. <b>Resume rebuild</b> can skip shrinking if space
+is low. Cancelling pauses work; it does not restore metadata already approved for clearing.</p>
+<div class="callout warn">Reset is not repair for an unreadable SQLite database or a damaged drive. Preserve
+<code>.memoria</code> for recovery; deleting it also deletes Recovery files and Undo history. Keep a separate backup.</div>
+</section>
+
 <section id="progress">
 <h2>Progress &amp; cancelling</h2>
-<p>Everything that takes time runs in the background with a bar at the bottom of the window showing what is happening,
+<p>Long file operations run in the background with a bar at the bottom of the window showing what is happening,
 the <b>percentage</b>, the time elapsed and an estimate of the <b>time left</b>. Multi-step work (Check everything, Undo,
 copying into the library) shows the step it is on. <b>Cancel</b> (or Esc) stops cleanly between files; anything already
-done is recorded in History and can be undone. The window never freezes, and only one task runs at a time so changes
-can't collide.</p>
+done in a file-operation batch is journaled. Cancellation is cooperative and can wait for an active decode or atomic
+database step. Insights has a separate read-only loading indicator. Reset follows the resumable behaviour above,
+not normal Undo. One main task runs at a time to avoid conflicting file operations.</p>
 </section>
 
 <section id="themes">
@@ -510,13 +576,13 @@ changes.</p>
 <h2>Keyboard shortcuts</h2>
 <table>
   <tr><th>Keys</th><th>Action</th></tr>
-  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">1</span> … <span class="kbd">0</span></td><td>Go to a page in sidebar order (Ctrl+1 Overview, Ctrl+3 People … Ctrl+8 Albums, Ctrl+9 Editor, Ctrl+0 Story maker)</td></tr>
+  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">1</span> … <span class="kbd">0</span></td><td>Existing page shortcuts are unchanged: Ctrl+1 Overview, Ctrl+3 People, Ctrl+8 Albums, Ctrl+9 Editor, Ctrl+0 Story maker. Insights has no numbered shortcut.</td></tr>
   <tr><td><span class="kbd">F5</span></td><td>Rescan the library</td></tr>
   <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">O</span></td><td>Open another library</td></tr>
   <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">Z</span></td><td>Undo the last change (asks first)</td></tr>
   <tr><td><span class="kbd">Esc</span></td><td>Cancel the running task</td></tr>
   <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">F</span></td><td>Search (Photos &amp; videos) — names, folders, cameras and people</td></tr>
-  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">A</span></td><td>Select all shown items</td></tr>
+  <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">A</span></td><td>Select all items on the current Photos page (up to 500), not unseen pages</td></tr>
   <tr><td><span class="kbd">Delete</span></td><td>Move selected items to Recovery (asks first)</td></tr>
   <tr><td><span class="kbd">Enter</span> / double-click</td><td>View photo</td></tr>
   <tr><td><span class="kbd">←</span> <span class="kbd">→</span></td><td>Previous / next in the viewer</td></tr>
@@ -565,8 +631,8 @@ locally.</p>
 <p>In the library's own catalogue (<code>.memoria</code>), next to your photos. People → More → <b>Forget all face data…</b>
 deletes every face, name and correction; your photos are not touched.</p>
 <h4>Can I delete the <code>.memoria</code> folder?</h4>
-<p>Yes, but it contains Recovery (files you removed) and History. Empty or restore Recovery first. Memoria rebuilds the
-catalogue and thumbnails next time you open the library.</p>
+<p>Do not delete it to reset the app: it contains Recovery, History, albums, faces and fingerprints.
+Use <a href="#reset">Storage &amp; reset</a> instead. Keep the folder intact if the database cannot be opened.</p>
 <h4>Will Memoria change my photos' contents or metadata?</h4>
 <p>No. It moves files (Recovery, organise), copies files (sync) and creates new files (stories, compressed videos). It never
 edits a photo or video in place.</p>
@@ -580,7 +646,11 @@ for you — try the "Only very blurry" sensitivity.</p>
 <p>After you're happy with a clean-up, use History &amp; recovery → <b>Empty Recovery…</b>.</p>
 <h4>Can I use Memoria on an external drive?</h4>
 <p>Yes. The catalogue and Recovery live on that drive, so they travel with it. If the drive is unplugged while
-Memoria is reading it, Memoria stops and changes nothing — reconnect it and press F5.</p>
+Memoria is scanning it, the scan stops rather than treating inaccessible entries as deleted. Reconnect and press F5;
+check History for completed steps if the interruption happened during a file operation.</p>
+<h4>Can one library contain multiple independent folders or drives?</h4>
+<p>Not yet. A library includes one root and its subfolders. The Insights folder picker narrows that existing library;
+it does not combine drives. Multi-folder libraries remain deferred.</p>
 <h4>Why does it say the library is already open?</h4>
 <p>Another Memoria window is using it. Only one window may work on a library at a time so changes can never collide.</p>
 </section>

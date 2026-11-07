@@ -8,10 +8,13 @@ Memoria looks after a personal photo library:
 - recognises the people in your photos — offline — so you can name them and see every photo of someone;
 - makes albums automatically from events, trips, places and people, and exports them to folders;
 - detects silent file damage and compares the library with a backup;
-- makes Instagram stories and story videos, and smaller copies of videos for sharing.
+- makes Instagram stories and story videos, and smaller copies of videos for sharing;
+- charts folder/type storage, timelines and offline GPS locations, with filters and size sorting;
+- offers safe/custom/hard catalogue reset with restartable rebuilding and optional storage compaction.
 
-Every change is shown before it happens, explained, and undoable. **Nothing is ever deleted** unless you
-explicitly empty the Recovery folder.
+Clean-up changes are reviewed before they happen and are undoable. **Removed originals go to Recovery**
+until you explicitly empty it. Undoing a copy or export removes the generated files only if their recorded
+fingerprints still match.
 
 ![Overview](docs/images/overview.png)
 
@@ -41,9 +44,10 @@ the rendered page).
 
 ## Highlights
 
-- **14 focused pages** replace the 20 commands of the old command-line tool, plus **Check everything**: one read-only
+- **15 focused pages** replace the 20 commands of the old command-line tool, plus **Check everything**: one read-only
   pass that runs every finder and puts count badges in the sidebar.
-- **Find → Review → Confirm → Apply → Undo** for every change, with plain-language reasons for every suggestion.
+- **Find → Review → Confirm → Apply → Undo** for file clean-up, with plain-language reasons for suggestions.
+  Irreversible personal catalogue clearing has a separate acknowledgement.
 - **Exact duplicates are proven**, not guessed: files are compared by full-content hash (xxh3-128), and the kept copy is
   verified before anything moves.
 - **People**: finds faces with two small open models (YuNet + SFace, run by OpenCV), groups the same person
@@ -56,7 +60,8 @@ the rendered page).
 - **Batch actions** in Photos & videos: select many items, then move to Recovery, copy to a folder (verified), move
   within the library, compress, or send to the Story maker. All undoable.
 - **Light, dark or Match Windows** themes, keyboard shortcuts, a built-in viewer, and thumbnail zoom.
-- **Progress everywhere**: percentage, elapsed time and time left for every task, with Cancel (Esc).
+- **Progress for long operations**: percentage, elapsed time and time left where available, with cooperative Cancel
+  (Esc). Insights has a separate background loading indicator.
 - **Best-shot picker** for bursts and WhatsApp-style copies. It scores sharpness, exposure, faces and resolution, and
   shows the reasoning (e.g. "sharpest (20× the softest)").
 - **Editor** for photos and videos: crop with aspect presets, rotate, mirror/flip, straighten, brightness, contrast,
@@ -72,8 +77,9 @@ the rendered page).
   - every copy must play, keep the same length and be smaller;
   - an SSIM quality score is reported.
 - **Health check** fingerprints every file and flags silent damage, such as bit rot or bad copies.
-- **Fast**: about 180 photos/s on first index; rescans in milliseconds; 100,000-photo similarity search in about 4 s.
-- **Tested** against a generated library with known answers: 141 automated tests, including an end-to-end UI test in both
+- **Bounded browsing**: 500-row pages, a 64 MiB thumbnail pixel cache, bounded analysis submission and aggregated maps.
+  Similarity is still quadratic; old random-hash microbenchmarks are not end-to-end photo-library timings.
+- **Tested** against generated libraries and synthetic catalogues: 175 automated tests, including UI tests in both
   themes.
 
 ## Quick start
@@ -104,6 +110,7 @@ No library handy? On the welcome screen choose **Try it on a sample library**. I
 |---|---|---|
 | **Overview** | Totals, years covered, safety status, and what each tool would do for this library. | Nothing |
 | **Photos & videos** | Timeline (year → month), search, filters, zoom, viewer and a large preview. The preview shows the date and where it came from, camera, GPS and problems. **Batch actions** on a selection. | Nothing, unless you run a batch action |
+| **Library insights** | Interactive folder/file-format storage bars; year → month → day counts with saved-album links; an offline India-first/world GPS map. Click charts to browse matching files. | Nothing |
 | **People** | Faces found offline and grouped by person. Name groups, join them, correct mistakes (*Not this person*), find look-alikes, hide strangers, make an album. Names are searchable in Photos & videos. | Nothing (catalogue only) |
 | **Duplicates** | Whole duplicate folders first (same files, or all inside a bigger folder), shown at the highest level with size, photo and video counts and sizes; then byte-identical single copies. Memoria explains which copy or folder it keeps; you can choose another or exclude any. | Moves copies or whole folders to Recovery |
 | **Similar & best shots** | Bursts, retakes and resized copies, with an explained best pick. The *Similar videos* tab finds re-encoded and trimmed copies. A *Blurry photos* tab has three sensitivities, and nothing is pre-ticked. | Moves ticked items to Recovery |
@@ -115,25 +122,26 @@ No library handy? On the welcome screen choose **Try it on a sample library**. I
 | **Video compressor** | Smaller copies of videos for sharing, using presets or a target size, with verification and a quality score. | Writes new files to an output folder |
 | **Health check** | Records a fingerprint of every file, then flags *possibly damaged*, *can't be opened* and *missing* files on later checks. | Nothing (catalogue only) |
 | **Compare & sync** | Compares the library with a backup by content, so renamed copies still match. Copies what's missing in either direction. | Writes verified copies |
-| **History & recovery** | Every change with each step; Undo; open or empty Recovery. | Undo / Empty Recovery (the only permanent deletion) |
+| **History & recovery** | File-operation batches and steps; Undo; open or empty Recovery. | Undo may remove unchanged generated copies; Empty Recovery permanently deletes originals stored there |
 
-The [Features guide](docs/features.html) explains every option.
+The [Features guide](docs/features.html) explains every option, including the sidebar's **Storage & reset** controls.
+These documents describe unreleased source updates after 1.4; an existing packaged executable must be rebuilt to include them.
 
 ## Why you can trust it
 
 | Promise | How it is enforced |
 |---|---|
 | Looking never changes anything | Scanning, analysis, comparison and health checks only read files. Memoria writes only to a hidden `.memoria` folder in the library. |
-| You see every change first | One shared confirmation flow states exactly what will happen, with counts and sizes. |
-| Nothing is deleted | "Remove" moves files to `.memoria\recovery\<batch>\<original path>`. **Empty Recovery** is the only delete and requires an explicit acknowledgement. |
-| Everything can be undone | Every operation is journaled in SQLite. Undo is offered right away in a toast and at any time in History. |
+| Review clean-up first | The shared file-plan confirmation states what will happen, with counts and sizes. Creative tools have explicit Save/Export controls. |
+| Originals are protected | "Remove" moves files to `.memoria\recovery\<batch>\<original path>`. **Empty Recovery** permanently deletes them and requires acknowledgement. Undo can delete unchanged generated copies. |
+| File operations are recoverable | Moves, copies and published outputs are journaled for Undo. Empty Recovery and acknowledged deletion of personal catalogue data cannot be undone. |
 | No stale decisions | Just before acting, each file's size and modified time are re-checked. Duplicates are also re-hashed, and the kept copy is verified. Changed files are skipped and reported. |
 | Nothing is overwritten | Name clashes get a new name, such as `IMG_1234 (2).jpg`. |
 | Copies are proven | Each copy is written to a temporary name, compared byte for byte, then renamed. |
 | One window per library | A lock file prevents two Memoria windows (or processes) from changing the same library. |
-| Unplugged drives are safe | If the library drive disconnects, the scan stops and changes nothing. Folders it can't read are never treated as deleted. |
-| Undo keeps everything | Recycled files' catalogue rows (thumbnails, dates, health fingerprints) are kept and restored on undo. |
-| Crash-safe | Each operation is marked *pending* before it runs. On the next launch, unfinished operations are reconciled against the disk and remain undoable. |
+| Unreadable is not deleted | A scan aborts on an inaccessible root; unreadable files/folders retain entries. For interrupted operations, check History for completed steps. |
+| Undo retains catalogue knowledge | Recycled rows are retained and restored, except metadata you deliberately clear with reset. IDs are not reused for new imports. |
+| Interrupted work is reconciled | Pending operations and reset phases are checked on reopening. This is not repair for arbitrary database or drive corruption. |
 | Private | No account, no network calls, no telemetry. |
 
 ## Screenshots
@@ -151,6 +159,10 @@ The [Features guide](docs/features.html) explains every option.
 | ![Similar videos](docs/images/similar-videos.png) | ![Dark theme](docs/images/dark-similar.png) |
 | **Organise by date** | **History & recovery** |
 | ![Organise](docs/images/organize.png) | ![History](docs/images/history.png) |
+| **Storage insights** | **Timeline and albums** |
+| ![Storage charts](docs/images/insights-storage.png) | ![Timeline](docs/images/insights-timeline.png) |
+| **Offline GPS map** | **Storage reset** |
+| ![India map](docs/images/insights-india.png) | ![Safe rebuild](docs/images/storage-reset.png) |
 
 ## How it works
 
@@ -161,7 +173,7 @@ memoria.ui  (PySide6, main thread)  ── pages ──► Page.run(...)  /  Pag
                                        TaskRunner (one background task at a time, progress + cancel)
                                                    │
 memoria.engine (no Qt)  scanner · duplicates · similar · organize · tidy · health · compare · story · videotools
-                                                   │  every file change is an Action
+                                                   │  reviewed file plans are Actions
                                                    ▼
                                        actions.apply  ─ preflight ─ journal ─ recycle/move/copy/rmdir ─ undo
                                                    │
@@ -178,6 +190,10 @@ memoria.engine (no Qt)  scanner · duplicates · similar · organize · tidy · 
 - **Video:** FFmpeg (bundled through `imageio-ffmpeg`), libx264 using CRF or two-pass encoding, then verification and
   SSIM.
 - **Stories:** Pillow composition; OpenCV warps for Ken Burns frames, piped to FFmpeg.
+- **Published outputs:** Editor, Story and Video workers use `created_batch`; shared publication records a fingerprint
+  and pending operation before renaming, so completed items remain journaled after cancellation.
+- **Insights:** parameterised SQL filters/aggregates, 500-row pages and a bounded GPS grid drawn with offline Natural Earth data.
+- **Reset:** transactional selected-data clearing, then durable cache, optional compaction and incremental rebuild phases.
 
 Details, schema and algorithms are in the [Technical document](docs/technical.html).
 
@@ -188,15 +204,17 @@ memoria-photo-manager/
 ├── memoria/                    application package
 │   ├── engine/                 UI-independent engine (testable without Qt)
 │   │   ├── actions.py          journaled executor: apply · undo · reconcile · Recovery
-│   │   ├── db.py               Library + SQLite schema (files, batches, operations)
+│   │   ├── db.py               Library + schema v5 (files, journal, missing/parked rows, reset state)
+│   │   ├── catalogue.py · geography.py · storage.py  filters/aggregates, offline map, selective reset
 │   │   ├── scanner.py          incremental scan + parallel analysis
 │   │   ├── media.py · ffmpeg.py · hashing.py · config.py · progress.py
 │   │   ├── duplicates.py · similar.py · videosim.py · organize.py · tidy.py · health.py · compare.py
 │   │   ├── faces.py · albums.py · places.py
-│   │   ├── data/               face models (YuNet, SFace) + licences · places.tsv.gz (GeoNames)
+│   │   ├── data/               face models + licences · GeoNames places · Natural Earth map + credits
 │   │   └── batch.py · checkup.py · photoedit.py · videoedit.py · story.py · videotools.py
 │   ├── ui/                     PySide6 desktop app
 │   │   ├── app.py · main_window.py · tasks.py · widgets.py · theme.py · assets/
+│   │   ├── insight_charts.py · library_filters.py · storage_dialog.py
 │   │   └── pages/              one module per sidebar page (+ base.py)
 │   ├── samplelib.py            generator for the sample / test library (with expected.json)
 │   ├── sample_faces/           public-domain portraits used by the sample library (CREDITS.txt)
@@ -217,25 +235,28 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 141 tests, about 2.5 minutes
+.\.venv\Scripts\python -m pytest -q                       # 175 tests; runtime depends on the machine
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
+.\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + documentation screenshots
 ```
 
 | Suite | Tests | Proves |
 |---|---|---|
-| `tests/test_engine.py` | 27 | Results match ground truth: duplicates (including files over 1.28 MB), bursts and best frame, near-duplicates, blur, dates and their sources, rotation, HEIC, video, tidy, organise. Safety: changed files are skipped, nothing is overwritten, copies are verified, undo restores an identical tree, crash reconciliation, cancellation, Empty Recovery. |
-| `tests/test_faces.py` | 8 | People: the expected people are found and grouped (no faces in landscapes), changed and deleted photos are handled, names and corrections survive regrouping, look-alike search, Undo keeps faces, forget all. |
+| `tests/test_engine.py` | 29 | Results match ground truth: duplicates (including files over 1.28 MB), bursts and best frame, near-duplicates, blur, dates and their sources, rotation, HEIC, video, tidy, organise. Safety: changed files are skipped, nothing is overwritten, copies are verified, undo restores an identical tree, crash reconciliation, cancellation, Empty Recovery. |
+| `tests/test_faces.py` | 8 | Expected people are grouped, changed photos re-scanned, missing-photo metadata retained, names/corrections survive regrouping, look-alike search, Undo keeps faces, forget all. |
 | `tests/test_albums.py` | 7 | Offline place names, event and trip albums, place and people albums, album edits never touch files, export + undo. |
 | `tests/test_dupfolders.py` | 6 | Duplicate folders: nested copies shown once at the top, contained and renamed folders, folder sizes and counts, clean-up and undo restore the exact tree, changed or new files keep their folder. |
 | `tests/test_photoedit.py` | 20 | Photo edits: exact rotate/flip/crop, straighten, adjustments, formats, EXIF and GPS handling, split and join, cancellation. |
 | `tests/test_videoedit.py` | 12 | Video edits: trim, speed, rotate, crop, mute, split, join, frame export, cancellation. |
-| `tests/test_safety.py` | 11 | Unplugged drive and unreadable folders, undo keeps catalogue rows, library lock, schema migrations, paths over 260 characters. |
+| `tests/test_safety.py` | 21 | Unavailable drives, unreadable files/folders, stable identities, retained missing files, verified Undo, failed Recovery deletion, crash recovery, output publication, schema migrations, paths over 260 characters. |
 | `tests/test_videosim.py` | 7 | Similar videos match ground truth, signature cache, cancellation, undo. |
 | `tests/test_batch.py` | 5 | Batch copy, move and recycle with undo; Check everything is read-only and correct. |
 | `tests/test_video.py` | 7 | Compression shrinks and verifies, sources are untouched, target size is met, cancel cleans up. |
 | `tests/test_story.py` | 30 | Exact output sizes, every template, panorama seams, EXIF rotation, story-video duration. |
-| `tests/test_ui_smoke.py` | 1 | Drives the real window offscreen through every page, runs Check everything and a batch action, applies and undoes changes, and repeats in the dark theme. |
+| `tests/test_ui_smoke.py` | 4 | Drives every page in both themes; checks Undo, thumbnails, opt-in cleanup, reset confirmations and the resumable reset UI. |
+| `tests/test_storage.py` | 13 | Safe/custom/hard reset, retained media and Undo, atomic rollback, abrupt process exit, cancellation/retry, updated media and low-space compaction. |
+| `tests/test_insights.py` | 6 | Folder/type totals, literal search, combined filters, leap-day boundaries, album links, India/world GPS selection, bounded 10,000-file browsing and interactive charts in both themes. |
 
 The **test library** (`tools\make_test_library.py [DEST] [--small]`) is a deterministic library of generated photos. It
 includes camera, phone and backup folders; exact duplicates (including 6 MB files); a nested album copied whole to an old
@@ -264,7 +285,98 @@ SmartScreen warns the first time it runs.
 
 ## Performance
 
-`tools\benchmark.py --photos 1000`: 1,050 files of 6 MP JPEG, 1.02 GB, on a 32-core machine with an SSD.
+### Libraries around 200-300 GB
+
+Indexing reads originals in place; it does not make a second copy of the library. It does need
+space for the catalogue and thumbnails. Analysis has a bounded queue of pending jobs, and the
+decoded thumbnail cache has a 64 MiB pixel-data budget (Qt overhead is additional).
+File count, image dimensions, codecs and drive speed matter more than total GB.
+
+Copying, editing and video exports still require free space for their outputs and temporary files.
+Recovery generally moves files on the same drive; it is **not a backup** and does not free disk space
+until you explicitly empty it.
+
+The test suite exercises a 10,000-entry catalogue representing 300 GB using synthetic analysis,
+without creating 300 GB of files. It also checks dense similarity matches and failure recovery.
+These checks do not replace real-drive throughput or long-video testing. Similarity comparisons
+remain quadratic; very large collections can still take time.
+
+### Safety and review
+
+- Copy Undo verifies the recorded output fingerprint. Older copies with no recorded fingerprint are
+  left in place for manual review rather than deleted.
+- Missing files remain listed in Health check across rescans. Their metadata and identities are
+  retained and restored if they return at the same path; files in disconnected folders are not treated
+  as deleted.
+- Comparisons stop with an error when the backup cannot be completely read.
+- Similar-photo/video suggestions start **unticked**. Review them, then select what to move; the
+  explicit "Keep only best in every group" shortcut remains available.
+- Editor, Story maker and Video compressor outputs are recorded in History when a library is open,
+  including completed outputs kept after cancellation.
+- Opening an older catalogue upgrades it to schema v5. The upgraded catalogue requires this version
+  or newer; keep a backup of the catalogue before upgrading if you need to return to an older release.
+- Unified multi-folder libraries are not included in this update.
+
+### Storage & reset
+
+Use **Storage & reset** below the library name in the sidebar. For normal additions or changes to your
+photos, try **Rescan library (F5)** first.
+
+- **Safe rebuild (soft)** is the default: clear photo/video thumbnails, analysis and similarity caches,
+  then re-index originals in place. Saved albums, people/names/corrections, health fingerprints,
+  missing-file records, Recovery and Undo history remain.
+- **Custom reset:** tick only the categories you want to clear. Clearing People, Albums, Health
+  fingerprints or missing-file records requires acknowledgement and **cannot be undone**.
+  Forgetting missing records also removes their album/face links.
+- **Start fresh (hard)** selects all these categories. It resets the catalogue's user data and analysis,
+  not your media or operating-system settings. Stable file identities and the operation journal are
+  retained to keep Recovery and Undo usable. It does not delete the database folder.
+- Thumbnails and file analysis rebuild immediately. Run **Find people**, album suggestions,
+  **Health check**, or **Find similar videos** separately if you cleared their data. Clearing a health
+  baseline loses the reference needed to detect older damage.
+- **Shrink storage files** is optional. Otherwise cleared database pages are reused, but the allocated
+  files may not get smaller. Shrinking needs temporary disk space; it never duplicates your media.
+
+Reset selections are committed transactionally before cache clearing. If the app is killed, cancelled,
+or the laptop shuts down, the next open resumes the unfinished phases instead of clearing data again.
+Other library actions are paused while a reset is unfinished. Use **Resume rebuild** to retry; if disk
+space is low, choose **Skip shrinking storage files**. Cancellation pauses work; it does not restore
+personal catalogue data you already approved clearing.
+
+Photos, videos, exported copies, Recovery files and Undo history are never deleted by these controls.
+Reset is not a backup or a repair for physical drive damage or an unreadable/corrupt SQLite catalogue.
+Keep the `.memoria` folder for recovery if the catalogue cannot be opened; deleting it would also delete
+Recovery and history.
+
+### Library insights and finding large files
+
+Open **Library insights** in the sidebar (or Overview):
+
+- **Storage:** pick a folder; bars show its immediate subfolders, files directly in that folder, and
+  file-format sizes/counts. Click a subfolder to drill down, or a format to browse its files.
+  Totals come from the catalogue, exclude Recovery/cache storage, and count each indexed file once.
+- **Timeline:** click a year, then a month, then a day to open matching photos/videos. Use **Browse this
+  period** for the selected year/month. Saved albums containing matching files are linked beside the
+  chart. These are capture dates where available, otherwise filename/modified dates; undated files
+  are excluded from the chart.
+- **Map:** bundled Natural Earth outlines keep GPS entirely offline. Auto starts with India for Indian
+  coverage (or an empty map), switching to the world when coordinates fall outside the approximate India
+  outline. India/World buttons override the viewport; the mouse wheel zooms. Markers cluster locations
+  into a bounded grid. Click a marker or its keyboard-accessible list entry to browse those coordinates.
+  Invalid/missing GPS is excluded. Borders are approximate; this is not authoritative country geocoding.
+
+In **Photos & videos**, choose **Largest first** to find the biggest photos/videos. Filters combine
+folder/subfolders, photo/video/other/problem type, file format, inclusive date range, minimum/maximum
+MiB, GPS availability or a selected map area, detected faces and named people. Use **Find people**
+first for face/person filters. Filename/folder/camera/person search is literal text.
+
+Browsing uses pages of up to **500 files**, with matching count and total size shown. **Ctrl+A and batch
+actions apply only to the current page**, not unseen matches. Clear filters to leave a chart's selection.
+Insights queries run in the background and coalesce rapid requests; neither charts nor sorting re-read
+the media contents. Results describe the last scan; use F5 after external file changes.
+
+**Historical results, not rerun for this update:** `tools\benchmark.py --photos 1000`, 1,050 files of 6 MP JPEG,
+1.02 GB, on a 32-core machine with an SSD. The 100,000-hash result is a random-hash microbenchmark, not a full photo search.
 
 | Stage | Result |
 |---|---|
@@ -285,7 +397,8 @@ SmartScreen warns the first time it runs.
 | `run.ps1` is blocked | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or run `powershell -ExecutionPolicy Bypass -File run.ps1` |
 | A photo wasn't organised | Its only date was the file's modified date. Tick *Also move files whose only date is the file's modified date*. |
 | A sharp photo is listed as blurry | Smooth scenes (sky, fog, night) have little fine detail. Use *Only very blurry*; nothing there is ticked for you. |
-| The library has a `.memoria` folder | It holds the catalogue, thumbnails, History and Recovery. Empty or restore Recovery before deleting it. |
+| The library has a `.memoria` folder | It holds catalogue data, History and Recovery. Do not delete it to reset the app; use Storage & reset. Preserve it for recovery if it cannot be opened. |
+| Results look stale or a rebuild stopped | Try F5; use Storage & reset for selective clearing. Resume an unfinished rebuild, optionally skipping shrinking when disk space is low. |
 | Offscreen screenshots show boxes instead of text | Set `QT_QPA_FONTDIR=C:\Windows\Fonts` (the screenshot tool does this automatically). |
 | "This library is already open" | Another Memoria window has it open. Close that window first. |
 | "The library folder can't be reached" | The drive was unplugged or the network is down. Reconnect it and press F5. Nothing was changed. |
@@ -295,7 +408,7 @@ SmartScreen warns the first time it runs.
 
 - Tune blur and best-shot scoring on real libraries.
 - Screen-reader names for grid items.
-- Removable-drive catalogue; screenshot text search (local OCR).
+- Unified multi-folder/offline-drive catalogue; screenshot text search (local OCR).
 - Backup restore drill: restore a sample from a backup and prove it matches.
 - Optional Rust (PyO3) hot paths if profiling shows a need.
 
@@ -306,4 +419,6 @@ See also the [CHANGELOG](CHANGELOG.md).
 Proprietary — © 2026 Rishabh Jain. All rights reserved. See [LICENSE](LICENSE). Third-party dependencies keep their own
 licences; see the [Technical document](docs/technical.html#deps). Bundled data: YuNet face detector (MIT) and SFace
 face recogniser (Apache 2.0) from the OpenCV model zoo; town names from [GeoNames](https://www.geonames.org) (CC BY 4.0);
-public-domain test portraits from Wikimedia Commons (`memoria/sample_faces/CREDITS.txt`).
+public-domain test portraits from Wikimedia Commons (`memoria/sample_faces/CREDITS.txt`); public-domain country
+outlines from [Natural Earth](https://www.naturalearthdata.com), with source and transformation details in
+[world-map-CREDITS.txt](memoria/engine/data/world-map-CREDITS.txt).

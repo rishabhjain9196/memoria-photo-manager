@@ -19,7 +19,7 @@ def plan_copy_to(lib: Library, rows: list[dict], dest: str | Path) -> list[Actio
     if config.APP_DIR_NAME in dest.parts:
         raise ValueError("Choose a folder outside Memoria's own .memoria folder.")
     return [Action(op="copy", src=str(lib.abspath(r["rel_path"])), dst=str(dest / r["name"]), size=r["size"],
-                   hash=r.get("chash"), reason=f"Copied to {dest}") for r in rows]
+                   mtime=r["mtime"], hash=r.get("chash"), reason=f"Copied to {dest}") for r in rows]
 
 
 def plan_move_within(lib: Library, rows: list[dict], dest: str | Path) -> list[Action]:

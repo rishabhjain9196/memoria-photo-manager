@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from . import ffmpeg
+from . import actions, ffmpeg
 from .ffmpeg import VideoInfo, probe
 from .progress import Cancelled, Progress
 
@@ -83,11 +83,12 @@ def publish_file(tmp: Path, wanted: Path) -> Path:
     while True:
         dst = unique_path(wanted)
         try:
-            if os.name == "nt":
-                os.rename(tmp, dst)  # fails if dst exists
-            else:
-                os.link(tmp, dst)  # fails if dst exists
-                os.unlink(tmp)
+            with actions.record_output(tmp, dst):
+                if os.name == "nt":
+                    os.rename(tmp, dst)  # fails if dst exists
+                else:
+                    os.link(tmp, dst)  # fails if dst exists
+                    os.unlink(tmp)
             return dst
         except FileExistsError:
             continue

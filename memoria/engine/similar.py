@@ -86,14 +86,12 @@ def similar_pairs(hashes: np.ndarray, times: np.ndarray, threshold: int, burst_s
         return out_i, out_j
 
     starts = list(range(0, n, BLOCK))
-    seen: set[tuple[int, int]] = set()
     with ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
         for k, (out_i, out_j) in enumerate(pool.map(block, starts), 1):
             if progress:
                 progress.update(k, len(starts), f"Comparing photos… {min(k * BLOCK, n):,} of {n:,}")
             for ii, jj in zip(out_i, out_j):
                 for i, j in zip(ii.tolist(), jj.tolist()):
-                    seen.add((i, j))
                     yield i, j, False
 
     finite = np.nonzero(~np.isnan(times))[0]
@@ -103,7 +101,8 @@ def similar_pairs(hashes: np.ndarray, times: np.ndarray, threshold: int, burst_s
         b = a + 1
         while b < len(order) and ts[b] - ts[a] <= burst_seconds:
             i, j = sorted((int(order[a]), int(order[b])))
-            if (i, j) not in seen and int(np.bitwise_count(h[i] ^ h[j])) <= burst_threshold:
+            distance = int(np.bitwise_count(h[i] ^ h[j]))
+            if threshold < distance <= burst_threshold:
                 yield i, j, True
             b += 1
 

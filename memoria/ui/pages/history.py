@@ -19,7 +19,7 @@ def status_label(status: str) -> tuple[str, str]:
 
 KIND = {"duplicates": "Duplicates", "similar": "Similar / blurry", "tidy": "Tidy up", "organize": "Organise",
         "sync": "Compare & sync", "batch": "Photos & videos", "edit": "Editor",
-        "albums": "Albums export"}
+        "albums": "Albums export", "story": "Story maker", "video": "Video compressor"}
 OP = {"recycle": "Moved to Recovery", "move": "Moved", "copy": "Copied", "rmdir": "Removed empty folder",
       "create": "Created"}
 OP_STATUS = {"done": "Done", "undone": "Undone", "skipped": "Skipped", "failed": "Failed", "purged": "Deleted from Recovery",
@@ -168,7 +168,7 @@ class HistoryPage(Page):
         files, size = actions.recovery_size(self.lib)
         dlg = ConfirmDialog(self, "Permanently delete files in Recovery?",
                             f"{fmt_n(files, 'file')} ({fmt_size(size)}) will be deleted forever.",
-                            ["This is the only action in Memoria that deletes anything.",
+                            ["This permanently deletes the files stored in Recovery.",
                              "Changes whose files are deleted can no longer be undone."],
                             "Delete permanently", danger=True,
                             require_ack="I understand these files cannot be recovered", note=None)

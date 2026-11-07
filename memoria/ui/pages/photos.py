@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import sqlite3
+from dataclasses import replace
 from pathlib import Path, PurePath
 
 from PySide6.QtCore import Qt, QTimer
@@ -9,29 +11,31 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QHeaderView, QInputDialog, QLineEdit, QMenu, QSlider,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QWidget)
 
-from ...engine import albums, batch, faces
+from ...engine import albums, batch, catalogue
+from ..library_filters import FilterDialog, KINDS, SORTS
 from ..widgets import (MessageDialog, PhotoGrid, Preview, Viewer, button, fmt_date, fmt_n, fmt_size, hbox, label,
                        open_path, show_in_explorer, vbox)
 from .base import Page, recovery_note, recycle_summary
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-KINDS = ["Everything", "Photos", "Videos", "Problems"]
 
 
 class PhotosPage(Page):
     title = "Photos & videos"
     subtitle = ("Browse by date. Double-click to view. Select several (Ctrl/Shift-click, Ctrl+A) to act on them "
-                "together.")
+                "together. Selection applies to the current page (up to 500 items).")
 
     def __init__(self, ctx):
         super().__init__(ctx)
+        self.filters = catalogue.Filters()
+        self.offset = 0
         self.zoom = QSlider(Qt.Orientation.Horizontal)
         self.zoom.setRange(110, 280)
         self.zoom.setValue(156)
         self.zoom.setFixedWidth(140)
         self.zoom.setToolTip("Thumbnail size (Ctrl + mouse wheel)")
         self.zoom.valueChanged.connect(self._set_zoom)
-        self.header_actions.addWidget(label("Size", "small"))
+        self.header_actions.addWidget(label("Thumbnails", "small"))
         self.header_actions.addWidget(self.zoom)
 
         self.search = QLineEdit()
@@ -39,7 +43,12 @@ class PhotosPage(Page):
         self.search.setToolTip("Ctrl+F")
         self.search.setClearButtonEnabled(True)
         self.kind = QComboBox()
-        self.kind.addItems(KINDS)
+        for key, text in KINDS:
+            self.kind.addItem(text, key)
+        self.sort = QComboBox()
+        for key, text in SORTS:
+            self.sort.addItem(text, key)
+        self.filter_note = label("", "small", wrap=True)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setColumnCount(2)
@@ -49,7 +58,10 @@ class PhotosPage(Page):
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         left = QWidget()
-        left.setLayout(vbox(self.search, self.kind, self.tree, spacing=8))
+        left.setLayout(vbox(self.search, self.kind, self.sort,
+                            hbox(button("Filters…", on_click=self._filters),
+                                 button("Clear", "link", self._clear_filters)),
+                            self.filter_note, self.tree, spacing=8))
         left.setFixedWidth(230)
 
         self.grid = PhotoGrid(ctx.thumbs, cell=156, captions=1)
@@ -59,7 +71,7 @@ class PhotosPage(Page):
         self.grid.activated_item.connect(self._view)
         self.grid.selectionModel().selectionChanged.connect(self._sel_changed)
         self.grid.viewport().installEventFilter(self)
-        self.count = label("", "small")
+        self.count = label("", "small", wrap=True)
 
         # selection bar (batch actions)
         self.sel_bar = QFrame()
@@ -84,7 +96,10 @@ class PhotosPage(Page):
         self.sel_bar.hide()
 
         center = QWidget()
-        center.setLayout(vbox(self.count, self.sel_bar, self.grid, spacing=6))
+        self.previous = button("Previous", on_click=lambda: self._turn_page(-1))
+        self.next = button("Next", on_click=lambda: self._turn_page(1))
+        center.setLayout(vbox(hbox(self.count, None, self.previous, self.next),
+                             self.sel_bar, self.grid, spacing=6))
         self.preview = Preview(ctx)
 
         split = QSplitter()
@@ -101,6 +116,7 @@ class PhotosPage(Page):
         self._debounce.timeout.connect(self._apply_filter)
         self.search.textChanged.connect(self._debounce.start)
         self.kind.currentIndexChanged.connect(self._apply_filter)
+        self.sort.currentIndexChanged.connect(self._apply_filter)
         self.tree.currentItemChanged.connect(lambda *_: self._apply_filter())
         QShortcut(QKeySequence("Ctrl+F"), self, activated=lambda: (self.search.setFocus(), self.search.selectAll()))
         QShortcut(QKeySequence("Ctrl+A"), self.grid, activated=self.grid.selectAll)
@@ -109,16 +125,12 @@ class PhotosPage(Page):
                   activated=lambda: self.grid.currentIndex().isValid() and self._view(
                       self.grid.currentIndex().data(Qt.ItemDataRole.UserRole)))
         self.rows: list[dict] = []
-        self.names: dict[int, str] = {}
         ctx.people_changed.connect(self._mark_stale)
 
     # --------------------------------------------------------------------------- data
     def refresh(self) -> None:
-        self.rows = [dict(r) for r in self.lib.files("1", order="COALESCE(taken_at,'') DESC, rel_path")]
-        self.names = {k: " ".join(v).lower() for k, v in faces.names_by_file(self.lib).items()}
-        problems = sum(1 for r in self.rows if r["error"] and r["kind"] != "other")
+        problems = self.lib.stats()["errors"]
         self.kind.setItemText(3, f"Problems ({problems:,})" if problems else "Problems")
-        self._build_tree()
         self._apply_filter()
 
     def _build_tree(self) -> None:
@@ -127,13 +139,16 @@ class PhotosPage(Page):
         self.tree.blockSignals(True)
         self.tree.clear()
         counts: dict[str, dict[str, int]] = {}
-        for r in self.rows:
-            if r["kind"] == "other" or r["error"]:
-                continue
-            t = r["taken_at"] or ""
+        sql, params = catalogue.where(replace(self.filters, kind=self.kind.currentData(), search=self.search.text()))
+        for r in self.lib.db.execute(f"SELECT substr(taken_at,1,7) AS month,COUNT(*) AS n FROM files f "
+                                     f"WHERE {sql} GROUP BY month", params):
+            t = r["month"] or ""
             y, m = (t[:4], t[5:7]) if t else ("Unknown", "")
             counts.setdefault(y, {})
-            counts[y][m] = counts[y].get(m, 0) + 1
+            counts[y][m] = r["n"]
+        if cur_key:
+            y, m = ("Unknown", "") if cur_key == "Unknown" else (cur_key[:4], cur_key[5:7])
+            counts.setdefault(y, {}).setdefault(m, 0)
         total = sum(sum(v.values()) for v in counts.values())
         all_item = QTreeWidgetItem(["All", f"{total:,}"])
         all_item.setData(0, Qt.ItemDataRole.UserRole, "")
@@ -158,37 +173,88 @@ class PhotosPage(Page):
         self.tree.setCurrentItem(select)
         self.tree.blockSignals(False)
 
-    def _apply_filter(self) -> None:
+    def _apply_filter(self, *_args) -> None:
+        self._debounce.stop()
+        self.offset = 0
+        try:
+            if self.lib is not None:
+                self._build_tree()
+        except sqlite3.Error as e:
+            self.grid.set_items([])
+            self.count.setText("Catalogue unavailable")
+            self.ctx.toast_requested.emit(str(e), "")
+            return
+        self._load_page()
+
+    def _load_page(self) -> None:
+        if self.lib is None:
+            return
         cur = self.tree.currentItem()
         prefix = cur.data(0, Qt.ItemDataRole.UserRole) if cur else ""
-        q = self.search.text().strip().lower()
-        kind = self.kind.currentIndex()
-        items = []
-        for r in self.rows:
-            k, err = r["kind"], r["error"]
-            if kind == 0 and (k == "other" or err):
-                continue
-            if kind == 1 and (k != "image" or err):
-                continue
-            if kind == 2 and (k != "video" or err):
-                continue
-            if kind == 3 and not (err and k != "other"):
-                continue
-            if prefix:
-                t = r["taken_at"] or ""
-                if prefix == "Unknown" and t:
-                    continue
-                if prefix != "Unknown" and not t.startswith(prefix):
-                    continue
-            if q and q not in r["rel_path"].lower() and q not in (r["camera"] or "").lower() \
-                    and q not in self.names.get(r["id"], ""):
-                continue
-            items.append({**r, "caption": fmt_date(r["taken_at"]) if r["taken_at"] else r["name"],
-                          "tip": f"{r['rel_path']}\n{fmt_size(r['size'])}"})
+        filters = replace(self.filters, kind=self.kind.currentData(), search=self.search.text().strip())
+        if prefix == "Unknown":
+            filters = replace(filters, undated=True)
+        elif prefix:
+            filters = catalogue.in_period(filters, prefix)
+        try:
+            self.rows, total, size = catalogue.page(self.lib, filters, self.sort.currentData(), self.offset)
+        except (ValueError, sqlite3.Error) as e:
+            self.grid.set_items([])
+            self.preview.clear()
+            self.count.setText("Could not load matching files")
+            self.ctx.toast_requested.emit(str(e), "")
+            return
+        items = [{**r, "caption": fmt_size(r["size"]) if self.sort.currentData() in ("largest", "smallest")
+                  else fmt_date(r["taken_at"]) if r["taken_at"] else r["name"],
+                  "tip": f"{r['rel_path']}\n{fmt_size(r['size'])}"} for r in self.rows]
         self.grid.set_items(items)
-        self.count.setText(f"Showing {fmt_n(len(items), 'item')}")
+        self.count.setText(f"{self.offset + 1 if total else 0:,}–{self.offset + len(items):,} of {total:,} · {fmt_size(size)}")
+        self.count.setToolTip("Selection and Ctrl+A apply to this page only (up to 500 items).")
+        self.previous.setEnabled(self.offset > 0)
+        self.next.setEnabled(self.offset + len(items) < total)
+        active = []
+        if filters.folder or not filters.recursive:
+            active.append(filters.folder or "Files directly in root")
+        if filters.start or filters.end:
+            active.append(f"Dates: {filters.start or 'any'} to before {filters.end or 'any'}")
+        if filters.min_bytes or filters.max_bytes is not None:
+            active.append(f"Size: {fmt_size(filters.min_bytes)}–{fmt_size(filters.max_bytes) if filters.max_bytes is not None else 'any'}")
+        if filters.extension is not None:
+            active.append(filters.extension or "No extension")
+        if filters.location != "all" or filters.bbox:
+            active.append("Map area" if filters.bbox else filters.location)
+        if filters.person is not None or filters.faces != "all":
+            active.append("People / face filter")
+        self.filter_note.setText("\n".join(active))
         self.preview.clear()
         self._sel_changed()
+
+    def _turn_page(self, direction: int):
+        self.offset = max(0, self.offset + direction * catalogue.PAGE_SIZE)
+        self._load_page()
+
+    def _filters(self):
+        if self.lib is None:
+            return
+        dlg = FilterDialog(self, self.lib, replace(self.filters, kind=self.kind.currentData()))
+        if dlg.exec():
+            self.open_filters(dlg.selected())
+
+    def _clear_filters(self):
+        self.open_filters(catalogue.Filters())
+
+    def open_filters(self, filters: catalogue.Filters):
+        self.filters = filters
+        self.search.blockSignals(True)
+        self.kind.blockSignals(True)
+        self.search.setText(filters.search)
+        self.kind.setCurrentIndex(self.kind.findData(filters.kind))
+        self.search.blockSignals(False)
+        self.kind.blockSignals(False)
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        self.tree.blockSignals(False)
+        self._apply_filter()
 
     # --------------------------------------------------------------------------- view / zoom
     def _set_zoom(self, v: int) -> None:
@@ -221,7 +287,7 @@ class PhotosPage(Page):
     def _sel_changed(self, *_):
         sel = self.selected()
         n = len(sel)
-        self.sel_bar.setVisible(n > 1)
+        self.sel_bar.setVisible(n > 0)
         if not n:
             return
         size = sum(r["size"] for r in sel)

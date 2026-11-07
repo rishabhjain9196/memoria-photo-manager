@@ -70,6 +70,7 @@ class HealthPage(Page):
             it.setData(1, Qt.ItemDataRole.UserRole, p["rel_path"])
             self.tree.addTopLevelItem(it)
         bad = rep.counts.get("damaged", 0)
+        problems = sum(rep.counts.get(k, 0) for k in ("damaged", "missing", "unreadable"))
         if bad:
             self.advice.setText(f"<b>{fmt_n(bad, 'file')} changed without being edited.</b> Restore "
                                 f"{'it' if bad == 1 else 'them'} from a backup (Compare &amp; sync can help find a good "
@@ -77,4 +78,5 @@ class HealthPage(Page):
         self.advice.setVisible(bool(bad))
         self.ctx.library_modified.emit()
         self.ctx.toast_requested.emit(f"Checked {fmt_n(rep.checked, 'file')} ({fmt_size(rep.bytes)}). "
-                                      + ("No damage found." if not bad else f"{fmt_n(bad, 'file')} may be damaged."), "")
+                                      + ("No problems found in the files checked." if not problems else
+                                         f"{fmt_n(problems, 'file')} need attention; see the results."), "")

@@ -24,7 +24,8 @@
   <a class="sub" href="#invariants">Safety invariants</a>
   <a class="sub" href="#threats">What can go wrong</a>
   <a href="#ia">Information architecture</a>
-  <a class="sub" href="#mapping">From 20 commands to 11 pages</a>
+  <a class="sub" href="#mapping">From CLI to 15 pages</a>
+  <a href="#explore-reset">Insights and reset</a>
   <a href="#interaction">Interaction model</a>
   <a class="sub" href="#flow">Find → Review → Confirm → Apply → Undo</a>
   <a class="sub" href="#states">States</a>
@@ -43,7 +44,7 @@
   <h1>Design document</h1>
   <p>Why Memoria looks and behaves the way it does — the product goals, the trust model that every tool obeys,
      the information architecture, interaction patterns and the decisions behind them.</p>
-  <div class="meta"><span class="pill">Version 1.4</span><span class="pill">Windows desktop · PySide6</span>
+  <div class="meta"><span class="pill">Unreleased updates after 1.4</span><span class="pill">Windows desktop · PySide6</span>
     <span class="pill">Offline · no accounts · no telemetry</span></div>
 </header>
 
@@ -56,9 +57,10 @@ story videos, and makes smaller copies of videos for sharing.</p>
 <p>It started as a Python command-line tool with twenty commands. That tool worked for its author but was hard to
 trust: commands acted on plans saved earlier, results were printed as text, and a hashing bug made it skip almost
 every real photo while reporting them as corrupted. The desktop redesign keeps the useful engine ideas and wraps
-them in an interface whose first job is to <b>make every change visible, explainable and reversible</b>.</p>
-<div class="callout ok"><b>The one-sentence design:</b> Memoria may look at anything, but it changes nothing you
-haven't seen, nothing it can't undo, and it never deletes.</div>
+them in an interface whose first job is to <b>make consequences visible, explainable and recoverable where possible</b>.</p>
+<div class="callout info"><b>The one-sentence design:</b> Protect originals, review file clean-up, journal file
+operations, and clearly distinguish reversible work from acknowledged deletion of files or catalogue data.
+Recovery is not a backup.</div>
 </section>
 
 <section id="problem">
@@ -109,7 +111,7 @@ files — so the app must make proof easy to see.</p>
       <li>Replacing a full photo editor or a DAM such as digiKam/Lightroom.</li>
       <li>Cloud sync, accounts or sharing to social networks directly.</li>
       <li>Automatic, unattended deletion of anything.</li>
-      <li>Face recognition / naming people (only face <i>counting</i> is used, to score best shots).</li>
+      <li>Unified multi-root libraries in this update; one root and its subfolders remain the library boundary.</li>
       <li>Reverse-geocoding through online services (the old CLI did this; it leaked locations to a third party).</li>
     </ul></td></tr>
 </table>
@@ -124,16 +126,16 @@ files — so the app must make proof easy to see.</p>
   in a confirmation that states exactly what will happen.</p></div>
   <div class="card"><h4>3. Move, never delete</h4><p>"Remove" means move to Recovery. Permanent deletion is a separate,
   deliberate act with its own warning.</p></div>
-  <div class="card"><h4>4. Everything has an Undo</h4><p>Each change becomes a named entry in History; an Undo button
-  appears the moment it finishes.</p></div>
+  <div class="card"><h4>4. Recoverable file operations</h4><p>Moves, copies and published outputs enter History.
+  Irreversible catalogue clearing is separately acknowledged; it is not misrepresented as undoable.</p></div>
   <div class="card"><h4>5. Explain the machine</h4><p>Every automatic choice carries its reason: "In a backup folder",
   "Sharpest (20× the softest)", "Date in file name".</p></div>
   <div class="card"><h4>6. The user has the last word</h4><p>Keepers and best picks can be changed, groups excluded,
   items unticked. Risky categories start unticked.</p></div>
   <div class="card"><h4>7. Re-check at the last moment</h4><p>Decisions are re-validated against the disk right before
   acting. If anything changed, Memoria skips it and says so.</p></div>
-  <div class="card"><h4>8. Never block the window</h4><p>All work runs in the background with progress and a Cancel
-  button; one task at a time so actions can't collide.</p></div>
+  <div class="card"><h4>8. Bound work and show progress</h4><p>Long operations run on workers; browsing loads at most
+  500 rows per page. Insights coalesces background queries; active decodes and atomic steps may delay cancellation.</p></div>
 </div>
 </section>
 
@@ -147,14 +149,15 @@ then simply tells the truth about those rules.</p>
   <tr><th>#</th><th>Invariant</th><th>Enforced by</th><th>How the user sees it</th></tr>
   <tr><td>I1</td><td>Reading never writes outside <code>.memoria</code></td><td>Scanner, analysis, health, compare
     only open files for reading; the catalogue, thumbnails and journal live in the hidden library folder.</td>
-    <td>Welcome screen and Overview banner: "Memoria has only read this library unless you approved a change."</td></tr>
-  <tr><td>I2</td><td>No change without confirmation</td><td>Every page routes changes through one shared
+    <td>Read-only chart descriptions and an Overview reminder that Recovery is not a backup.</td></tr>
+  <tr><td>I2</td><td>Review file clean-up before applying</td><td>Clean-up pages route file plans through one shared
     <code>apply_actions</code> flow that opens a confirmation dialog first.</td><td>Dialog with counts, size, what is kept,
     and a green "Nothing is deleted" note.</td></tr>
-  <tr><td>I3</td><td>Nothing is deleted</td><td>The executor has no delete operation for user files; "recycle" moves into
-    <code>.memoria\recovery\&lt;batch&gt;\&lt;original relative path&gt;</code>. Only <i>Empty Recovery</i> deletes.</td>
+  <tr><td>I3</td><td>Removed originals go to Recovery</td><td>"recycle" moves into
+    <code>.memoria\recovery\&lt;batch&gt;\&lt;original relative path&gt;</code>. Empty Recovery deletes those originals;
+    Undo can remove unchanged generated copies, and failed exports can clean up their own output.</td>
     <td>Recovery size on Overview and History; Empty Recovery is red and requires ticking an acknowledgement.</td></tr>
-  <tr><td>I4</td><td>Every change is undoable</td><td>Each operation is journaled in SQLite before it runs
+  <tr><td>I4</td><td>File operations are journaled</td><td>File mutations are journaled in SQLite before they run
     (<code>pending</code>) and after (<code>done</code>).</td><td>Toast with Undo; History lists every step.</td></tr>
   <tr><td>I5</td><td>No stale decisions</td><td>Pre-flight checks size and modified time of each file; duplicates are
     re-hashed in full and the kept copy is verified too.</td><td>"3 files skipped because they changed since you reviewed."</td></tr>
@@ -167,11 +170,13 @@ then simply tells the truth about those rules.</p>
   <tr><td>I9</td><td>Identity means identical bytes</td><td>Exact-duplicate decisions require equal xxh3-128 hashes of the
     whole file; sampled hashes are only used to rule files out.</td><td>"Proven by comparing every byte."</td></tr>
   <tr><td>I11</td><td>Unreadable is not deleted</td><td>A scan aborts if the library root is unreachable; files under
-    folders that can't be read keep their catalogue rows.</td><td>"2 folders couldn't be read (kept as they were)".</td></tr>
+    folders/files that can't be read keep their catalogue rows. Genuinely missing rows are retained separately.</td>
+    <td>Unreadable counts and persistent missing-file results.</td></tr>
   <tr><td>I12</td><td>One writer per library</td><td>A cross-process lock file in <code>.memoria</code>; a second window
     is refused.</td><td>"This library is already open in another Memoria window."</td></tr>
   <tr><td>I13</td><td>Undo restores knowledge, not just files</td><td>Catalogue rows of recycled files are parked and
-    restored on undo (thumbnails, dates, health fingerprints).</td><td>Health check stays "Intact" after an undo.</td></tr>
+    restored on undo, with non-reused file IDs. Metadata deliberately cleared by reset is not resurrected.</td>
+    <td>Saved album/face links cannot attach to a new import because a recycled ID was reused.</td></tr>
   <tr><td>I14</td><td>Edits never touch originals</td><td>The Editor only writes new files (unique names, temp file →
     verify → rename) and journals them as <code>create</code> operations.</td><td>"Saved IMG_1 (edited).jpg. The original is
     unchanged." with Undo.</td></tr>
@@ -188,6 +193,11 @@ then simply tells the truth about those rules.</p>
   <tr><td>I10</td><td>Originals of creative tools are untouched</td><td>Story and video outputs are new files in a separate
     output folder; video copies must play, match duration and be smaller or they are discarded.</td>
     <td>Video page banner and result column.</td></tr>
+  <tr><td>I18</td><td>Undo never deletes an unverified output</td><td>A full fingerprint is recorded before publication;
+    modified outputs and legacy outputs without one are left in place.</td><td>Manual-review message instead of a destructive fallback.</td></tr>
+  <tr><td>I19</td><td>Reset never deletes media, Recovery or history</td><td>Transactional selected-data clearing plus
+    durable cache/compaction/rebuild phases; no deletion of <code>.memoria</code>.</td><td>Safe default, category descriptions,
+    acknowledgement for personal data and a Resume rebuild action.</td></tr>
 </table>
 
 <h3 id="threats">What can go wrong — and the design response</h3>
@@ -198,8 +208,8 @@ then simply tells the truth about those rules.</p>
   <tr><td>Power cut halfway through a 5,000-file move</td><td>Journal shows which moves completed; batch is marked
       <i>Partly done</i> and can be undone.</td></tr>
   <tr><td>Undo target name now taken by a new file</td><td>Restored under a new name; nothing overwritten.</td></tr>
-  <tr><td>Files are similar but not identical</td><td>Similar tool says so in the confirmation; blurry list starts
-      unticked; a group can never be emptied completely.</td></tr>
+  <tr><td>Files are similar but not identical</td><td>Photo, video and blur suggestions all start unticked.
+      Keep-only-best is an explicit action; a group cannot be emptied completely.</td></tr>
   <tr><td>File modified date is wrong (common for copies)</td><td>Organise skips files dated only by modified time unless
       the user opts in; date source is shown for every file.</td></tr>
   <tr><td>Library drive unplugged during a scan</td><td>Scan stops with a clear message; nothing in the catalogue is
@@ -208,6 +218,11 @@ then simply tells the truth about those rules.</p>
   <tr><td>Catalogue from a newer Memoria version</td><td>Refused with "please update" instead of being misread.</td></tr>
   <tr><td>Two operations at once</td><td>Single task runner; start buttons disable while busy; a second request shows
       "Please wait for … to finish first."</td></tr>
+  <tr><td>Edited copy later undone</td><td>Destination fingerprint mismatch → left in place, reported.</td></tr>
+  <tr><td>Backup cannot be fully read</td><td>Comparison fails explicitly rather than calling an unreadable drive empty.</td></tr>
+  <tr><td>Recovery deletion fails</td><td>The failure is surfaced; its remaining recovery records are retained.</td></tr>
+  <tr><td>Reset interrupted or compaction runs out of space</td><td>Resume unfinished phases without clearing twice;
+      compaction can be skipped. Already-approved personal-data clearing is not undone by Cancel.</td></tr>
 </table>
 </section>
 
@@ -217,7 +232,7 @@ then simply tells the truth about those rules.</p>
 understand the library, clean it, organise it, create from it, and protect it.</p>
 <table>
   <tr><th>Group</th><th>Pages</th><th>User intent</th></tr>
-  <tr><td>LIBRARY</td><td>Overview · Photos &amp; videos · People</td><td>"What do I have — and who is in it?"</td></tr>
+  <tr><td>LIBRARY</td><td>Overview · Photos &amp; videos · People · Library insights</td><td>"What do I have, who is in it, and where does the space go?"</td></tr>
   <tr><td>CLEAN UP</td><td>Duplicates · Similar &amp; best shots · Tidy up</td><td>"Get rid of what I don't need — safely."</td></tr>
   <tr><td>ORGANISE</td><td>Organise by date · Albums</td><td>"Make it findable — by date, event, place or person."</td></tr>
   <tr><td>CREATE</td><td>Editor · Story maker · Video compressor</td><td>"Fix it up and share it."</td></tr>
@@ -231,7 +246,7 @@ library changes (a generation counter invalidates them).</p>
 sentence, what that tool would do for <i>this</i> library ("25 files might have exact copies"), and highlights the
 cards worth visiting.</p>
 
-<h3 id="mapping">From 20 commands to 11 pages</h3>
+<h3 id="mapping">From the CLI to 15 pages</h3>
 <table>
   <tr><th>Old CLI command(s)</th><th>Now</th><th>Why</th></tr>
   <tr><td><code>index</code></td><td>Automatic on open; <i>Rescan library</i></td><td>An index is a means, not a goal.</td></tr>
@@ -243,11 +258,27 @@ cards worth visiting.</p>
   <tr><td><code>import</code>, <code>compare</code>, <code>sync</code></td><td>Compare &amp; sync</td><td>Import is "copy into library" from another folder.</td></tr>
   <tr><td><code>undo</code></td><td>History &amp; recovery (+ toast Undo)</td><td>Undo is available everywhere, not as a separate command.</td></tr>
   <tr><td><code>status</code></td><td>Overview</td><td>—</td></tr>
-  <tr><td><code>geomap</code></td><td>Removed</td><td>Sent GPS coordinates to an online geocoder (privacy). Coordinates are shown in the preview instead.</td></tr>
+  <tr><td><code>geomap</code></td><td>Library insights → Map</td><td>Replaced online geocoding with bundled public-domain outlines and local GPS plotting.</td></tr>
   <tr><td><code>export</code> (CSV)</td><td>Removed</td><td>The catalogue is a documented SQLite database.</td></tr>
-  <tr><td><code>reset</code></td><td>Removed from UI</td><td>Deleting the hidden <code>.memoria</code> folder does the same; too destructive for a button.</td></tr>
+  <tr><td><code>reset</code></td><td>Storage &amp; reset in the sidebar</td><td>Selective, resumable clearing preserves Recovery/history instead of deleting the library's hidden folder.</td></tr>
   <tr><td>—</td><td>Similar &amp; best shots, Story maker, Video compressor</td><td>New tools from the product plan.</td></tr>
 </table>
+</section>
+
+<section id="explore-reset">
+<h2>Exploration and recovery without surprises</h2>
+<p>Library insights shares one parameterised filter model with Photos. Folder/type bars count files once; the timeline
+drills through calendar boundaries and links to saved albums; the map clusters valid GPS into a bounded grid. It starts
+with India when the approximate outline contains the selected coordinates, otherwise the world. The UI states that
+boundaries and fallback dates are not authoritative. No GPS leaves the computer.</p>
+<p>Photos is paged at 500 rows. Ctrl+A selects only the current page; totals still describe all matches. Filters and
+sorting do not change files. Keyboard-accessible chart rows and location lists complement custom map painting.
+Existing numbered navigation shortcuts are retained even though Insights adds a sidebar entry.</p>
+<p>Reset has a safe default, independent categories and an acknowledged hard preset. It retains stable identities,
+Recovery and operation history. Clearing names, albums, health baselines or missing records is intentionally irreversible.
+An unfinished reset gates other library actions, can resume after restarting, and can skip optional compaction when disk
+space is low. It is not a repair for unreadable SQLite databases or physical drive failure.</p>
+<figure><img src="images/storage-reset.png" alt="Safe reset dialog"><figcaption>Explain what is kept before offering stronger clearing options.</figcaption></figure>
 </section>
 
 <section id="interaction">
@@ -259,7 +290,7 @@ cards worth visiting.</p>
 <ol>
   <li><b>Find</b> — a primary button starts a read-only background task. Progress and Cancel appear in a task bar at the
       bottom of the window.</li>
-  <li><b>Select</b> (Photos &amp; videos) — multi-select reveals a selection bar with batch actions: Move to Recovery,
+  <li><b>Select</b> (Photos &amp; videos) — one or more items on the current page reveal actions: Move to Recovery,
       Copy to folder, Move to folder, Story maker, Compress videos.</li>
   <li><b>Review</b> — results show as thumbnails with badges (<i>KEEP</i>, <i>COPY</i>, <i>BEST</i>), reasons beneath each
       file, a large preview with metadata, and running totals ("14 copies (26.7 MB) will move to Recovery · 11 originals
@@ -313,11 +344,11 @@ returns a reason alongside its result:</p>
 
 <section id="visual">
 <h2>Visual design system</h2>
-<p>Two palettes — <b>Light</b> and <b>Dark</b> — plus <b>Match Windows</b>, which follows the system setting live. Every
-colour comes from the active palette (no hard-coded colours in pages); switching theme rebuilds the window and reopens
+<p>Two palettes — <b>Light</b> and <b>Dark</b> — plus <b>Match Windows</b>, which follows the system setting live. Semantic
+colours come from the active palette; switching theme rebuilds the window and reopens
 the same library and page. Badge colours (KEEP/BEST) stay identical in both themes so their meaning never shifts.</p>
 <p>A calm, Windows 11-like style: neutral surfaces, one blue accent for primary actions, and semantic colours
-reserved for meaning — green for safety, amber for caution, red only for the single destructive action.</p>
+reserved for meaning — green for successful results, amber for caution, red for destructive operations or errors.</p>
 <div class="swatches">
   <div class="sw"><div style="background:#2563eb"></div><span><b>Accent</b> #2563EB<br>primary buttons, selection</span></div>
   <div class="sw"><div style="background:#e8effe"></div><span><b>Accent soft</b> #E8EFFE<br>info banners, selection bg</span></div>
@@ -368,7 +399,7 @@ explain what each tool would do for this library.</figcaption></figure>
   <li><b>No jargon in the main text.</b> "Proven by comparing every byte" instead of "xxh3-128 match"; technical detail goes in
       tooltips or expandable details.</li>
   <li><b>Explain uncertainty.</b> "File modified date — may be inaccurate", "These photos are similar, not identical".</li>
-  <li><b>Errors tell the user the state of their files.</b> "They were left exactly where they were."</li>
+  <li><b>Errors avoid unverified reassurance.</b> "Some steps may have completed. Check History before trying again."</li>
   <li><b>British spelling</b> (organise, colour), sentence case, no exclamation marks.</li>
 </ul>
 </section>
@@ -396,7 +427,7 @@ explain what each tool would do for this library.</figcaption></figure>
     Apache 2.0); dlib needs a compiler on Windows; popular InsightFace models are licensed for non-commercial use only.</td></tr>
   <tr><td>Grouping faces</td><td>Leader clustering → centre merging → reassignment at cosine 0.42; corrections stored
     (<code>face_rejects</code>)</td><td>DBSCAN/HDBSCAN; pairwise linking</td><td>Centre-based linking avoids chaining two people
-    together through one ambiguous face; one pass scales to tens of thousands of faces with NumPy.</td></tr>
+    together through one ambiguous face. Centre merging still uses a dense matrix and needs care at large scale.</td></tr>
   <tr><td>Place names</td><td>Bundled GeoNames towns (15,000+ people), most populous within a few km of the nearest</td>
     <td>Online reverse geocoding</td><td>Privacy (the old CLI leaked locations to a web service) and offline use.</td></tr>
   <tr><td>Event albums</td><td>Time gaps, extended to 3 days while photos stay in one place</td><td>Fixed per-day albums;
@@ -411,9 +442,9 @@ explain what each tool would do for this library.</figcaption></figure>
     <td>Copies reset modified time; filing them by it would scatter photos into wrong years.</td></tr>
   <tr><td>Video tooling</td><td>FFmpeg from <code>imageio-ffmpeg</code></td><td>Require user install</td>
     <td>Zero setup; the binary is bundled with the app.</td></tr>
-  <tr><td>Performance changes</td><td>Only lossless speed-ups (laziness, threading, vectorisation, trimming unused binaries)</td>
-    <td>Cached backup hashes; sampled health checks</td><td>A cache keyed on size+date would miss silent corruption — the
-    exact thing Health and Compare exist to catch.</td></tr>
+  <tr><td>Performance changes</td><td>Bounded queues, byte-budgeted thumbnails, SQL paging, coalesced read-only charts</td>
+    <td>Loading every file row and pixmap at once</td><td>Bound resource use without sampling away records. Health rereads
+    every file; Compare caches library hashes and is not a substitute for a fresh Health check.</td></tr>
   <tr><td>Similar videos</td><td>8 frame dHashes + duration, median distance ≤ 12, ±1-frame alignment</td><td>Full-video
     perceptual hashing; audio fingerprints</td><td>Fast (≈0.15 s per short clip), explainable, robust to re-encoding and
     small trims; measured margin between copies (3–9) and unrelated clips (≥16).</td></tr>
@@ -431,14 +462,17 @@ explain what each tool would do for this library.</figcaption></figure>
 
 <section id="performance">
 <h2>Performance as a design requirement</h2>
-<p>Slow tools teach users to stop checking. The design budget is: opening a known library feels instant, finding
-duplicates takes seconds, and the window never freezes.</p>
+<p>The target is responsive browsing of a 200–300 GB library without needing a duplicate library to test it.
+File count, codecs, drive speed and matching density matter more than GB alone. Responsiveness is a target, not a
+guarantee on arbitrary drives or files.</p>
 <ul>
   <li>Incremental scan: unchanged files (same size and modified time) are skipped — a rescan of 1,000 photos takes 0.01 s.</li>
   <li>JPEG decoding at reduced resolution and parallel analysis (≈180 photos/s on the benchmark machine).</li>
   <li>Duplicate funnel: only files sharing a size are ever read.</li>
-  <li>Similarity: vectorised, multi-threaded Hamming distance (100,000 photos in ≈4 s); bursts found by a time-sorted window.</li>
-  <li>Thumbnails stored once in their own SQLite file; the grid decodes only visible cells.</li>
+  <li>Similarity remains quadratic; the historical ≈4 s result is a random-hash microbenchmark, not 100,000-photo end-to-end processing.</li>
+  <li>Decoded thumbnails use a 64 MiB pixel-data budget (Qt overhead is additional), invalidated after library changes.</li>
+  <li>Photos loads at most 500 matching rows; SQL chart aggregation and a bounded GPS grid avoid per-photo widgets.</li>
+  <li>Tests model 300 GB using 10,000 tiny catalogue entries, exercise dense matches and inject failures. They do not measure real-drive throughput.</li>
 </ul>
 <p>See the <a href="technical.html#performance">technical document</a> for measurements.</p>
 </section>
@@ -466,10 +500,11 @@ duplicates takes seconds, and the window never freezes.</p>
     close to the threshold; groups are suggestions and nothing is pre-applied.</td></tr>
   <tr><td>Haar face detection is basic</td><td>Faces only nudge the best-shot score (12% weight).</td></tr>
   <tr><td>Recovery uses disk space</td><td>Size is shown on Overview and History; emptying is explicit.</td></tr>
-  <tr><td>Very large libraries (&gt;100k)</td><td>Engine scales; some page refreshes load the full catalogue in memory and may
-    need pagination.</td></tr>
+  <tr><td>Very large libraries (&gt;100k)</td><td>Photos is paged, but other tools can load whole groups.
+    Similarity is quadratic and face-centre merging can allocate a large dense matrix.</td></tr>
   <tr><td>Network drives</td><td>Untested; moves across volumes fall back to verified copy + delete of the source.</td></tr>
-  <tr><td>Packaged size (~380 MB)</td><td>Dominated by Qt, OpenCV and FFmpeg; could be trimmed.</td></tr>
+  <tr><td>Packaged size</td><td>Historically around 340 MB, dominated by Qt, OpenCV and FFmpeg.
+    This source update has not been validated as a newly built standalone executable.</td></tr>
 </table>
 </section>
 
@@ -478,7 +513,7 @@ duplicates takes seconds, and the window never freezes.</p>
 <ol>
   <li>Calibrate blur and best-shot scoring on real libraries (with an opt-in local feedback log).</li>
   <li>Screen-reader names for grid items.</li>
-  <li>Removable-drive catalogue (find which disconnected drive holds a file).</li>
+  <li>Unified multi-folder libraries and offline-drive catalogue support; not implemented by Insights' folder filter.</li>
   <li>Screenshot text search (local OCR) in Photos &amp; videos.</li>
   <li>Backup restore drill: restore a sample from a backup and prove it matches.</li>
   <li>Optional Rust (PyO3) extension for hashing and similarity if profiling shows a need.</li>

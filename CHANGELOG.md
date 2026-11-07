@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased
+
+### Documentation
+- Updated the complete HTML documentation set and README for the current source, including safety limits,
+  selective reset, insights, filters, paging, schema v5 and offline map attribution.
+- Regenerated the quality report and screenshots from disposable test media; large media benchmarks are explicitly
+  not rerun. Existing executable/package measurements are labelled historical rather than current build verification.
+
+### Library insights
+- Read-only folder/file-format storage bars, drilldown year/month/day counts with saved-album links,
+  and an offline India-first/world GPS map with zoom and clustered markers.
+- Chart clicks open matching files or albums; map coordinates never leave this computer.
+- Photos support size/name/date sorting and combined folder, format, date, size, GPS and people filters.
+- SQL-backed browsing is bounded to 500 rows per page; Ctrl+A and batch selection are page-scoped.
+- Sidebar navigation scrolls on smaller windows; existing Ctrl+number shortcuts remain unchanged.
+- Public-domain Natural Earth country outlines are bundled with attribution; no new runtime dependency.
+- Album cleanup retains membership for missing files so a later return does not lose saved organisation.
+
+### Storage & reset
+- Sidebar controls offer a safe rebuild, selectable categories, and an acknowledged hard-reset preset.
+- Original media, exported files, Recovery, stable file IDs and Undo history are always retained.
+- Optional database compaction has a free-space check and can be skipped when resuming.
+- Catalogue schema v5 records reset progress durably. Interrupted resets resume without repeating
+  personal-data clearing; other library actions are paused until the rebuild completes.
+- Tests cover abrupt process exit, rollback, cancellation, changed media, low space and the reset UI.
+
+### Safety
+- Copies record a fingerprint before publication; Undo refuses changed or unverified copies.
+- Catalogue schema v4 prevents recycled IDs from being reassigned to newly imported files.
+- Missing files and their metadata survive rescans and are shown in Health check.
+- Temporary file-access failures retain catalogue entries and are reported.
+- Interrupted moves reconcile catalogue state and History counts as well as file locations.
+- Recovery deletion failures surface as errors instead of discarding recovery records.
+- Editor, story and video output publication is journaled, including partial cancelled batches.
+- Unavailable or unreadable backup folders cannot produce a successful comparison.
+
+### Usability and resource use
+- Analysis submission is bounded; decoded thumbnail pixels have a 64 MiB cache budget.
+- Thumbnail caches refresh after library changes.
+- Similarity no longer retains a Python set of every matching pair.
+- Similar photo/video cleanup starts unticked; single-item selections show their action toolbar.
+- Overview distinguishes Recovery from backup; Health check reports missing/unreadable problems
+  rather than showing a misleading "No damage found" message.
+- Low-disk tests cover synthetic large catalogues, migration, cancellation and filesystem failures.
+
 ## 1.4.0 — 2026-11-04
 
 ### Added

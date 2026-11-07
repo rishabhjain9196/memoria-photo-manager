@@ -161,7 +161,7 @@ def detect(path) -> list[Face]:
 
 # ----------------------------------------------------------------------------- scanning
 def _live_ids(lib: Library) -> str:
-    return "(SELECT id FROM files UNION SELECT file_id FROM parked_files)"
+    return "(SELECT id FROM files UNION SELECT file_id FROM parked_files UNION SELECT file_id FROM missing_files)"
 
 
 def _cleanup(lib: Library) -> None:

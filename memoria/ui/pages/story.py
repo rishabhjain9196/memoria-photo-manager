@@ -798,15 +798,27 @@ class StoryPage(Page):
             msg = message(res)
             self.result_label.setText(msg.replace(str(out), f"“{out.name}”"))
             self.show_btn.setVisible(bool(res))
-            self.ctx.toast_requested.emit(msg, "")
+            self.ctx.library_modified.emit()
+            self.ctx.toast_requested.emit(msg, created[0].batch_id if created[0] and created[0].done else "")
 
         def cancelled():
             self.result_label.setText("Stopped. Nothing was saved.")
             self.show_btn.hide()
+            self.ctx.library_modified.emit()
 
         self.result_label.setText("")
         self.show_btn.hide()
-        if not self.run(title, work, done, cancelled):
+        from ...engine import actions
+        lib = self.lib
+        created = [None]
+        export = work
+
+        def journaled_work(prog):
+            with actions.created_batch(lib, "story", title) as batch:
+                created[0] = batch
+                return export(prog)
+
+        if not self.run(title, journaled_work, done, cancelled):
             self.ctx.toast_requested.emit("Another task is still running. Try again when it has finished.", "")
 
     def _show_outputs(self) -> None:

@@ -70,10 +70,13 @@ class Page(QWidget):
     # helpers -----------------------------------------------------------------------------
     @property
     def busy(self) -> bool:
-        return self.ctx.runner.busy
+        return self.ctx.runner.busy or self.ctx.maintenance
 
     def run(self, title: str, fn: Callable[[Progress], Any], on_done: Optional[Callable[[Any], None]] = None,
             on_cancel: Optional[Callable[[], None]] = None) -> bool:
+        if self.ctx.maintenance:
+            self.ctx.toast_requested.emit("Finish the library rebuild using Resume rebuild first.", "")
+            return False
         ok = self.ctx.runner.run(title, fn, on_done, on_cancel)
         if not ok:
             self.ctx.toast_requested.emit(f"Please wait for “{self.ctx.runner.title}” to finish first.", "")

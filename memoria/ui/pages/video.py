@@ -591,11 +591,15 @@ class VideoPage(Page):
             return
         files = [r["path"] for r in rows]
         settings = self.settings()
+        from ...engine import actions
+        lib = self.lib
 
         def work(progress):
-            return videotools.compress_many(files, out, settings, progress)
+            with actions.created_batch(lib, "video", "Compress videos"):
+                return videotools.compress_many(files, out, settings, progress)
 
         def cancelled():
+            self.ctx.library_modified.emit()
             self.ctx.toast_requested.emit("Compression stopped. Videos that had already finished were kept "
                                           f"in {out}.", "")
 
@@ -603,6 +607,7 @@ class VideoPage(Page):
             self.ctx.toast_requested.emit("Another task is still running. Try again when it has finished.", "")
 
     def _show_results(self, results: list[videotools.CompressResult]) -> None:
+        self.ctx.library_modified.emit()
         self._results = list(results)
         t = self.results
         t.setRowCount(len(results))

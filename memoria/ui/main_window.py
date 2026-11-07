@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sqlite3
 import time
 from pathlib import Path
 
@@ -12,16 +13,16 @@ from PySide6.QtWidgets import (QButtonGroup, QComboBox, QFileDialog, QFrame, QHB
                                QProgressBar, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import __version__
-from ..engine import actions, scanner
+from ..engine import actions, scanner, storage
 from ..engine.db import Library, LibraryInUse, LibraryTooNew
 from . import theme
 from .tasks import TaskRunner
 from .widgets import (AppContext, Banner, ConfirmDialog, MessageDialog, Toast, button, fmt_date, fmt_n,
-                      glyph_label, hbox, icon_family, label, vbox)
+                      glyph_label, hbox, icon_family, label, scroll, vbox)
 
 NAV = [
     ("LIBRARY", [("overview", "Overview", "\uE80F"), ("photos", "Photos & videos", "\uE91B"),
-                 ("people", "People", "\uE716")]),
+                 ("people", "People", "\uE716"), ("insights", "Library insights", "\uE9D9")]),
     ("CLEAN UP", [("duplicates", "Duplicates", "\uE8C8"), ("similar", "Similar & best shots", "\uE734"),
                   ("tidy", "Tidy up", "\uE74D")]),
     ("ORGANISE", [("organize", "Organise by date", "\uE8B7"), ("albums", "Albums", "\uE7AA")]),
@@ -31,14 +32,16 @@ NAV = [
                  ("history", "History & recovery", "\uE81C")]),
 ]
 NAV_KEYS = [k for _, items in NAV for k, _, _ in items]
+SHORTCUT_KEYS = [key for key in NAV_KEYS if key != "insights"]
 
 
 def page_classes() -> dict:
-    from .pages import compare, duplicates, health, history, organize, overview, photos, similar, tidy
+    from .pages import compare, duplicates, health, history, insights, organize, overview, photos, similar, tidy
     classes = {"overview": overview.OverviewPage, "photos": photos.PhotosPage,
                "duplicates": duplicates.DuplicatesPage, "similar": similar.SimilarPage,
                "tidy": tidy.TidyPage, "organize": organize.OrganizePage,
-               "health": health.HealthPage, "compare": compare.ComparePage, "history": history.HistoryPage}
+               "health": health.HealthPage, "compare": compare.ComparePage, "history": history.HistoryPage,
+               "insights": insights.InsightsPage}
     try:
         from .pages.people import PeoplePage
         classes["people"] = PeoplePage
@@ -88,7 +91,7 @@ class WelcomePage(QWidget):
             "<b>Built to be trusted</b><br>"
             "• Memoria only <b>reads</b> your photos while it looks around.<br>"
             "• Before changing anything it shows you exactly what will happen, and asks.<br>"
-            "• It never deletes: removed files go to a Recovery folder, and every change can be undone.<br>"
+            "• Clean-up moves originals to Recovery. Undo restores them; it can also remove unchanged generated copies.<br>"
             "• Its catalogue lives in a hidden <i>.memoria</i> folder inside the library you choose.", "trust")
         choose = button("Choose photo folder…", "primary", window.choose_library)
         sample = button("Try it on a sample library", on_click=window.open_sample,
@@ -142,8 +145,12 @@ class MainWindow(QMainWindow):
         self.runner.finished.connect(self._task_finished)
         self.runner.error.connect(self._task_error)
         self.runner.busy_changed.connect(lambda busy: self.theme_combo.setEnabled(not busy))
+        self.runner.busy_changed.connect(
+            lambda busy: self.storage_btn.setEnabled(self.ctx.library is not None and not busy))
         self.ctx.toast_requested.connect(self.toast.show_message)
         self.ctx.navigate.connect(self.go)
+        self.ctx.browse_requested.connect(self.browse_filtered)
+        self.ctx.album_requested.connect(self.open_album)
         self.ctx.badges_changed.connect(self._update_badges)
         self.ctx.checkup_requested.connect(self.run_checkup)
         self.toast.undo_clicked.connect(self.undo_batch)
@@ -171,6 +178,8 @@ class MainWindow(QMainWindow):
         sl.addWidget(self.lib_label)
         change = button("Change library…", "link", self.choose_library, tip="Ctrl+O")
         sl.addLayout(hbox(8, change, None))
+        self.storage_btn = button("Storage && reset…", "link", self.manage_storage)
+        sl.addLayout(hbox(8, self.storage_btn, None))
         sl.addSpacing(6)
         group = QButtonGroup(self)
         group.setExclusive(True)
@@ -184,13 +193,13 @@ class MainWindow(QMainWindow):
             for key, text, glyph in items:
                 if key not in self.page_classes:
                     continue
-                n = NAV_KEYS.index(key) + 1
+                n = SHORTCUT_KEYS.index(key) + 1 if key in SHORTCUT_KEYS else 0
                 shown = text.replace("&", "&&")
                 b = QPushButton(f"         {shown}" if fam else f"  {shown}")
                 b.setObjectName("nav")
                 b.setCheckable(True)
                 b.setCursor(Qt.CursorShape.PointingHandCursor)
-                b.setToolTip(f"{text}  (Ctrl+{n % 10})" if n <= 10 else text)
+                b.setToolTip(f"{text}  (Ctrl+{n % 10})" if 0 < n <= 10 else text)
                 lay = QHBoxLayout(b)
                 lay.setContentsMargins(10, 0, 8, 0)
                 if fam:
@@ -208,8 +217,7 @@ class MainWindow(QMainWindow):
                 group.addButton(b)
                 self.nav_buttons[key] = b
                 nl.addWidget(b)
-        sl.addWidget(self.nav_container)
-        sl.addStretch(1)
+        sl.addWidget(scroll(self.nav_container), 1)
         self.theme_combo = QComboBox()
         for mode, text in theme.MODES.items():
             self.theme_combo.addItem(text, mode)
@@ -259,7 +267,7 @@ class MainWindow(QMainWindow):
         self.toast = Toast(root)
 
     def _shortcuts(self) -> None:
-        for i, key in enumerate(NAV_KEYS[:10]):
+        for i, key in enumerate(SHORTCUT_KEYS[:10]):
             QShortcut(QKeySequence(f"Ctrl+{(i + 1) % 10}"), self, activated=lambda k=key: self.go(k))
         QShortcut(QKeySequence("F5"), self, activated=self.index_library)
         QShortcut(QKeySequence("Ctrl+O"), self, activated=self.choose_library)
@@ -281,15 +289,30 @@ class MainWindow(QMainWindow):
         return self.pages.get(key)
 
     def go(self, key: str) -> None:
-        if self.ctx.library is None or key not in self.page_classes:
+        if self.ctx.library is None or key not in self.page_classes or self.ctx.maintenance:
             return
         self.stack.setCurrentWidget(self.page(key))
         self.nav_buttons[key].setChecked(True)
         self.current_key = key
         self.settings.setValue("last_page", key)
 
+    def browse_filtered(self, filters) -> None:
+        if self.ctx.library is None or self.ctx.maintenance:
+            return
+        page = self.page("photos")
+        page.open_filters(filters)
+        page.stale = False
+        self.go("photos")
+
+    def open_album(self, album_id: int) -> None:
+        if self.ctx.library is None or self.ctx.maintenance:
+            return
+        self.go("albums")
+        self.page("albums").open_album(album_id)
+
     def _show_library_ui(self, has_lib: bool) -> None:
         self.nav_container.setEnabled(has_lib)
+        self.storage_btn.setEnabled(has_lib and not self.runner.busy)
         if not has_lib:
             self.welcome.set_recent(self.settings.value("recent", [], list) or [])
             self.stack.setCurrentWidget(self.welcome)
@@ -336,7 +359,15 @@ class MainWindow(QMainWindow):
         except Exception as e:
             MessageDialog(self, "Can't open this folder", str(e)).exec()
             return
-        fixed = actions.reconcile(lib)
+        try:
+            fixed = actions.reconcile(lib)
+        except Exception as e:
+            lib.close()
+            MessageDialog(self, "Could not recover this catalogue", str(e) +
+                          "\n\nPhotos and Recovery files have not been deleted. Keep the .memoria folder "
+                          "for recovery; do not remove it to force a fresh start.").exec()
+            return
+        self._clear_pages()
         self.ctx.set_library(lib)
         parent = str(lib.root.parent)
         if len(parent) > 34:
@@ -348,6 +379,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("recent", recent[:8])
         self.settings.setValue("library", str(lib.root))
         self._show_library_ui(True)
+        self._reset_state()
         self.go(page if page in self.page_classes else "overview")
         if fixed:
             self.toast.show_message(f"Memoria was interrupted last time. {fmt_n(fixed, 'unfinished change')} "
@@ -371,16 +403,88 @@ class MainWindow(QMainWindow):
                 bits.append(f"{s.removed:,} no longer there")
             if s.unreadable_folders:
                 bits.append(f"{fmt_n(s.unreadable_folders, 'folder')} couldn't be read (kept as they were)")
+            if s.unreadable_files:
+                bits.append(f"{fmt_n(s.unreadable_files, 'file')} couldn't be read (catalogue entries kept)")
             if bits:
                 self.toast.show_message("Library updated: " + ", ".join(bits) + ".", seconds=6)
 
-        self.runner.run("Reading your library", lambda prog: scanner.index(lib, prog), done,
+        self.runner.run("Resuming library rebuild" if self.ctx.maintenance else "Reading your library",
+                        lambda prog: storage.resume(lib, prog), done,
+                        on_cancel=self.ctx.library_modified.emit)
+
+    def _reset_state(self) -> None:
+        try:
+            self.ctx.maintenance = self.ctx.library is not None and storage.pending(self.ctx.library) is not None
+        except sqlite3.Error as e:
+            self.ctx.maintenance = True
+            self.toast.show_message(f"Catalogue unavailable: {e}. Reconnect the drive and reopen the library. "
+                                    "Keep its .memoria folder for recovery.", seconds=15)
+        self.stack.setEnabled(not self.ctx.maintenance)
+        self.nav_container.setEnabled(self.ctx.library is not None and not self.ctx.maintenance)
+        self.storage_btn.setText("Resume rebuild…" if self.ctx.maintenance else "Storage && reset…")
+
+    def _clear_pages(self) -> None:
+        for page in self.pages.values():
+            stop = getattr(page, "shutdown", None)
+            if callable(stop):
+                stop()
+            self.stack.removeWidget(page)
+            page.deleteLater()
+        self.pages.clear()
+        self.current_key = ""
+        self.ctx.story_selection.clear()
+        self.ctx.video_selection.clear()
+        self.ctx.edit_selection.clear()
+        self.ctx.thumbs.clear()
+        self.stack.setCurrentWidget(self.welcome)
+
+    def manage_storage(self) -> None:
+        lib = self.ctx.library
+        if lib is None or self.runner.busy:
+            return
+        from .storage_dialog import StorageDialog
+        try:
+            dlg = StorageDialog(self, storage.usage(lib), storage.pending(lib) is not None)
+        except (OSError, sqlite3.Error) as e:
+            MessageDialog(self, "Storage unavailable", str(e)).exec()
+            return
+        if not dlg.exec():
+            return
+        options = None if dlg.interrupted else dlg.options()
+        skip_compact = dlg.skip_compact.isChecked()
+        # Clear page-local selections/results too, not just shared thumbnail caches.
+        self._clear_pages()
+        self.stack.setEnabled(False)
+        self.nav_container.setEnabled(False)
+        self.ctx.maintenance = True
+
+        def work(prog):
+            try:
+                if options is None:
+                    return storage.resume(lib, prog, skip_compact=skip_compact)
+                return storage.reset(lib, options, prog)
+            finally:
+                lib.close_thread()
+
+        def done(result):
+            self.ctx.library_modified.emit()
+            self.go("overview")
+            scan_result, analysis_result = result
+            issues = scan_result.unreadable_files + analysis_result.errors
+            message = "Catalogue rebuilt. Original files, Recovery and Undo history were kept."
+            if issues or scan_result.unreadable_folders:
+                message += (f" {fmt_n(issues, 'file')} and {fmt_n(scan_result.unreadable_folders, 'folder')} "
+                            "could not be read. Check Problems or reconnect the drive and rescan.")
+            message += " Run People, Albums, Health check or Similar videos again if you cleared them."
+            self.toast.show_message(message, seconds=15)
+
+        self.runner.run("Rebuilding library storage", work, done,
                         on_cancel=self.ctx.library_modified.emit)
 
     def run_checkup(self) -> None:
         """Run every finder in one read-only pass; pages and sidebar badges use the results."""
         lib = self.ctx.library
-        if lib is None or self.runner.busy:
+        if lib is None or self.runner.busy or self.ctx.maintenance:
             return
         from ..engine import checkup
 
@@ -424,7 +528,7 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------------------------- undo
     def undo_last(self) -> None:
         lib = self.ctx.library
-        if lib is None or self.runner.busy:
+        if lib is None or self.runner.busy or self.ctx.maintenance:
             return
         last = next((b for b in actions.batches(lib) if b["status"] in ("applied", "partial")), None)
         if last is None:
@@ -439,7 +543,7 @@ class MainWindow(QMainWindow):
 
     def undo_batch(self, batch_id: str) -> None:
         lib = self.ctx.library
-        if lib is None:
+        if lib is None or self.ctx.maintenance:
             return
 
         def work(prog):
@@ -490,12 +594,21 @@ class MainWindow(QMainWindow):
 
     def _task_finished(self, outcome: str) -> None:
         self.task_bar.hide()
+        self._reset_state()
+        if self.ctx.maintenance:
+            self.toast.show_message("Rebuild is unfinished. Use Resume rebuild, or reopen this library. "
+                                    "Originals and Recovery are untouched.", seconds=15)
+            return
+        if self.ctx.library is not None and not self.pages:
+            self.go("overview")
         if outcome == "cancelled":
             self.toast.show_message("Stopped. Anything already done is recorded in History.", seconds=6)
 
     def _task_error(self, title: str, msg: str, details: str) -> None:
-        MessageDialog(self, f"{title} didn't finish", msg + "\n\nNo files were left half-changed: every "
-                      "completed step is recorded in History.", details).exec()
+        advice = ("Use Resume rebuild to finish safely. If space is low, choose Skip shrinking storage files."
+                  if self.ctx.maintenance else
+                  "Some steps may have completed. Check History & recovery before trying again.")
+        MessageDialog(self, f"{title} didn't finish", msg + "\n\n" + advice, details).exec()
 
     def _cancel(self) -> None:
         self.cancel_btn.setEnabled(False)

@@ -59,7 +59,8 @@ def test_changed_and_deleted_photos_are_rescanned_and_forgotten(library, expecte
     fid = library.file_by_rel(expected["people"]["Abraham Lincoln"][0])["id"]
     new = {r["face_id"] for r in faces.faces_in(library, fid)}
     assert new and not new & old
-    assert library.db.execute("SELECT COUNT(*) FROM faces WHERE file_id NOT IN (SELECT id FROM files)").fetchone()[0] == 0
+    assert library.db.execute("SELECT COUNT(*) FROM faces WHERE file_id NOT IN "
+                              "(SELECT id FROM files UNION SELECT file_id FROM missing_files)").fetchone()[0] == 0
     lincoln = next(k for k, got in _groups_by_files(library).items()
                    if set(expected["people"]["Abraham Lincoln"]) <= got)
     assert lincoln                                                            # the mirrored photo is still Lincoln

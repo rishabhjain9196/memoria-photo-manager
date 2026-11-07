@@ -360,3 +360,61 @@ def test_empty_recovery_is_explicit(library):
     assert actions.empty_recovery(library, [res.batch_id]) == res.done
     assert actions.recovery_size(library) == (0, 0)
     assert actions.batches(library)[0]["status"] == "emptied"
+
+
+def test_large_analysis_backlog_has_bounded_submission(tmp_path, monkeypatch):
+    from concurrent.futures import Future
+    lib = Library(tmp_path)
+    queued = set()
+    peak = 0
+
+    class TrackedFuture(Future):
+        def result(self, *args, **kwargs):
+            queued.discard(self)
+            return super().result(*args, **kwargs)
+
+    class ImmediatePool:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def submit(self, *args):
+            nonlocal peak
+            future = TrackedFuture()
+            future.set_result({"width": 10, "height": 10})
+            queued.add(future)
+            peak = max(peak, len(queued))
+            return future
+
+    try:
+        with lib.transaction() as db:
+            db.executemany("INSERT INTO files(rel_path,folder,name,ext,kind,size,mtime) "
+                           "VALUES (?,'',?,'.jpg','image',30000000,1)",
+                           [(f"{i}.jpg", f"{i}.jpg") for i in range(10_000)])
+        monkeypatch.setattr(scanner, "ThreadPoolExecutor", ImmediatePool)
+        result = scanner.analyze(lib, workers=2)
+        assert result.analyzed == 10_000
+        assert peak <= 6 and not queued
+        assert lib.stats()["pending"] == 0
+    finally:
+        lib.close()
+
+
+def test_dense_similarity_does_not_retain_all_pairs():
+    import tracemalloc
+    import numpy as np
+    n = 1000
+    tracemalloc.start()
+    try:
+        count = sum(1 for _ in similar.similar_pairs(np.zeros(n, dtype=np.int64),
+                                                    np.zeros(n), 10, 3, 16))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert count == n * (n - 1) // 2
+    assert peak < 40 * 1024 * 1024

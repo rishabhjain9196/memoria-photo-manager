@@ -37,8 +37,10 @@
   <a class="sub" href="#p-editor">Editor</a>
   <a class="sub" href="#p-people">People (faces)</a>
   <a class="sub" href="#p-albums">Albums &amp; places</a>
+  <a href="#p-insights">Catalogue queries &amp; maps</a>
+  <a href="#p-reset">Selective storage reset</a>
   <a href="#executor">Action executor &amp; journal</a>
-  <a href="#integrity">Catalogue integrity (1.1)</a>
+  <a href="#integrity">Catalogue integrity</a>
   <a href="#ui">UI architecture</a>
   <a href="#concurrency">Concurrency model</a>
   <a href="#performance">Performance</a>
@@ -55,9 +57,9 @@
 <header class="hero">
   <h1>Technical document</h1>
   <p>How Memoria is built: architecture, modules, data model, algorithms, the journaled executor that makes every
-  change undoable, concurrency, performance, testing and packaging.</p>
-  <div class="meta"><span class="pill">Python 3.12</span><span class="pill">PySide6 6.12</span><span class="pill">SQLite (WAL)</span>
-  <span class="pill">NumPy · Pillow · OpenCV 4 · FFmpeg 7</span><span class="pill">v1.4 · ≈17,000 lines incl. tests</span></div>
+  file operations recoverable, concurrency, performance, testing and packaging.</p>
+  <div class="meta"><span class="pill">Python 3.11+</span><span class="pill">PySide6 6.7+</span><span class="pill">SQLite schema 5 · WAL</span>
+  <span class="pill">NumPy · Pillow · OpenCV 4 · FFmpeg</span><span class="pill">Unreleased updates after 1.4</span></div>
 </header>
 
 <section id="overview">
@@ -69,8 +71,9 @@
   <li><b><code>memoria.ui</code></b> — a PySide6 shell: a main window with sidebar navigation, one page per tool, a single
       background <code>TaskRunner</code>, and shared widgets.</li>
 </ul>
-<p>All file mutations — from any page — are expressed as a list of <code>Action</code> objects and executed by one
-function, <code>engine.actions.apply</code>, which journals, verifies and makes them undoable.</p>
+<p>File plans use <code>Action</code> lists and <code>actions.apply</code>. Exporters use
+<code>actions.created_batch</code> and shared <code>publish_file</code>/<code>record_output</code> to journal each output
+before publication. Selective catalogue reset has a separate durable state machine; metadata deletion is not Undo.</p>
 </section>
 
 <section id="architecture">
@@ -80,7 +83,7 @@ function, <code>engine.actions.apply</code>, which journals, verifies and makes 
   <rect x="10" y="10" width="940" height="140" rx="12" fill="#e8effe" stroke="#c9d8fb"/>
   <text x="26" y="34" font-weight="600" fill="#1e3a8a">memoria.ui (PySide6, main thread)</text>
   <rect x="26" y="48" width="170" height="86" rx="8" fill="#fff" stroke="#c9d8fb"/><text x="40" y="70" font-weight="600">MainWindow</text><text x="40" y="90" fill="#5e6670">sidebar · stack</text><text x="40" y="108" fill="#5e6670">task bar · toast</text><text x="40" y="126" fill="#5e6670">open / index / undo</text>
-  <rect x="210" y="48" width="330" height="86" rx="8" fill="#fff" stroke="#c9d8fb"/><text x="224" y="70" font-weight="600">Pages (11) — base.Page</text><text x="224" y="90" fill="#5e6670">refresh() · on_busy_changed()</text><text x="224" y="108" fill="#5e6670">run(title, fn, on_done)</text><text x="224" y="126" fill="#5e6670">apply_actions(...) → confirm → apply → toast</text>
+  <rect x="210" y="48" width="330" height="86" rx="8" fill="#fff" stroke="#c9d8fb"/><text x="224" y="70" font-weight="600">Pages (15) — base.Page</text><text x="224" y="90" fill="#5e6670">refresh() · on_busy_changed()</text><text x="224" y="108" fill="#5e6670">run(title, fn, on_done)</text><text x="224" y="126" fill="#5e6670">apply_actions(...) → confirm → apply → toast</text>
   <rect x="554" y="48" width="180" height="86" rx="8" fill="#fff" stroke="#c9d8fb"/><text x="568" y="70" font-weight="600">widgets</text><text x="568" y="90" fill="#5e6670">PhotoGrid · Preview</text><text x="568" y="108" fill="#5e6670">ConfirmDialog · Toast</text><text x="568" y="126" fill="#5e6670">AppContext · ThumbCache</text>
   <rect x="748" y="48" width="186" height="86" rx="8" fill="#fff" stroke="#c9d8fb"/><text x="762" y="70" font-weight="600">TaskRunner</text><text x="762" y="90" fill="#5e6670">one QThread at a time</text><text x="762" y="108" fill="#5e6670">progress · cancel</text><text x="762" y="126" fill="#5e6670">errors → dialog</text>
   <line x1="840" y1="134" x2="840" y2="180" stroke="#5e6670" marker-end="url(#a)"/>
@@ -110,7 +113,9 @@ function, <code>engine.actions.apply</code>, which journals, verifies and makes 
 </svg>
 <p>Dependencies point downward only: pages import engine modules; the engine never imports Qt. The
 <code>AppContext</code> object carries shared state (open <code>Library</code>, runner, thumbnail cache) and app-wide
-signals (<code>library_opened</code>, <code>library_modified</code>, <code>toast_requested</code>, <code>navigate</code>).</p>
+signals (<code>library_opened</code>, <code>library_modified</code>, <code>toast_requested</code>, <code>navigate</code>,
+<code>browse_requested</code>, <code>album_requested</code>). The diagram shows the main file-operation path;
+Insights uses read-only background queries and reset uses its own journaled phases.</p>
 </section>
 
 <section id="layout">
@@ -124,7 +129,7 @@ signals (<code>library_opened</code>, <code>library_modified</code>, <code>toast
 │  ├─ samplelib.py          deterministic sample/test library generator (+ expected.json)
 │  ├─ sample_faces/         16 public-domain portraits for People tests + CREDITS.txt
 │  ├─ engine/               UI-independent engine (see Module reference)
-│  │  └─ data/              YuNet + SFace ONNX models (+ licences), places.tsv.gz (GeoNames, CC BY 4.0)
+│  │  └─ data/              face models, GeoNames places, world-map.json.gz + credits (Natural Earth)
 │  └─ ui/
 │     ├─ app.py             QApplication, style, icon
 │     ├─ main_window.py     sidebar, page stack, task bar, toast, library lifecycle, undo
@@ -133,11 +138,14 @@ signals (<code>library_opened</code>, <code>library_modified</code>, <code>toast
 │     ├─ theme.py           colours + Qt stylesheet
 │     ├─ assets/            memoria.ico / memoria.png (generated by tools/make_icon.py)
 │     ├─ cropcanvas.py      CropCanvas (handles, aspect lock, thirds) + rotate_crop / flip_crop
+│     ├─ insight_charts.py  bar rows and offline map painting
+│     ├─ library_filters.py shared filter dialog
+│     ├─ storage_dialog.py  safe/custom/hard reset choices
 │     └─ pages/             base.py + overview, photos, people, duplicates, similar, tidy, organize,
-│                           albums, editor, story, video, health, compare, history
+│                           albums, editor, story, video, health, compare, history, insights
 ├─ tests/                   conftest.py (session library fixtures) + one test_*.py per area (see Testing)
 ├─ tools/                   make_test_library.py, ui_screenshots.py, benchmark.py, make_icon.py
-└─ docs/                    design.html, features.html, technical.html, style.css, images/</code></pre>
+└─ docs/                    index.html, design.html, features.html, technical.html, report.html, style.css, images/</code></pre>
 </section>
 
 <section id="modules">
@@ -145,21 +153,21 @@ signals (<code>library_opened</code>, <code>library_modified</code>, <code>toast
 <h3>Engine</h3>
 <table>
   <tr><th>Module</th><th>Lines</th><th>Responsibility · key API</th></tr>
-  <tr><td><code>config</code></td><td>71</td><td>Extension sets (<code>IMAGE_EXT</code>, <code>RAW_EXT</code>, <code>VIDEO_EXT</code>), junk names, tuning constants, <code>kind_for_ext</code>, <code>app_dir/ensure_app_dir</code> (creates hidden <code>.memoria</code>), <code>recovery_dir</code>, <code>default_export_dir</code>.</td></tr>
-  <tr><td><code>db</code></td><td>362</td><td><code>Library(root)</code>: cross-process lock, versioned schema + migrations, parked rows (<code>park_rows</code>, <code>restore_parked</code>, <code>drop_parked</code>), <code>close_thread</code>; schema creation, thread-local connections (<code>.db</code>, <code>.thumbs_db</code>), <code>files(where, params, order)</code>, <code>file</code>, <code>file_by_rel</code>, <code>set_hashes</code>, <code>thumbnail</code>, <code>stats</code>, <code>remove_rows</code>, <code>transaction()</code>, <code>abspath/rel</code>.</td></tr>
+  <tr><td><code>config</code></td><td>80</td><td>Extension sets (<code>IMAGE_EXT</code>, <code>RAW_EXT</code>, <code>VIDEO_EXT</code>), junk names, tuning constants, <code>kind_for_ext</code>, <code>app_dir/ensure_app_dir</code> (creates hidden <code>.memoria</code>), <code>recovery_dir</code>, <code>default_export_dir</code>.</td></tr>
+  <tr><td><code>db</code></td><td>414</td><td><code>Library(root)</code>: cross-process lock, versioned schema + migrations, parked rows (<code>park_rows</code>, <code>restore_parked</code>, <code>drop_parked</code>), <code>close_thread</code>; schema creation, thread-local connections (<code>.db</code>, <code>.thumbs_db</code>), <code>files(where, params, order)</code>, <code>file</code>, <code>file_by_rel</code>, <code>set_hashes</code>, <code>thumbnail</code>, <code>stats</code>, <code>remove_rows</code>, <code>transaction()</code>, <code>abspath/rel</code>.</td></tr>
   <tr><td><code>progress</code></td><td>69</td><td><code>Progress(callback, cancel_event, interval)</code> — throttled reporting; <code>update()</code>/<code>check()</code> raise <code>Cancelled</code> when the event is set. <code>progress.step(i, n, label)</code> → <code>StepProgress</code> maps a sub-task onto its slice of a 0–1000 scale ("Step 2 of 6 · …").</td></tr>
   <tr><td><code>hashing</code></td><td>49</td><td><code>full_hash(path)</code> xxh3-128 over 1 MiB <code>readinto</code> chunks; <code>quick_hash(path, size)</code> five 64 KiB samples + size (pre-filter only).</td></tr>
   <tr><td><code>media</code></td><td>214</td><td><code>open_oriented</code> (JPEG draft decode, EXIF transpose, RGB), <code>read_exif</code> (date, camera, GPS), <code>date_from_filename</code>, <code>dhash</code>, <code>quality_metrics</code>, <code>thumbnail_bytes</code>, <code>analyze_image</code>, <code>load_for_display</code>, <code>count_faces</code> (OpenCV Haar, thread-local).</td></tr>
   <tr><td><code>ffmpeg</code></td><td>104</td><td><code>ffmpeg_exe()</code> (imageio-ffmpeg), <code>run_ffmpeg</code> (no console window), <code>probe()</code> → <code>VideoInfo</code> (parses <code>ffmpeg -i</code>), <code>video_frame()</code> → JPEG bytes.</td></tr>
-  <tr><td><code>scanner</code></td><td>244</td><td><code>walk_files/walk_dirs</code> (iterative <code>os.scandir</code>, long-path aware, reports unreadable folders), <code>scan</code> (incremental diff; raises <code>LibraryUnavailable</code>; never removes rows under unreadable folders), <code>analyze</code> (parallel, batched commits), <code>index</code>.</td></tr>
-  <tr><td><code>actions</code></td><td>393</td><td><code>Action</code>, <code>BatchResult</code>, <code>apply</code>, <code>record_created</code>, <code>undo</code>, <code>reconcile</code>, <code>batches</code>, <code>operations</code>, <code>verified_copy</code>, <code>safe_move</code>, <code>recovery_size</code>, <code>empty_recovery</code>.</td></tr>
+  <tr><td><code>scanner</code></td><td>273</td><td><code>walk_files/walk_dirs</code> (iterative <code>os.scandir</code>, long-path aware, reports unreadable folders), <code>scan</code> (incremental diff; raises <code>LibraryUnavailable</code>; never removes rows under unreadable folders), <code>analyze</code> (parallel, batched commits), <code>index</code>.</td></tr>
+  <tr><td><code>actions</code></td><td>469</td><td><code>Action</code>, <code>BatchResult</code>, <code>apply</code>, <code>created_batch</code>, <code>record_output</code>, legacy <code>record_created</code>, <code>undo</code>, <code>reconcile</code>, journal queries, verified copy/move and Recovery management.</td></tr>
   <tr><td><code>duplicates</code></td><td>474</td><td><code>confirm_identical</code> (size→quick→full funnel with hash caching), <code>find_all</code> → <code>DuplicateReport</code> (<code>groups</code>, <code>folders</code>, <code>loose_groups</code>), <code>find_duplicate_folders</code> → <code>FolderMatch</code>/<code>FolderInfo</code>, <code>plan_cleanup</code>, <code>keeper_score/keeper_reason</code>, <code>find_duplicates</code> → <code>DuplicateGroup</code>, <code>plan_removal</code>.</td></tr>
-  <tr><td><code>similar</code></td><td>253</td><td><code>similar_pairs</code> (threaded blocked Hamming + burst window), <code>find_similar</code> → <code>SimilarGroup</code>, <code>rank_group</code>, <code>find_blurry</code>, <code>BLUR_PRESETS</code>, <code>plan_recycle</code>.</td></tr>
-  <tr><td><code>organize</code></td><td>121</td><td><code>PATTERNS</code>, <code>plan_organize</code> → <code>OrganizePlan</code>, <code>plan_actions</code>, <code>empty_folders_after</code>.</td></tr>
-  <tr><td><code>tidy</code></td><td>85</td><td><code>CATEGORIES</code>, <code>find_tidy</code> → <code>TidyReport</code>, <code>empty_folders</code>, <code>plan_actions</code>.</td></tr>
-  <tr><td><code>health</code></td><td>104</td><td><code>run_health</code> → <code>HealthReport</code> (fingerprints, damage, decode check), <code>last_checked</code>.</td></tr>
-  <tr><td><code>compare</code></td><td>132</td><td><code>compare(lib, other)</code> → <code>CompareResult</code>, <code>plan_sync</code>.</td></tr>
-  <tr><td><code>videotools</code></td><td>372</td><td><code>CompressSettings</code>, <code>CompressResult</code>, <code>estimate</code>, <code>compress</code>, <code>compress_many</code>, <code>unique_path</code>, <code>publish_file</code>.</td></tr>
+  <tr><td><code>similar</code></td><td>252</td><td><code>similar_pairs</code> (threaded blocked Hamming + burst window), <code>find_similar</code> → <code>SimilarGroup</code>, <code>rank_group</code>, <code>find_blurry</code>, <code>BLUR_PRESETS</code>, <code>plan_recycle</code>.</td></tr>
+  <tr><td><code>organize</code></td><td>126</td><td><code>PATTERNS</code>, <code>plan_organize</code> → <code>OrganizePlan</code>, <code>plan_actions</code>, <code>empty_folders_after</code>.</td></tr>
+  <tr><td><code>tidy</code></td><td>90</td><td><code>CATEGORIES</code>, <code>find_tidy</code> → <code>TidyReport</code>, <code>empty_folders</code>, <code>plan_actions</code>.</td></tr>
+  <tr><td><code>health</code></td><td>108</td><td><code>run_health</code> → <code>HealthReport</code> (fingerprints, damage, decode check), <code>last_checked</code>.</td></tr>
+  <tr><td><code>compare</code></td><td>139</td><td><code>compare(lib, other)</code> → <code>CompareResult</code>, <code>plan_sync</code>.</td></tr>
+  <tr><td><code>videotools</code></td><td>373</td><td><code>CompressSettings</code>, <code>CompressResult</code>, <code>estimate</code>, <code>compress</code>, <code>compress_many</code>, <code>unique_path</code>, <code>publish_file</code>.</td></tr>
   <tr><td><code>videosim</code></td><td>303</td><td><code>find_similar_videos</code> → <code>SimilarGroup</code>; <code>signature</code> (8 frame dHashes), <code>frame_distance</code>, <code>durations_close</code>, <code>rank_group</code>; cached in <code>video_sigs</code>.</td></tr>
   <tr><td><code>batch</code></td><td>40</td><td>Selection actions: <code>plan_recycle</code>, <code>plan_copy_to</code> (verified, flat, no overwrite), <code>plan_move_within</code> (inside the library only).</td></tr>
   <tr><td><code>photoedit</code></td><td>778</td><td><code>PhotoEdit</code> recipe (<code>is_identity</code>, <code>copy</code>), <code>transform</code>, <code>apply</code>, <code>crop_box</code>, <code>crop_for_aspect</code>, <code>save</code>, <code>save_many</code> → <code>SavedFiles</code> (<code>.sources</code>, <code>.failures</code>), <code>split_grid</code>, <code>join</code>, <code>estimate_bytes</code>; <code>FILTERS</code>, <code>ASPECTS</code>, <code>FORMATS</code>.</td></tr>
@@ -167,19 +175,25 @@ signals (<code>library_opened</code>, <code>library_modified</code>, <code>toast
   <tr><td><code>faces</code></td><td>517</td><td><code>available</code>, <code>detect(path)</code> → <code>Face</code> (box, score, 128-d unit signature, JPEG thumb), <code>scan</code> (incremental, parallel, cancellable), <code>group_faces</code>, <code>cluster</code>, <code>groups</code> → <code>Group</code>, <code>faces_of</code>, <code>photos_of</code>, <code>faces_in</code>, <code>similar</code>, <code>names_by_file</code>, <code>status</code>; corrections <code>name</code>, <code>merge</code>, <code>assign</code>, <code>not_this_person</code>, <code>hide</code>, <code>unhide_all</code>, <code>forget_person</code>, <code>forget_all</code>.</td></tr>
   <tr><td><code>albums</code></td><td>313</td><td><code>Suggestion</code>, <code>EventOptions</code>, <code>suggest_events</code>, <code>suggest_places</code>, <code>suggest_people</code>, <code>create</code>, <code>save</code>, <code>albums</code>, <code>items</code>, <code>rename</code>, <code>add</code>, <code>remove</code>, <code>set_cover</code>, <code>delete</code>, <code>cleanup</code>, <code>plan_export</code>, <code>folder_name</code>, <code>date_range</code>.</td></tr>
   <tr><td><code>places</code></td><td>81</td><td><code>nearest(lat, lon)</code> → <code>Place</code> (<code>label</code>, <code>distance_km</code>) from the bundled GeoNames list; <code>distance_km</code>.</td></tr>
-  <tr><td><code>checkup</code></td><td>64</td><td><code>run(lib, progress)</code> → <code>Checkup(results, counts, summary)</code>: index + every read-only finder with step progress.</td></tr>
+  <tr><td><code>checkup</code></td><td>67</td><td><code>run(lib, progress)</code> → <code>Checkup(results, counts, summary)</code>: index + every read-only finder with step progress.</td></tr>
   <tr><td><code>story</code></td><td>623</td><td><code>StyleOptions</code>, <code>TEMPLATES</code>, <code>render_story</code>, <code>render_carousel</code>, <code>export_stories</code>, <code>export_carousel</code>, <code>make_story_video</code>, <code>story_video_duration</code>.</td></tr>
+  <tr><td><code>catalogue</code></td><td>209</td><td>Immutable <code>Filters</code>, parameterised predicates, paged/sorted browsing, distributions, calendar periods, timeline counts, album links and bounded GPS cells.</td></tr>
+  <tr><td><code>geography</code></td><td>30</td><td>Cached public-domain Natural Earth outlines; approximate point-in-polygon India coverage. No online geocoding.</td></tr>
+  <tr><td><code>storage</code></td><td>159</td><td><code>ResetOptions</code>, <code>usage</code>, <code>pending</code>, <code>reset</code>, <code>resume</code>; selective clearing, optional compaction, resumable indexing.</td></tr>
 </table>
 <h3>UI</h3>
 <table>
   <tr><th>Module</th><th>Lines</th><th>Responsibility</th></tr>
-  <tr><td><code>main_window</code></td><td>503</td><td>Sidebar (<code>NAV</code> groups, count badges, theme selector), lazily created pages (<code>page(key)</code>), <code>WelcomePage</code>, task bar (% · elapsed · time left · Cancel), toast, shortcuts, drag &amp; drop, saved geometry; <code>open_library</code> (lock → reconcile → set context → index), <code>run_checkup</code>, <code>open_sample</code> (with progress), <code>undo_last</code>, <code>undo_batch</code>, <code>restore_last</code>.</td></tr>
-  <tr><td><code>theme</code></td><td>200</td><td>Light/dark palettes, <code>use(mode)</code> (system | light | dark), stylesheet builder, <code>qpalette()</code>, <code>badge_colors</code>, <code>settings()</code> (profile via <code>MEMORIA_PROFILE</code>).</td></tr>
+  <tr><td><code>main_window</code></td><td>630</td><td>Sidebar (<code>NAV</code> groups, count badges, theme selector), lazily created pages (<code>page(key)</code>), <code>WelcomePage</code>, task bar (% · elapsed · time left · Cancel), toast, shortcuts, drag &amp; drop, saved geometry; <code>open_library</code> (lock → reconcile → set context → index), <code>run_checkup</code>, <code>open_sample</code> (with progress), <code>undo_last</code>, <code>undo_batch</code>, <code>restore_last</code>.</td></tr>
+  <tr><td><code>theme</code></td><td>193</td><td>Light/dark palettes, <code>use(mode)</code> (system | light | dark), stylesheet builder, <code>qpalette()</code>, <code>badge_colors</code>, <code>settings()</code> (profile via <code>MEMORIA_PROFILE</code>).</td></tr>
   <tr><td><code>tasks</code></td><td>165</td><td><code>TaskRunner.run(title, fn(progress), on_done, on_cancel)</code>; signals <code>started/progressed/finished/error/busy_changed</code>. <code>BackgroundCall</code>: latest-wins read-only computations off the UI thread (page insights).</td></tr>
-  <tr><td><code>widgets</code></td><td>823</td><td>Formatting helpers, <code>friendly_error</code>, layout helpers, <code>Tile/Banner/Card/EmptyState</code>, <code>AppContext</code> (generation counter, cached check-up results, badges), <code>ThumbCache</code> (LRU 4,000 pixmaps), <code>PhotoModel/PhotoDelegate/PhotoGrid</code>, <code>Preview</code> (Open only for media), <code>Viewer</code>, <code>ConfirmDialog</code> (with thumbnail strip), <code>MessageDialog</code>, <code>Toast</code>.</td></tr>
-  <tr><td><code>pages/base</code></td><td>122</td><td><code>Page</code>: header, stale/refresh lifecycle, busy handling, <code>run</code>, <code>apply_actions</code> (the shared Confirm → Apply → Toast/Undo flow).</td></tr>
+  <tr><td><code>widgets</code></td><td>843</td><td>Formatting/layout helpers, tiles/banners/cards, <code>AppContext</code> (generations, cached results, maintenance state, navigation signals), <code>ThumbCache</code> (64 MiB pixel budget and 4,000-entry cap), model/delegate/grid, Preview, Viewer, confirmation/message dialogs and Toast.</td></tr>
+  <tr><td><code>pages/base</code></td><td>129</td><td><code>Page</code>: header, stale/refresh lifecycle, busy handling, <code>run</code>, <code>apply_actions</code> (the shared Confirm → Apply → Toast/Undo flow).</td></tr>
   <tr><td><code>cropcanvas</code></td><td>237</td><td><code>CropCanvas</code>: draws the preview, eight drag handles, rule-of-thirds grid and aspect lock; emits a crop normalised to the transformed image. <code>rotate_crop</code>/<code>flip_crop</code> keep the crop on the same content when rotating or mirroring.</td></tr>
-  <tr><td><code>pages/*</code></td><td>≈3,700</td><td>One per tool. Editor (926), Story (817) and Video (636) render previews off the UI thread.</td></tr>
+  <tr><td><code>pages/*</code></td><td>5655</td><td>One per tool; preview work and Insights aggregates use workers. Photos uses SQL paging rather than full-catalogue Python filtering.</td></tr>
+  <tr><td><code>insight_charts</code></td><td>159</td><td>Accessible bar lists and a QPainter map with bounded markers and wheel zoom.</td></tr>
+  <tr><td><code>library_filters</code></td><td>103</td><td>Shared folder/type/format/date/size/GPS/face/person controls and validation.</td></tr>
+  <tr><td><code>storage_dialog</code></td><td>84</td><td>Safe defaults, selective clearing, hard-reset acknowledgement and low-space resume option.</td></tr>
 </table>
 </section>
 
@@ -188,16 +202,16 @@ signals (<code>library_opened</code>, <code>library_modified</code>, <code>toast
 <p>Each library gets a hidden <code>.memoria</code> folder (Windows <code>FILE_ATTRIBUTE_HIDDEN</code>):</p>
 <table>
   <tr><th>Path</th><th>Contents</th></tr>
-  <tr><td><code>.memoria\memoria.db</code></td><td>Catalogue + journal (SQLite, WAL, <code>synchronous=NORMAL</code>).</td></tr>
-  <tr><td><code>.memoria\thumbs.db</code></td><td>256 px JPEG thumbnails as BLOBs keyed by file id (separate file keeps the catalogue small and fast).</td></tr>
+  <tr><td><code>.memoria\memoria.db</code></td><td>Catalogue + operation/reset journals (WAL, <code>synchronous=FULL</code>).</td></tr>
+  <tr><td><code>.memoria\thumbs.db</code></td><td>256 px file thumbnails and face crops (WAL, <code>synchronous=NORMAL</code>); a separate regenerable cache.</td></tr>
   <tr><td><code>.memoria\recovery\&lt;batch-id&gt;\&lt;relative path&gt;</code></td><td>Files removed by a batch, mirroring their original folders.</td></tr>
   <tr><td><code>.memoria\lock</code></td><td>Cross-process lock (byte-range lock held while the library is open; released by the OS if Memoria crashes).</td></tr>
 </table>
 <h3><code>files</code></h3>
 <table>
   <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
-  <tr><td><code>id</code></td><td>INTEGER PK</td><td>Stable across organise moves (row updated in place).</td></tr>
-  <tr><td><code>rel_path</code></td><td>TEXT UNIQUE NOCASE</td><td>Relative to library root — catalogue is portable between drive letters.</td></tr>
+  <tr><td><code>id</code></td><td>INTEGER PK AUTOINCREMENT</td><td>Stable across moves/Recovery; never reused for a new import. Migration reserves parked/referenced IDs.</td></tr>
+  <tr><td><code>rel_path</code></td><td>TEXT UNIQUE NOCASE</td><td>Relative to one library root. Journal paths are absolute; changing drive letters can still affect old Undo paths.</td></tr>
   <tr><td><code>folder, name, ext, kind</code></td><td>TEXT</td><td><code>kind</code> ∈ image | video | other.</td></tr>
   <tr><td><code>size, mtime</code></td><td>INTEGER, REAL</td><td>Change detection key.</td></tr>
   <tr><td><code>qhash, chash</code></td><td>TEXT</td><td>Cached quick / full content hashes; cleared when size or mtime changes.</td></tr>
@@ -213,7 +227,8 @@ signals (<code>library_opened</code>, <code>library_modified</code>, <code>toast
 <h3>Schema versioning</h3>
 <p><code>PRAGMA user_version</code> records the schema version. The v1 schema is frozen; later changes are numbered
 steps in <code>db.MIGRATIONS</code>, applied in transactions on open. A catalogue with a higher version than the app
-raises <code>LibraryTooNew</code> rather than being misread. Current version: <b>3</b>.</p>
+raises <code>LibraryTooNew</code> rather than being misread. Current version: <b>5</b>. Back up the catalogue before upgrading
+if you need to return to an older application build.</p>
 <table>
   <tr><th>Table</th><th>Since</th><th>Purpose</th></tr>
   <tr><td><code>parked_files</code> (<code>op_id</code>, <code>file_id</code>, <code>data</code> JSON)</td><td>v2</td><td>Catalogue rows of files in Recovery, restored on undo; dropped when Recovery is emptied.</td></tr>
@@ -221,14 +236,16 @@ raises <code>LibraryTooNew</code> rather than being misread. Current version: <b
   <tr><td><code>faces</code> (<code>id</code>, <code>file_id</code>, <code>x y w h</code> as fractions of the upright photo, <code>score</code>, <code>emb</code> 512-byte float32[128], <code>person_id</code>, <code>confirmed</code>, <code>cluster</code>, <code>ignored</code>)</td><td>v3</td><td>One row per face. <code>confirmed</code> = the user put it there; unconfirmed matches are re-decided on every grouping. Face crops (128 px JPEG) live in <code>thumbs.db</code> → <code>face_thumbs</code>.</td></tr>
   <tr><td><code>face_scans</code> (<code>file_id</code>, <code>size</code>, <code>mtime</code>, <code>faces</code>)</td><td>v3</td><td>Which photos were checked; a photo is checked again when its size or mtime changes.</td></tr>
   <tr><td><code>face_rejects</code> (<code>face_id</code>, <code>person_id</code>)</td><td>v3</td><td>"Not this person" corrections.</td></tr>
-  <tr><td><code>albums</code> (<code>id</code>, <code>name</code>, <code>kind</code>, <code>created_at</code>, <code>cover_id</code>) and <code>album_items</code> (<code>album_id</code>, <code>file_id</code>, <code>pos</code>)</td><td>v3</td><td>Albums reference catalogue ids, so they survive moves and Organise; entries of files in Recovery are kept for Undo and dropped once the file is gone for good.</td></tr>
+  <tr><td><code>albums</code> and <code>album_items</code></td><td>v3</td><td>Album names/kinds/covers and ordered file-ID membership. Links survive moves, Recovery and missing-file retention; selected reset can explicitly discard them.</td></tr>
   <tr><td><code>video_sigs</code> (<code>file_id</code>, <code>size</code>, <code>mtime</code>, <code>duration</code>, <code>sig</code>)</td><td>created by <code>videosim</code></td><td>Cached frame signatures; valid only while size and mtime match.</td></tr>
+  <tr><td><code>missing_files</code> (<code>file_id</code>, <code>rel_path</code>, <code>data</code> JSON)</td><td>v4</td><td>Absent-file snapshots retained across rescans and restored with the same identity when the path returns.</td></tr>
+  <tr><td><code>storage_reset</code> (<code>id=1</code>, <code>options</code>, <code>phase</code>, <code>forgotten</code>)</td><td>v5</td><td>Pending selective reset; removed only after rebuilding finishes.</td></tr>
 </table>
 <h3><code>batches</code> and <code>operations</code> (journal)</h3>
 <table>
   <tr><th>Table</th><th>Columns</th></tr>
-  <tr><td><code>batches</code></td><td><code>id</code> (YYYYMMDD-HHMMSS-xxxxxx), <code>created_at</code>, <code>kind</code> (duplicates | similar | tidy | organize | sync), <code>title</code>, <code>status</code> (applying | applied | partial | undone | emptied | nothing), <code>files</code>, <code>bytes</code></td></tr>
-  <tr><td><code>operations</code></td><td><code>batch_id</code>, <code>seq</code>, <code>op</code> (recycle | move | copy | rmdir), <code>src</code>, <code>dst</code>, <code>size</code>, <code>hash</code>, <code>reason</code>, <code>status</code> (pending | done | failed | skipped | undone | purged), <code>error</code></td></tr>
+  <tr><td><code>batches</code></td><td><code>id</code> (YYYYMMDD-HHMMSS-xxxxxx), <code>created_at</code>, <code>kind</code> (duplicates | similar | tidy | organize | sync | batch | edit | albums | story | video), <code>title</code>, <code>status</code> (applying | applied | partial | undone | emptied | nothing), <code>files</code>, <code>bytes</code></td></tr>
+  <tr><td><code>operations</code></td><td><code>batch_id</code>, <code>seq</code>, <code>op</code> (recycle | move | copy | rmdir | create), <code>src</code>, <code>dst</code>, <code>size</code>, <code>hash</code>, <code>reason</code>, <code>status</code> (pending | done | failed | skipped | undone | purged), <code>error</code></td></tr>
 </table>
 </section>
 
@@ -240,9 +257,11 @@ raises <code>LibraryTooNew</code> rather than being misread. Current version: <b
   <li><b>Walk</b> with an explicit stack over <code>os.scandir</code>, skipping <code>.memoria</code>, <code>$RECYCLE.BIN</code>,
       <code>System Volume Information</code>; never follows links.</li>
   <li><b>Diff</b> against the catalogue by lower-cased relative path: new rows inserted; rows whose size or mtime changed have
-      derived columns reset (<code>analyzed=0</code>); missing rows removed (with their thumbnails). One transaction.</li>
+      derived columns reset (<code>analyzed=0</code>); genuinely missing rows move to <code>missing_files</code> without
+      deleting thumbnails. Failed file stats retain entries. Returning paths restore identities before updates.</li>
   <li><b>Analyse</b> un-analysed media in a <code>ThreadPoolExecutor</code> (images: <code>WORKERS</code> threads; videos: a
-      smaller pool). Per image: open → <code>draft()</code> JPEG decode near 512 px → EXIF → transpose → resize to
+      smaller pool), with at most <code>2 × (image workers + video workers)</code> submitted jobs. Per image:
+      open → <code>draft()</code> JPEG decode near 512 px → EXIF → transpose → resize to
       <b>exactly</b> 512 px on the long side → dHash, Laplacian-variance sharpness, brightness, contrast, clipped share →
       256 px thumbnail. Per video: <code>probe</code> + one frame at min(1 s, duration/2).</li>
   <li><b>Date resolution:</b> EXIF <code>DateTimeOriginal</code> → <code>DateTimeDigitized</code> → <code>DateTime</code> →
@@ -304,6 +323,8 @@ hash) verified once per batch.</p>
 </ol>
 <p><b>Blurry:</b> <code>sharpness &lt; threshold</code> with presets strict 8 / normal 20 / lenient 45 (variance of the
 Laplacian at 512 px).</p>
+<p>Matching pairs are streamed without retaining a Python set of every edge; the burst pass checks whether a pair was
+already covered by its distance. Pair comparison remains quadratic, and dense block outputs can still be large.</p>
 
 <h3 id="p-org">Organise (<code>organize.plan_organize</code>)</h3>
 <p>Eligible rows: media with a date, no error, size &gt; 0, not AppleDouble. Rows dated only by <code>modified</code> are
@@ -322,12 +343,15 @@ removed, so folders containing only junk qualify. Plans recycle files first, the
 full hash and, for images, a reduced-size decode. Classification against the stored fingerprint: none → <i>new</i>;
 size+mtime equal and hash equal → <i>ok</i>, hash differs → <i>damaged</i>; size or mtime differ → <i>edited</i>; decode
 failure → <i>unreadable</i>. Fingerprints are refreshed except for damaged files, which stay flagged.</p>
+<p>Missing-file results come from durable <code>missing_files</code>, not just the current scan's removal count.
+The <i>edited</i> label is a size/mtime heuristic, not evidence that a change was intentional.</p>
 
 <h3 id="p-compare">Compare &amp; sync (<code>compare</code>)</h3>
 <p>Refuses overlapping folders. Lists the other folder without writing to it, then hashes only files whose size occurs on
 both sides (library hashes cached, other side hashed in memory). Results: only-here, only-there, in-both counts.
 <code>plan_sync</code> emits <code>copy</code> actions preserving relative paths; the executor's verified copy never
-overwrites (clashes get a new name).</p>
+overwrites (clashes get a new name). Traversal/stat/required-hash failures abort comparison explicitly instead of
+returning a misleading empty or incomplete backup inventory.</p>
 
 <h3 id="p-video">Video compression (<code>videotools</code>)</h3>
 <ul>
@@ -389,8 +413,8 @@ exactly the same pre-flight checks, journal, verified copies and undo as every o
 <h2>Editor (<code>photoedit</code>, <code>videoedit</code>)</h2>
 <p>Each file in the Editor has its own <i>recipe</i> (<code>PhotoEdit</code> or <code>VideoEdit</code>), a plain dataclass.
 Nothing touches the source until <b>Save</b>; outputs are always new files named <code>"name (edited).ext"</code> (made unique,
-never overwriting) and are recorded with <code>actions.record_created</code>, so History lists them and Undo removes them
-only if they are unchanged.</p>
+never overwriting). Workers open <code>actions.created_batch</code>; shared publication persists each fingerprint and
+pending record before renaming. Completed items remain in History if a later item is cancelled. Undo requires a matching recorded hash.</p>
 <h3>Photo pipeline</h3>
 <pre><code>open (EXIF-oriented) → rotate 90° steps → flip H/V → straighten (rotate + largest inner crop, no empty corners)
 → crop (normalised box on the transformed image) → auto enhance (autocontrast, 0.5 % cut-off)
@@ -409,7 +433,8 @@ vertically, scaled to a common height/width and capped at <code>MAX_JOIN_SIDE</c
 <p>Cuts are frame-accurate because every export re-encodes. Display-rotated sources are baked upright, and any output
 that still carries a rotation flag is rejected. <code>split</code> exports consecutive ranges; <code>join</code> normalises
 every clip to the first one's size (letterboxed), 30 fps and AAC, adding silence for clips without audio. Each output's
-duration is checked against <code>output_duration</code>; cancelled or failed exports leave nothing behind.</p>
+duration is checked against <code>output_duration</code>. Incomplete work files are cleaned up; completed outputs in a
+batch may remain and are recorded by the publication journal.</p>
 </section>
 
 <section id="p-people">
@@ -426,7 +451,7 @@ duration is checked against <code>output_duration</code>; cancelled or failed ex
   <li><b>Scan:</b> photos whose (size, mtime) differ from <code>face_scans</code> are processed in chunks of 48 on a thread
       pool with <code>cv2.setNumThreads(1)</code> (parallel across photos rather than inside each model); each chunk is
       committed, so cancelling keeps finished work. Faces of files gone for good are removed; files in Recovery keep
-      theirs for Undo.</li>
+      theirs for Undo, and missing records retain theirs until explicitly forgotten.</li>
   <li><b>Grouping (<code>cluster</code>):</b> unconfirmed matches are cleared; each free face joins the named person whose
       confirmed-face centre is most similar (cosine ≥ <code>SAME_PERSON</code> = 0.42) unless a reject exists; the rest go
       through <code>group_faces</code>: a leader pass in order of detection quality, merge rounds of group centres (best pairs
@@ -460,7 +485,7 @@ takes ≈1 ms.</p>
 </section>
 
 <section id="integrity">
-<h2>Catalogue integrity (1.1)</h2>
+<h2>Catalogue integrity</h2>
 <table>
   <tr><th>Risk</th><th>Mechanism</th><th>Test</th></tr>
   <tr><td>Unplugged drive / unreadable folder wipes catalogue rows and health fingerprints</td><td><code>scan</code> raises
@@ -477,12 +502,17 @@ takes ≈1 ms.</p>
   <tr><td>Paths longer than 260 characters</td><td><code>config.longpath</code> adds <code>\\?\</code> for scandir, open,
     stat, rename, copy, remove and rmdir.</td><td><code>test_paths_longer_than_260_characters</code></td></tr>
   <tr><td>Non-media files launched from a preview</td><td><code>Preview</code> enables Open only for images and videos.</td><td>UI smoke test</td></tr>
+  <tr><td>Recycled ID reused by a new import</td><td>AUTOINCREMENT and migration sequence reservation.</td><td><code>test_recycle_import_undo_preserves_album_identity</code></td></tr>
+  <tr><td>Undo deletes an edited/unverified copy</td><td>Fingerprint stored before copying; mismatches and NULL legacy fingerprints refused.</td><td><code>test_copy_undo_rejects_modified_and_legacy_unverified_outputs</code></td></tr>
+  <tr><td>Missing files vanish from health results</td><td>Persistent missing snapshots and return detection.</td><td><code>test_missing_survives_rescan_and_return_preserves_fingerprint</code></td></tr>
+  <tr><td>Reset killed or storage full</td><td>Atomic clearing and durable, idempotent resume phases.</td><td><code>test_storage.py</code></td></tr>
 </table>
 </section>
 
 <section id="executor">
 <h2>Action executor &amp; journal</h2>
-<p><code>actions.apply(lib, kind, title, actions, progress)</code> is the only code path that changes user files.</p>
+<p><code>actions.apply(lib, kind, title, actions, progress)</code> executes reviewed move/copy/recycle plans.
+Generated outputs use the companion publication journal.</p>
 <pre><code>for each Action (in order):
     preflight ── guards (keeper exists + full hash, verified once per batch)
               ── src exists / folder empty (rmdir)
@@ -495,23 +525,62 @@ takes ≈1 ms.</p>
     perform: recycle/move → safe_move (rename on same volume; else verified copy + remove)
              copy         → verified_copy (tmp → hash compare → rename)
              rmdir        → os.rmdir (only if empty)
-    journal 'done' | 'failed' + error
-update catalogue (park recycled rows; rewrite moved rel_paths); batch status = applied | partial | nothing</code></pre>
+    update catalogue for this operation (park recycle; rewrite moved paths)
+    journal 'done' | 'failed' + error (completed moves awaiting catalogue repair remain pending)
+batch status = applied | partial | nothing</code></pre>
 <h3>Undo</h3>
 <p>Processes <code>done</code> operations in reverse. Moves are reversed with <code>safe_move</code>; if the original path is
-taken the file is restored as a unique name and reported. Copies — and files created by the Editor (<code>op="create"</code>,
-written by <code>record_created</code>) — are removed only if their full hash still equals the recorded hash, and their
+taken the file is restored as a unique name and reported. Copies and published outputs (<code>op="create"</code>)
+are removed only if a recorded full hash exists and still matches; their
 catalogue rows are dropped. <code>rmdir</code> is reversed with <code>mkdir</code>. The batch becomes <code>undone</code> or
 <code>partial</code>; empty recovery sub-folders are pruned. The UI re-indexes afterwards.</p>
 <h3>Crash reconciliation</h3>
-<p><code>reconcile(lib)</code> runs whenever a library is opened. For each <code>pending</code> operation it inspects the
-disk: a move/recycle is <code>done</code> if the destination exists and the source does not; a copy is <code>done</code> if
-the destination hash matches (stray <code>.memoria-tmp</code> files are removed); otherwise <code>failed</code>. Batches left in
-<code>applying</code> become <code>partial</code> — and therefore undoable.</p>
+<p><code>reconcile(lib)</code> inspects pending operations and done operations in interrupted applying batches.
+Move/recycle completion requires the destination to exist and source to be absent; copy/create completion requires
+the recorded destination hash to match. Catalogue parking/moved paths and batch totals are reconciled too.
+Stray copy <code>.memoria-tmp</code> files are removed. Applying batches become partial. This does not repair
+arbitrary disk or SQLite corruption.</p>
 <h3>Recovery</h3>
 <p><code>recovery_size</code> walks the folder; <code>empty_recovery(lib, batch_ids=None)</code> deletes batch folders, marks
-their recycle operations <code>purged</code> and batches <code>emptied</code>. This is the only deleting function in the
-codebase.</p>
+their recycle operations <code>purged</code> and batches <code>emptied</code> after successful removal. Errors propagate
+and preserve remaining recovery records. Undo and exporter rollback can separately delete generated copies.</p>
+</section>
+
+<section id="p-insights">
+<h2>Catalogue queries and offline maps</h2>
+<p><code>catalogue.Filters</code> is shared by Photos, Insights and chart navigation. Values are SQL parameters; sort
+expressions come from a fixed whitelist. Folder matching has a separator boundary, so <code>Trip</code> does not match
+<code>Trip2</code>. Person/face predicates use EXISTS, preventing duplicate rows for multiple faces in a file.</p>
+<ul>
+  <li><code>page</code> returns at most 500 rows plus matching count/bytes. Sorting has path/ID tie-breakers. Ctrl+A
+      and batch actions are page-scoped.</li>
+  <li>Storage aggregates exact indexed folders, then rolls up immediate children once per file; format counts use SQL GROUP BY.</li>
+  <li>Calendar periods use inclusive starts/exclusive ends, including leap days. Inclusive UI range endpoints convert
+      to an exclusive next day. Album links count only matching members.</li>
+  <li>GPS must be in legal latitude/longitude ranges. Auto uses approximate Natural Earth India polygons, otherwise
+      the world. A 64×40 grid (up to 65×41 endpoint bins) bounds marker/list rows; each marker carries actual coordinate
+      minima/maxima for exact browse-through filtering.</li>
+  <li><code>geography.countries</code> caches 177 public-domain country outlines. QPainter draws locally; no WebEngine,
+      online tiles or new runtime dependency is used.</li>
+  <li>Insights coalesces rapid requests, rejects stale generation/filter results and closes worker connections.
+      Accessible bar/location lists complement map clicks and wheel zoom.</li>
+</ul>
+</section>
+
+<section id="p-reset">
+<h2>Selective storage reset</h2>
+<p><code>storage.reset</code> validates selections/free space, reconciles file operations, then clears selected catalogue
+fields and records <code>storage_reset</code> in one transaction. Parked/missing JSON snapshots receive the same selected
+field clearing, so Undo cannot resurrect deliberately discarded health/analysis data.</p>
+<pre><code>atomic selected-data clear + pending marker
+    → caches (thumbnail database transaction; safe to retry)
+    → compact (optional VACUUM + WAL checkpoint; can be skipped)
+    → rebuild (incremental scanner.index; committed analysis retained)
+    → remove pending marker</code></pre>
+<p>Compaction conservatively requires twice the larger database's page allocation plus 16 MiB free, allowing for a
+temporary database and WAL. Personal metadata clearing is not undoable. Reset retains file IDs, operations/batches,
+media, exports and Recovery. Maintenance state gates other library actions until completion; page-local caches and
+selections are discarded. Reset does not delete <code>.memoria</code> or recover an unreadable SQLite database.</p>
 </section>
 
 <section id="ui">
@@ -524,7 +593,7 @@ codebase.</p>
       → <code>library_modified</code> → toast with Undo (batch id) → failure dialog if needed.</li>
   <li><b>PhotoGrid:</b> <code>QListView</code> (icon mode, uniform sizes, batched layout) + <code>PhotoModel</code> holding plain
       dicts + <code>PhotoDelegate</code> custom painting (rounded thumbnail, badge, tick box, video tag, captions). Thumbnails
-      load on demand through <code>ThumbCache</code> (SQLite BLOB → <code>QPixmap</code>, LRU).</li>
+      load on demand through a byte-budgeted <code>ThumbCache</code>, invalidated on library changes. Photos loads at most 500 rows.</li>
   <li><b>Preview:</b> full image decoded at 900 px via <code>media.load_for_display</code> (draft decode keeps it fast).</li>
   <li><b>Styling:</b> one Qt stylesheet (<code>theme.QSS</code>) using object names (<code>primary</code>, <code>danger</code>,
       <code>card</code>, <code>tile</code>, <code>trust</code>…); Fusion style for consistent rendering.</li>
@@ -533,7 +602,7 @@ codebase.</p>
       window and reopens the same library and page (no stale colours). "Match Windows" follows
       <code>styleHints().colorSchemeChanged</code>.</li>
   <li><b>Insights:</b> Overview computes card texts with <code>BackgroundCall</code> (own SQLite connection, closed with
-      <code>close_thread</code>), showing "Updating…".</li>
+      <code>close_thread</code>), showing "Updating…". Library insights uses its own coalesced worker queries.</li>
   <li><b>Persistence:</b> <code>theme.settings()</code> → <code>QSettings("Memoria", profile)</code> stores theme, window
       geometry, last library and page, recent libraries. Tests and tools set <code>MEMORIA_PROFILE</code> so they never touch
       the user's settings.</li>
@@ -544,10 +613,10 @@ codebase.</p>
 <h2>Concurrency model</h2>
 <table>
   <tr><th>Thread</th><th>Does</th><th>Rules</th></tr>
-  <tr><td>Qt main thread</td><td>UI, cheap catalogue reads in <code>refresh()</code>, thumbnail BLOB reads</td><td>Never runs long work.</td></tr>
-  <tr><td>TaskRunner worker (QThread)</td><td>One engine call at a time; all catalogue writes except schema creation and journal reconciliation when a library is opened</td><td>Single task enforces "no two file operations at once".</td></tr>
+  <tr><td>Qt main thread</td><td>UI, bounded catalogue reads, thumbnails and current-photo preview decode</td><td>Avoid unbounded work; slow media/drives can still delay a preview.</td></tr>
+  <tr><td>TaskRunner worker (QThread)</td><td>One long operation at a time; small album/person edits and initial migration/reconciliation can still run on the main thread.</td><td>Serialises normal file-operation tasks.</td></tr>
   <tr><td>Engine thread pools</td><td>Decode/analyse, hash, faces, similarity blocks, health reads</td><td>Pure functions; results returned to the worker which writes to SQLite.</td></tr>
-  <tr><td>BackgroundCall threads</td><td>Read-only page insights (Overview)</td><td>Latest call wins; connections closed per thread.</td></tr>
+  <tr><td>BackgroundCall threads</td><td>Read-only page insights (Overview and Library insights)</td><td>Latest valid result wins; Insights coalesces requests; connections closed per thread.</td></tr>
   <tr><td>Story preview thread</td><td>Debounced (250 ms) preview rendering at half size</td><td>Latest request wins; never touches the runner.</td></tr>
   <tr><td>Video probe thread</td><td>Probes ticked videos lazily for estimates</td><td>Cached by path.</td></tr>
   <tr><td>Story-video writer thread</td><td>Pipes frames to FFmpeg while the next frame renders</td><td>Bounded queue (4).</td></tr>
@@ -560,7 +629,8 @@ operations and record the batch as partial.</p>
 
 <section id="performance">
 <h2>Performance</h2>
-<p>Measured with <code>tools\benchmark.py --photos 1000</code> (1,050 files: 6 MP JPEGs + 5% copies, 1.02 GB) on a 32-core
+<p><b>Historical measurements, not rerun for this source update.</b> Measured with <code>tools\benchmark.py --photos 1000</code>
+(1,050 files: 6 MP JPEGs + 5% copies, 1.02 GB) on a 32-core
 Windows machine with an SSD. Expect lower absolute numbers on laptops.</p>
 <table>
   <tr><th>Stage</th><th>Time</th><th>Throughput / note</th></tr>
@@ -579,11 +649,14 @@ Windows machine with an SSD. Expect lower absolute numbers on laptops.</p>
 <h3>Techniques</h3>
 <ul>
   <li>JPEG DCT-domain downscaling via <code>Image.draft</code>; Pillow, NumPy and xxhash release the GIL so threads scale.</li>
-  <li>Batched transactions (200 rows), WAL, <code>synchronous=NORMAL</code>, 32 MB page cache, separate thumbnail DB.</li>
+  <li>Batched transactions (200 rows), WAL, FULL catalogue durability and NORMAL cache durability;
+      32 MiB page cache per connection, separate thumbnail DB.</li>
   <li>Size-first duplicate funnel and cached hashes; compare hashes only cross-side size collisions.</li>
-  <li>Tiled, threaded <code>bitwise_count</code> similarity with bounded memory; O(n log n) burst detection.</li>
-  <li>Grid renders only visible cells; pixmaps cached LRU.</li>
+  <li>Tiled similarity remains O(n²); dense block results can be large. The burst window can also be quadratic when many timestamps coincide.</li>
+  <li>Photos uses 500-row pages; thumbnail pixels have a 64 MiB cache budget plus Qt overhead. Other pages can still load whole groups.</li>
 </ul>
+<p>The current <a href="report.html">report</a> uses small generated media and synthetic 10,000-entry catalogues
+representing 300 GB. It does not establish real-drive throughput at that size. Face-centre merging remains a dense-matrix scaling limit.</p>
 </section>
 
 <section id="config">
@@ -599,28 +672,36 @@ Windows machine with an SSD. Expect lower absolute numbers on laptops.</p>
   <tr><td><code>QUALITY_CRF</code></td><td>high 20 · balanced 24 · small 28</td><td>videotools</td></tr>
   <tr><td><code>MIN_VIDEO_KBPS</code> / payload share / SSIM frames</td><td>150 / 97% / 600</td><td>videotools</td></tr>
   <tr><td>Story <code>LOAD_SIDE</code> / JPEG quality / Ken Burns zoom</td><td>2,200 px / 92 / 8%</td><td>story</td></tr>
-  <tr><td>ThumbCache capacity</td><td>4,000 pixmaps</td><td>widgets</td></tr>
+  <tr><td>ThumbCache capacity</td><td>64 MiB pixel bytes and at most 4,000 entries</td><td>widgets</td></tr>
+  <tr><td><code>PAGE_SIZE</code></td><td>500 files</td><td>catalogue</td></tr>
+  <tr><td>Map grid</td><td>64 × 40 cells, plus endpoint bins</td><td>catalogue.map_data</td></tr>
   <tr><td>Toast duration</td><td>10 s (6 s for informational)</td><td>widgets / main_window</td></tr>
 </table>
 </section>
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>141 tests</b>, ≈2.5 min: <code>.\.venv\Scripts\python -m pytest -q</code></p>
+<p><b>175 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. See the generated
+<a href="report.html">quality report</a> for current outcomes and timings.</p>
 <table>
   <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
-  <tr><td><code>test_engine.py</code></td><td>27</td><td>Hash pre-filter semantics; incremental scan; counts, errors, dates and date sources; EXIF rotation; HEIC and video analysis; duplicate groups vs ground truth incl. the &gt;1.28 MB regression; removal + undo restores an identical tree; changed keeper/copy are skipped; user keeper override/exclusion; bursts and best frame; near-duplicates prefer original; exact copies and screenshots excluded from Similar; blur detection; organise plan/apply/undo and uncertain dates; tidy categories and apply/undo (folders recreated); health baseline, bit-flip damage, edit detection; compare read-only + two-way sync + undo; overlapping folder rejection; verified copy failure leaves nothing; never overwrites; crash reconciliation; cancellation; Empty Recovery.</td></tr>
+  <tr><td><code>test_engine.py</code></td><td>29</td><td>Hash pre-filter semantics; incremental scan; counts, errors, dates and date sources; EXIF rotation; HEIC and video analysis; duplicate groups vs ground truth incl. the &gt;1.28 MB regression; removal + undo restores an identical tree; changed keeper/copy are skipped; user keeper override/exclusion; bursts and best frame; near-duplicates prefer original; exact copies and screenshots excluded from Similar; blur detection; organise plan/apply/undo and uncertain dates; tidy categories and apply/undo (folders recreated); health baseline, bit-flip damage, edit detection; compare read-only + two-way sync + undo; overlapping folder rejection; verified copy failure leaves nothing; never overwrites; crash reconciliation; cancellation; Empty Recovery.</td></tr>
   <tr><td><code>test_video.py</code> + <code>test_story.py</code></td><td>37</td><td>Compression shrinks and verifies, sources untouched, no overwrite, target mode within tolerance, cancellation cleans up; story sizes, every template, panorama seams, EXIF-rotated input, story-video duration and resolution.</td></tr>
-  <tr><td><code>test_safety.py</code></td><td>11</td><td>Unplugged drive, unreadable folder, real deletions still removed, undo keeps ids/thumbnails/fingerprints, organise undo keeps ids, Empty Recovery drops parked rows, cross-process lock, re-entrant lock released on close, schema migration from v1, refusal of newer catalogues, paths over 260 characters.</td></tr>
+  <tr><td><code>test_safety.py</code></td><td>21</td><td>Unplugged drive, unreadable folder, real deletions still removed, undo keeps ids/thumbnails/fingerprints, organise undo keeps ids, Empty Recovery drops parked rows, cross-process lock, re-entrant lock released on close, schema migration from v1, refusal of newer catalogues, paths over 260 characters.</td></tr>
   <tr><td><code>test_videosim.py</code></td><td>7</td><td>Similar-video groups and best pick vs ground truth, identical copies excluded, signature cache and invalidation, cancellation, recycle/undo round trip.</td></tr>
-  <tr><td><code>test_faces.py</code></td><td>8</td><td>Grouping unit test; scan finds exactly the expected people (no faces in landscapes, none in the faceless portrait, photos unchanged, re-run checks nothing); changed photos are re-scanned and deleted ones forgotten; naming, renaming, joining by name, "not this person" and re-assigning survive regrouping; look-alike search ranks the person first; a recycled photo keeps its faces through Undo; hide/unhide and forget-all; models load from a non-ASCII path.</td></tr>
+  <tr><td><code>test_faces.py</code></td><td>8</td><td>Expected people/negative examples, incremental scanning, changed-photo rescans and missing-photo metadata retention; naming, merging and corrections; look-alike ranking; Recovery/Undo preserves faces; hide/unhide, forget-all and non-ASCII model paths.</td></tr>
   <tr><td><code>test_albums.py</code></td><td>7</td><td>Offline place names and distances; date-range wording; event albums (three-day trip kept together, no screenshots or duplicate copies, time-ordered; splits without trip logic); place and people albums; album edits never touch files; export into folders with byte-identical copies, no overwrite, undo, refusal inside <code>.memoria</code>; Windows-safe folder names.</td></tr>
   <tr><td><code>test_dupfolders.py</code></td><td>6</td><td>Nested copies reported once at the top folder, contained folders, renamed copies, junk ignored, folder stats (counts and sizes), originals preferred as containers, remaining file groups, keeper override, folder clean-up + undo restores the exact tree, a changed kept copy or a new file keeps the folder, no remaining copy → not planned, ground truth on the sample library.</td></tr>
   <tr><td><code>test_photoedit.py</code></td><td>20</td><td>Identity recipe, exact rotate/flip pixel mapping, pixel-exact crops and aspect boxes, straighten leaves no empty corners, adjustments move the right way, filters, resize never upscales, EXIF date kept + Orientation reset + GPS stripped, formats/quality, PNG alpha, HEIC → JPEG, split tiles reassemble exactly, join sizes and cap, size estimate, partial failures, cancellation leaves nothing.</td></tr>
   <tr><td><code>test_videoedit.py</code></td><td>12</td><td>Rotated sources baked upright, recipe planning, trim without overwrite, default output folder, speed changes duration and keeps audio, rotate/crop/mute/max height, fast filtered preview frames, split points, join landscape + portrait, frame extraction, cancelled export/split leave nothing.</td></tr>
   <tr><td><code>test_batch.py</code></td><td>5</td><td>Copy to folder (verified, no overwrite, undo), move within library (rows follow, undo), refusals, batch recycle/undo, Check everything is read-only and matches ground truth with step progress.</td></tr>
-  <tr><td><code>test_ui_smoke.py</code></td><td>1</td><td>Drives the real window offscreen: Check everything, every page (find, preview, viewer, plan, health, compare, story preview, video compress, similar videos), a batch move to Recovery undone with Ctrl+Z, a duplicate removal undone from History, an edited photo
-    (crop + adjustments) and an edited video (trim + contrast) saved from the Editor and undone, then rebuilds the window in the dark theme; asserts no UI exceptions, all changes undone, empty Recovery and no parked rows.</td></tr>
+  <tr><td><code>test_ui_smoke.py</code></td><td>4</td><td>Drives the real window offscreen: Check everything, every page (find, preview, viewer, plan, health, compare, story preview, video compress, similar videos), a batch move to Recovery undone with Ctrl+Z, a duplicate removal undone from History, an edited photo
+    (crop + adjustments) and an edited video (trim + contrast) saved and undone; light/dark screenshots, reset UI,
+    thumbnail budgets/invalidation, single selection and opt-in cleanup.</td></tr>
+  <tr><td><code>test_storage.py</code></td><td>13</td><td>Selective clearing, media/history preservation, transaction rollback,
+    process termination, cancellation/resume, changed media, low-space and compaction recovery.</td></tr>
+  <tr><td><code>test_insights.py</code></td><td>6</td><td>Folder/type totals, literal search, combined filters, leap dates,
+    saved-album links, India/world switching, bounded 10,000-row paging, mouse clicks and wheel zoom in both themes.</td></tr>
 </table>
 <h3>Ground-truth library</h3>
 <p><code>memoria/samplelib.py</code> deterministically generates procedural landscape photos (sky gradient, sun, ridges,
@@ -637,6 +718,7 @@ handle, recording expectations in <code>expected.json</code> (<code>duplicate_gr
 .\.venv\Scripts\python tools\benchmark.py [WORK_DIR] --photos 1000
 .\.venv\Scripts\python tools\make_icon.py
 .\.venv\Scripts\python tools\make_reports.py [--no-bench]      # docs\report.html
+.\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + current UI screenshots
 .\tools\verify_build.ps1                                       # check the packaged app</code></pre>
 </section>
 
@@ -649,7 +731,9 @@ handle, recording expectations in <code>expected.json</code> (<code>duplicate_gr
   <tr><td>Standalone app</td><td><code>.\build.ps1</code> → <code>dist\Memoria\Memoria.exe</code> (PyInstaller one-folder, windowed, ≈340 MB incl. 39 MB of face models)</td></tr>
   <tr><td>Verify the build</td><td><code>.\tools\verify_build.ps1</code> — runs the real exe on a generated library and checks the catalogue it produced</td></tr>
 </table>
-<p><code>build.ps1</code> regenerates the icon, bundles <code>memoria/ui/assets</code>, collects the imageio-ffmpeg binary and
+<p>The package sizes and build-verification results below are historical. The current source has not been rebuilt as a
+standalone executable; run build and verification before distributing it.</p>
+<p><code>build.ps1</code> regenerates the icon, bundles UI assets and engine data (including map outlines), collects the imageio-ffmpeg binary and
 OpenCV data (Haar cascades), and excludes unused Qt modules (WebEngine, QML/Quick, 3D, Multimedia, PDF) plus tkinter and
 pytest. After building it removes parts the app never loads — OpenCV's VideoCapture FFmpeg DLL, Qt's software OpenGL
 fallback, Qt Quick/QML/PDF libraries and their plugins, translations, and unused Haar cascades (420 → 338 MB) — and
@@ -674,8 +758,9 @@ plugin was also checked to start.</p>
       <code>self.apply_actions(kind, title, actions, summary=…, details=…, confirm_text=…, note=recovery_note(), done_message=…)</code>.</li>
   <li>Register the page in <code>main_window.NAV</code> and <code>page_classes</code>, add a card to Overview, and extend
       <code>tools/ui_screenshots.py</code> so the smoke test drives it.</li>
-  <li>Tools that <i>create</i> new files (like the Editor) write them with a unique name and then call
-      <code>actions.record_created(lib, kind, title, [(src, dst), …])</code> so they appear in History and can be undone.</li>
+  <li>Tools that create files must wrap work in <code>actions.created_batch</code> and publish through
+      <code>videotools.publish_file</code>. <code>record_output</code> persists intent and a fingerprint before publication;
+      do not wait until a whole batch finishes to journal outputs.</li>
 </ol>
 <h3>Rules for contributors</h3>
 <ul>
@@ -701,6 +786,8 @@ plugin was also checked to start.</p>
   <tr><td>YuNet face detector (OpenCV Zoo)</td><td>finding faces</td><td>MIT (<code>engine/data/LICENSE-yunet.txt</code>)</td></tr>
   <tr><td>SFace face recogniser (OpenCV Zoo)</td><td>face signatures</td><td>Apache-2.0 (<code>engine/data/LICENSE-sface.txt</code>)</td></tr>
   <tr><td>GeoNames cities15000</td><td>offline place names</td><td>CC BY 4.0 — attribution in the data file header and docs</td></tr>
+  <tr><td>Natural Earth 1:110m countries</td><td>Offline India/world outlines</td><td>Public domain; source and transformation
+    documented in <a href="../memoria/engine/data/world-map-CREDITS.txt">world-map-CREDITS.txt</a>.</td></tr>
   <tr><td>Test portraits</td><td>People tests / sample library</td><td>Public domain (Wikimedia Commons; see <code>sample_faces/CREDITS.txt</code>)</td></tr>
   <tr><td>pytest, PyInstaller</td><td>tests, packaging</td><td>MIT; GPL-2.0 with bootloader exception</td></tr>
 </table>
@@ -727,8 +814,8 @@ LGPL (Qt, libheif) and GPL (FFmpeg/x264) binaries — include the licence texts 
 <h2>Known limitations</h2>
 <ul>
   <li>Blur thresholds and best-shot weights were calibrated on generated images; real libraries may need tuning.</li>
-  <li>Some pages load the full catalogue into memory on refresh (fine to tens of thousands of files; very large libraries may
-      need pagination).</li>
+  <li>Photos is paged, but several analysis/album pages can still load whole groups. Similarity and face-centre merging
+      remain quadratic/dense in their worst cases; preview decoding still runs on the UI thread.</li>
   <li>RAW previews depend on what Pillow can decode; RAW files are still catalogued and de-duplicated.</li>
   <li>Network shares are untested; cross-volume moves fall back to verified copy + delete.</li>
   <li>The packaged app is unsigned (SmartScreen will warn) and ≈340 MB.</li>
@@ -738,6 +825,9 @@ LGPL (Qt, libheif) and GPL (FFmpeg/x264) binaries — include the licence texts 
       person decades apart, or young children, may form separate groups (join them by name).</li>
   <li>Place names are the nearest town with 15,000+ people (or the region); small villages are not named.</li>
   <li>Similar-video matching relies on visual frames; videos with near-identical static content can score close to the threshold.</li>
+  <li>One root per library; multi-folder/offline-drive catalogues remain deferred. Absolute journal paths can complicate Undo after drive-letter changes.</li>
+  <li>Natural Earth boundaries are approximate; map coverage is not authoritative country classification and has no street-level tiles.</li>
+  <li>Reset resumes supported interrupted work but cannot repair physical drive damage or unreadable SQLite storage. Keep backups.</li>
 </ul>
 </section>
 

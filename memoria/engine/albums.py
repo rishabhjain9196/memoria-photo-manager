@@ -271,7 +271,7 @@ def delete(lib: Library, album_ids: Iterable[int]) -> None:
 def cleanup(lib: Library) -> None:
     """Drop album entries of files that are gone for good (files in Recovery keep theirs, for Undo)."""
     lib.db.execute("DELETE FROM album_items WHERE file_id NOT IN "
-                   "(SELECT id FROM files UNION SELECT file_id FROM parked_files)")
+                   "(SELECT id FROM files UNION SELECT file_id FROM parked_files UNION SELECT file_id FROM missing_files)")
 
 
 # ----------------------------------------------------------------------------- export

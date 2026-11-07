@@ -99,6 +99,26 @@ MIGRATIONS: dict[int, list[str]] = {
         "CREATE TABLE IF NOT EXISTS album_items (album_id INTEGER NOT NULL, file_id INTEGER NOT NULL, "
         "pos INTEGER NOT NULL, PRIMARY KEY (album_id, file_id))",
     ],
+    4: [
+        # Rebuild from the frozen schema, retaining every column and existing identity.
+        SCHEMA.split("CREATE INDEX", 1)[0].replace("IF NOT EXISTS files", "files_v4").replace(
+            "INTEGER PRIMARY KEY,", "INTEGER PRIMARY KEY AUTOINCREMENT,", 1),
+        "INSERT INTO files_v4 SELECT * FROM files",
+        "DROP TABLE files",
+        "ALTER TABLE files_v4 RENAME TO files",
+        "CREATE INDEX ix_files_size ON files(size)",
+        "CREATE INDEX ix_files_taken ON files(taken_at)",
+        "CREATE INDEX ix_files_kind ON files(kind)",
+        "UPDATE sqlite_sequence SET seq=MAX(seq, COALESCE((SELECT MAX(file_id) FROM "
+        "(SELECT file_id FROM parked_files UNION ALL SELECT file_id FROM album_items "
+        "UNION ALL SELECT file_id FROM faces UNION ALL SELECT file_id FROM face_scans)),0)) WHERE name='files'",
+        "CREATE TABLE IF NOT EXISTS missing_files (file_id INTEGER PRIMARY KEY, rel_path TEXT NOT NULL UNIQUE COLLATE NOCASE, "
+        "data TEXT NOT NULL)",
+    ],
+    5: [
+        "CREATE TABLE IF NOT EXISTS storage_reset (id INTEGER PRIMARY KEY CHECK(id=1), "
+        "options TEXT NOT NULL, phase TEXT NOT NULL, forgotten TEXT NOT NULL)",
+    ],
 }
 SCHEMA_VERSION = max(MIGRATIONS)
 
@@ -111,11 +131,11 @@ DERIVED = ("qhash", "chash", "analyzed", "error", "width", "height", "taken_at",
            "clipped", "faces")
 
 
-def _connect(path: Path) -> sqlite3.Connection:
+def _connect(path: Path, durable: bool = False) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path), timeout=30, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA synchronous=FULL" if durable else "PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA temp_store=MEMORY")
     conn.execute("PRAGMA cache_size=-32000")
     return conn
@@ -222,7 +242,7 @@ class Library:
     def db(self) -> sqlite3.Connection:
         conn = getattr(self._local, "db", None)
         if conn is None:
-            conn = self._local.db = _connect(self.db_path)
+            conn = self._local.db = _connect(self.db_path, durable=True)
         return conn
 
     @property
@@ -302,6 +322,19 @@ class Library:
         tdb.execute("BEGIN")
         tdb.executemany("DELETE FROM thumbs WHERE file_id=?", [(i,) for i in file_ids])
         tdb.execute("COMMIT")
+
+    def mark_missing(self, file_ids: list[int]) -> None:
+        """Retain identities and fingerprints of files absent from a successful scan."""
+        with self.transaction() as db:
+            for fid in file_ids:
+                row = db.execute("SELECT * FROM files WHERE id=?", (fid,)).fetchone()
+                if row is not None:
+                    db.execute("INSERT OR REPLACE INTO missing_files VALUES (?,?,?)",
+                               (fid, row["rel_path"], json.dumps(dict(row))))
+                    db.execute("DELETE FROM files WHERE id=?", (fid,))
+
+    def missing(self) -> list[dict]:
+        return [json.loads(r[0]) for r in self.db.execute("SELECT data FROM missing_files ORDER BY rel_path")]
 
     # parking: rows of files in Recovery ------------------------------------------------
     def park_rows(self, pairs: list[tuple[int, int]]) -> None:

@@ -14,7 +14,7 @@ from typing import Optional
 
 from . import config
 from .actions import Action
-from .db import Library
+from .db import Library, LibraryUnavailable
 from .hashing import full_hash
 from .progress import Progress
 from .scanner import walk_files
@@ -46,17 +46,21 @@ def compare(lib: Library, other: str | Path, progress: Optional[Progress] = None
         raise ValueError("Choose a folder outside this library (and not containing it).")
     progress.update(0, 0, "Listing files in the other folder…")
     theirs: list[OtherFile] = []
-    cut = len(str(other)) + 1
-    for e in walk_files(other):
+    cut = len(str(other).rstrip(os.sep)) + 1
+    failed = []
+    for e in walk_files(other, failed=failed):
         ext = os.path.splitext(e.name)[1].lower()
         if media_only and ext not in config.MEDIA_EXT:
             continue
         try:
             st = e.stat(follow_symlinks=False)
-        except OSError:
-            continue
+        except OSError as e:
+            raise LibraryUnavailable(f"Comparison incomplete: could not read a backup file: {e}") from e
         if st.st_size:
             theirs.append(OtherFile(e.path[cut:], st.st_size, st.st_mtime))
+    if failed or not other.is_dir():
+        raise LibraryUnavailable("Comparison incomplete: the backup folder or one of its subfolders could not "
+                                 "be read. Reconnect the drive or check permissions and try again. No sync was planned.")
     ours = [dict(r) for r in lib.files("kind!='other' AND size>0" if media_only else "size>0")]
 
     # Only files whose size exists on both sides can possibly match → only those are read.
@@ -73,6 +77,9 @@ def compare(lib: Library, other: str | Path, progress: Optional[Progress] = None
 
     _hash_ours(lib, ours_c, progress, total)
     _hash_theirs(other, theirs_c, progress, len(ours_c), total)
+    if any(not r.get("chash") for r in ours_c) or any(not t.hash for t in theirs_c):
+        raise LibraryUnavailable("Comparison incomplete: some files could not be fingerprinted. "
+                                 "Check that both drives are available and try again.")
 
     our_hashes = {r["chash"] for r in ours_c if r.get("chash")}
     their_hashes = {t.hash for t in theirs_c if t.hash}
@@ -125,8 +132,8 @@ def plan_sync(lib: Library, result: CompareResult, to_other: list[dict], to_libr
     for r in to_other:
         actions.append(Action(op="copy", src=str(lib.abspath(r["rel_path"])),
                               dst=str(result.other / r["rel_path"]), size=r["size"],
-                              hash=r.get("chash"), reason=f"Copy to {result.other}"))
+                              mtime=r["mtime"], hash=r.get("chash"), reason=f"Copy to {result.other}"))
     for t in to_library:
         actions.append(Action(op="copy", src=str(result.other / t.rel_path), dst=str(lib.abspath(t.rel_path)),
-                              size=t.size, hash=t.hash, reason=f"Copy from {result.other}"))
+                              size=t.size, mtime=t.mtime, hash=t.hash, reason=f"Copy from {result.other}"))
     return actions

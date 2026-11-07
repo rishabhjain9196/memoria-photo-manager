@@ -5,7 +5,7 @@ Scanning never modifies anything outside ``.memoria``.
 from __future__ import annotations
 
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +23,7 @@ class ScanResult:
     changed: int = 0
     removed: int = 0
     unreadable_folders: int = 0
+    unreadable_files: int = 0
 
 
 @dataclass
@@ -71,6 +72,8 @@ def walk_files(root: Path, skip_dirs: Optional[set[str]] = None,
                 elif entry.is_file(follow_symlinks=False):
                     yield _Entry(path, entry)
             except OSError:
+                if failed is not None:
+                    failed.append(current)
                 continue
 
 
@@ -95,26 +98,32 @@ def walk_dirs(root: Path) -> list[str]:
 def scan(lib: Library, progress: Optional[Progress] = None) -> ScanResult:
     progress = progress or Progress()
     root = str(lib.root)
-    cut = len(root) + 1
+    cut = len(root.rstrip(os.sep)) + 1
     if not os.path.isdir(root):
         raise LibraryUnavailable(f"The library folder can't be reached ({root}). If it is on an external or "
                                  "network drive, reconnect it and try again. Nothing was changed.")
     existing = {r["rel_path"].lower(): (r["id"], r["size"], r["mtime"])
                 for r in lib.db.execute("SELECT id, rel_path, size, mtime FROM files")}
+    missing = {r["rel_path"].lower(): r for r in lib.missing()}
+    existing.update({k: (r["id"], r["size"], r["mtime"]) for k, r in missing.items()})
     seen: set[str] = set()
     failed: list[str] = []
     new_rows, changed_ids = [], []
+    returned = []
     res = ScanResult()
     for n, entry in enumerate(walk_files(lib.root, failed=failed), 1):
         if n % 500 == 0:
             progress.update(n, 0, f"Scanning… {n:,} files found")
-        try:
-            st = entry.stat(follow_symlinks=False)
-        except OSError:
-            continue
         rel = entry.path[cut:]
         key = rel.lower()
         seen.add(key)
+        try:
+            st = entry.stat(follow_symlinks=False)
+        except OSError:
+            res.unreadable_files += 1
+            continue
+        if key in missing:
+            returned.append(missing[key])
         old = existing.get(key)
         if old is None:
             folder, name = os.path.split(rel)
@@ -127,15 +136,21 @@ def scan(lib: Library, progress: Optional[Progress] = None) -> ScanResult:
                                  "Nothing was changed.")
     # Files inside folders that couldn't be read are kept: unreadable is not the same as deleted.
     unreadable = tuple(f[cut:].lower() + os.sep for f in failed)
-    removed = [v[0] for k, v in existing.items() if k not in seen and not k.startswith(unreadable)]
+    removed = [v[0] for k, v in existing.items() if k not in seen and k not in missing
+               and not k.startswith(unreadable)]
     res.unreadable_folders = len(failed)
 
     with lib.transaction() as db:
+        for row in returned:
+            cols = list(row)
+            db.execute(f"INSERT INTO files ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})",
+                       [row[c] for c in cols])
+            db.execute("DELETE FROM missing_files WHERE file_id=?", (row["id"],))
         db.executemany("INSERT INTO files (rel_path, folder, name, ext, kind, size, mtime) "
                        "VALUES (?,?,?,?,?,?,?)", new_rows)
         reset = ", ".join(f"{c}=NULL" for c in DERIVED if c != "analyzed")
         db.executemany(f"UPDATE files SET size=?, mtime=?, analyzed=0, {reset} WHERE id=?", changed_ids)
-    lib.remove_rows(removed)
+    lib.mark_missing(removed)
     res.added, res.changed, res.removed = len(new_rows), len(changed_ids), len(removed)
     res.total = len(seen)
     progress.update(res.total, res.total, f"Scan complete: {res.total:,} files", force=True)
@@ -215,19 +230,33 @@ def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = co
     video_workers = max(1, min(4, workers // 2))
     with ThreadPoolExecutor(max_workers=workers) as pool, ThreadPoolExecutor(max_workers=video_workers) as vpool:
         futures = {}
-        for r in rows:
+        remaining = iter(rows)
+
+        def submit(r):
             p = vpool if r["kind"] == "video" else pool
             futures[p.submit(_analyze_one, lib.abspath(r["rel_path"]), r["kind"], r["name"], r["mtime"])] = r["id"]
+
         try:
-            for done, fut in enumerate(as_completed(futures), 1):
-                out = fut.result()
-                if "error" in out:
-                    res.errors += 1
-                res.analyzed += 1
-                pending.append((futures[fut], out))
-                if len(pending) >= 200:
-                    flush()
-                progress.update(done, total, f"Analysing photos and videos… {done:,} of {total:,}")
+            for _ in range(2 * (workers + video_workers)):
+                r = next(remaining, None)
+                if r is not None:
+                    submit(r)
+            while futures:
+                progress.check()
+                completed, _ = wait(futures, timeout=0.1, return_when=FIRST_COMPLETED)
+                for fut in completed:
+                    out = fut.result()
+                    if "error" in out:
+                        res.errors += 1
+                    res.analyzed += 1
+                    pending.append((futures.pop(fut), out))
+                    if len(pending) >= 200:
+                        flush()
+                    progress.update(res.analyzed, total,
+                                    f"Analysing photos and videos… {res.analyzed:,} of {total:,}")
+                    r = next(remaining, None)
+                    if r is not None:
+                        submit(r)
         except BaseException:
             for f in futures:
                 f.cancel()

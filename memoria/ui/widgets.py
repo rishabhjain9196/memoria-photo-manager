@@ -238,11 +238,14 @@ class AppContext(QObject):
     checkup_requested = Signal()
     people_changed = Signal()         # faces found / named — Photos search and Albums suggestions follow
     albums_changed = Signal()         # albums created, edited or deleted
+    browse_requested = Signal(object)
+    album_requested = Signal(int)
 
     def __init__(self, runner):
         super().__init__()
         self.runner = runner
         self.library: Optional[Library] = None
+        self.maintenance = False
         self.thumbs = ThumbCache(self)
         self.story_selection: list[int] = []
         self.video_selection: list[str] = []
@@ -258,6 +261,8 @@ class AppContext(QObject):
         if self.library is not None and self.library is not lib:
             self.library.close()
         self.library = lib
+        from ..engine import storage
+        self.maintenance = lib is not None and storage.pending(lib) is not None
         self.thumbs.clear()
         self._results, self._results_gen = {}, -1
         self.generation += 1
@@ -265,6 +270,7 @@ class AppContext(QObject):
         self.library_opened.emit()
 
     def _on_modified(self) -> None:
+        self.thumbs.clear()
         self.generation += 1
         if self._results_gen != self.generation:
             self._results = {}
@@ -291,13 +297,16 @@ class AppContext(QObject):
 
 
 class ThumbCache:
-    def __init__(self, ctx: AppContext, capacity: int = 4000):
+    def __init__(self, ctx: AppContext, capacity: int = 4000, max_bytes: int = 64 * 1024 * 1024):
         self.ctx = ctx
         self.capacity = capacity
+        self.max_bytes = max_bytes
+        self.bytes = 0
         self._cache: OrderedDict[int, Optional[QPixmap]] = OrderedDict()
 
     def clear(self) -> None:
         self._cache.clear()
+        self.bytes = 0
 
     def get(self, file_id: int) -> Optional[QPixmap]:
         if file_id in self._cache:
@@ -313,8 +322,10 @@ class ThumbCache:
                     pm = None
         if pm is not None:
             self._cache[file_id] = pm
-            if len(self._cache) > self.capacity:
-                self._cache.popitem(last=False)
+            self.bytes += pm.width() * pm.height() * max(1, pm.depth() // 8)
+            while self._cache and (len(self._cache) > self.capacity or self.bytes > self.max_bytes):
+                _, old = self._cache.popitem(last=False)
+                self.bytes -= old.width() * old.height() * max(1, old.depth() // 8)
         return pm
 
 

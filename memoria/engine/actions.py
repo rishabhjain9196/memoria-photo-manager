@@ -14,6 +14,8 @@ from __future__ import annotations
 import os
 import shutil
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -118,14 +120,15 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
                (batch_id, _now(), kind, title, "applying"))
     recycle_root = lib.recovery / batch_id
     total = len(actions)
-    parked: list[tuple[int, int]] = []
-    moved_rows: list[tuple[str, str, str, int]] = []
     verified: set = set()
     try:
         for seq, a in enumerate(actions):
             progress.update(seq, total, f"{title}… {seq:,} of {total:,}")
             src = Path(a.src)
-            problem = _preflight(a, src, verified)
+            try:
+                problem = _preflight(a, src, verified)
+            except OSError as e:
+                problem = f"could not check file: {e}"
             if problem:
                 res.skipped += 1
                 res.messages.append(f"Skipped {src.name}: {problem}")
@@ -149,27 +152,26 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
                     verified_copy(src, dst, a.hash)
                 elif a.op == "rmdir":
                     os.rmdir(L(src))
-                db.execute("UPDATE operations SET status='done' WHERE id=?", (op_id,))
-                res.done += 1
-                res.bytes += a.size
                 if a.file_id is not None:
                     if a.op == "recycle":
-                        parked.append((op_id, a.file_id))
+                        lib.park_rows([(op_id, a.file_id)])
                     elif a.op == "move" and _inside(dst, lib.root):
                         rel = str(dst.relative_to(lib.root))
                         folder, name = os.path.split(rel)
-                        moved_rows.append((rel, folder, name, a.file_id))
+                        db.execute("UPDATE files SET rel_path=?, folder=?, name=? WHERE id=?",
+                                   (rel, folder, name, a.file_id))
+                db.execute("UPDATE operations SET status='done' WHERE id=?", (op_id,))
+                res.done += 1
+                res.bytes += a.size
             except Exception as e:
                 res.failed += 1
                 res.messages.append(f"Failed {src.name}: {e}")
-                db.execute("UPDATE operations SET status='failed', error=? WHERE id=?", (str(e)[:300], op_id))
+                interrupted = a.op in ("move", "recycle") and _ex(dst) and not _ex(src)
+                db.execute("UPDATE operations SET status=?, error=? WHERE id=?",
+                           ("pending" if interrupted else "failed", str(e)[:300], op_id))
     except Cancelled:
         res.cancelled = True
     finally:
-        lib.park_rows(parked)
-        if moved_rows:
-            with lib.transaction() as tx:
-                tx.executemany("UPDATE files SET rel_path=?, folder=?, name=? WHERE id=?", moved_rows)
         status = "applied" if res.done and not res.failed and not res.cancelled else (
             "partial" if res.done else "nothing")
         db.execute("UPDATE batches SET status=?, files=?, bytes=? WHERE id=?",
@@ -199,6 +201,59 @@ def record_created(lib: Library, kind: str, title: str, items: list[tuple[str, s
     db.execute("UPDATE batches SET status=?, files=?, bytes=? WHERE id=?",
                ("applied" if res.done else "nothing", res.done, res.bytes, batch_id))
     return res
+
+
+_output_batch: ContextVar[Optional[tuple[Library, BatchResult, str]]] = ContextVar("output_batch", default=None)
+
+
+@contextmanager
+def created_batch(lib: Optional[Library], kind: str, title: str):
+    """Journal publications as they happen, including outputs kept after cancellation."""
+    if lib is None:
+        yield None
+        return
+    result = BatchResult(datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6])
+    lib.db.execute("INSERT INTO batches (id,created_at,kind,title,status) VALUES (?,?,?,?,?)",
+                   (result.batch_id, _now(), kind, title, "applying"))
+    token = _output_batch.set((lib, result, title))
+    try:
+        yield result
+    finally:
+        _output_batch.reset(token)
+        # Some all-or-nothing exporters remove completed outputs when cancelled.
+        for op in operations(lib, result.batch_id):
+            if op["status"] == "done" and not _ex(op["dst"]):
+                lib.db.execute("UPDATE operations SET status='undone' WHERE id=?", (op["id"],))
+        done = [o for o in operations(lib, result.batch_id) if o["status"] == "done"]
+        result.done, result.bytes = len(done), sum(o["size"] for o in done)
+        pending = lib.db.execute("SELECT COUNT(*) FROM operations WHERE batch_id=? AND status='pending'",
+                                 (result.batch_id,)).fetchone()[0]
+        lib.db.execute("UPDATE batches SET status=?,files=?,bytes=? WHERE id=?",
+                       ("partial" if pending else "applied" if done else "nothing",
+                        result.done, result.bytes, result.batch_id))
+
+
+@contextmanager
+def record_output(tmp: Path, dst: Path):
+    """Write durable intent and fingerprint before an exporter publishes its temp file."""
+    active = _output_batch.get()
+    if active is None:
+        yield
+        return
+    lib, result, title = active
+    fingerprint = full_hash(tmp)
+    if not fingerprint:
+        raise OSError(f"Cannot verify {tmp.name}; output was not published")
+    a = Action("create", str(dst), str(dst), os.path.getsize(L(tmp)), hash=fingerprint, reason=title)
+    seq = lib.db.execute("SELECT COUNT(*) FROM operations WHERE batch_id=?", (result.batch_id,)).fetchone()[0]
+    op_id = _log(lib.db, result.batch_id, seq, a, dst, "pending")
+    try:
+        yield
+    except FileExistsError:
+        lib.db.execute("UPDATE operations SET status='failed',error='Name already taken' WHERE id=?", (op_id,))
+        raise
+    else:
+        lib.db.execute("UPDATE operations SET status='done' WHERE id=?", (op_id,))
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -234,6 +289,10 @@ def _preflight(a: Action, src: Path, verified: Optional[set] = None) -> Optional
         return "file was modified since review"
     if a.hash and a.op != "copy" and full_hash(src) != a.hash:
         return "file content changed since review"
+    if a.op == "copy" and not a.hash:
+        a.hash = full_hash(src)
+        if not a.hash:
+            return "file could not be fingerprinted for a safe copy and Undo"
     return None
 
 
@@ -283,7 +342,9 @@ def undo(lib: Library, batch_id: str, progress: Optional[Progress] = None) -> Ba
             elif op["op"] in ("copy", "create"):
                 if _ex(dst):
                     # Only remove the copy/new file when it still matches the content we wrote.
-                    if op["hash"] and full_hash(dst) != op["hash"]:
+                    if not op["hash"]:
+                        raise OSError(f"{dst.name} has no recorded fingerprint; left in place for manual review")
+                    if full_hash(dst) != op["hash"]:
                         raise OSError(f"{dst.name} was modified after copying; left in place")
                     os.remove(L(dst))
                     if _inside(dst, lib.root):
@@ -356,9 +417,9 @@ def empty_recovery(lib: Library, batch_ids: Optional[list[str]] = None,
     for i, t in enumerate(targets):
         progress.update(i, len(targets), f"Deleting from Recovery… {i:,} of {len(targets):,} changes")
         if os.path.isdir(L(t)):
-            for _, _, fs in os.walk(t):
-                removed += len(fs)
-            shutil.rmtree(L(t), ignore_errors=True)
+            count = sum(len(fs) for _, _, fs in os.walk(t))
+            shutil.rmtree(L(t))
+            removed += count
             ops = [r[0] for r in lib.db.execute("SELECT id FROM operations WHERE batch_id=? AND op='recycle' "
                                                 "AND status='done'", (t.name,))]
             lib.db.execute("UPDATE batches SET status='emptied' WHERE id=? AND status IN ('applied','partial')",
@@ -373,21 +434,36 @@ def empty_recovery(lib: Library, batch_ids: Optional[list[str]] = None,
 def reconcile(lib: Library) -> int:
     """Repair the journal after a crash: resolve operations left in ``pending`` state."""
     fixed = 0
-    for op in lib.db.execute("SELECT * FROM operations WHERE status='pending'").fetchall():
+    for op in lib.db.execute("SELECT * FROM operations WHERE status='pending' OR "
+                             "(status='done' AND batch_id IN "
+                             "(SELECT id FROM batches WHERE status='applying'))").fetchall():
         src_exists = _ex(op["src"])
         dst_exists = bool(op["dst"]) and _ex(op["dst"])
         if op["op"] in ("recycle", "move"):
             status = "done" if dst_exists and not src_exists else "failed"
-        elif op["op"] == "copy":
+            if status == "done" and _inside(Path(op["src"]), lib.root):
+                row = lib.file_by_rel(lib.rel(op["src"]))
+                if row is not None:
+                    if op["op"] == "recycle":
+                        lib.park_rows([(op["id"], row["id"])])
+                    elif _inside(Path(op["dst"]), lib.root):
+                        rel = lib.rel(op["dst"])
+                        folder, name = os.path.split(rel)
+                        lib.db.execute("UPDATE files SET rel_path=?, folder=?, name=? WHERE id=?",
+                                       (rel, folder, name, row["id"]))
+        elif op["op"] in ("copy", "create"):
             status = "done" if dst_exists and full_hash(op["dst"]) == op["hash"] else "failed"
-            tmp = Path(str(op["dst"]) + ".memoria-tmp") if op["dst"] else None
+            tmp = Path(str(op["dst"]) + ".memoria-tmp") if op["dst"] and op["op"] == "copy" else None
             if tmp and _ex(tmp):
                 os.remove(L(tmp))
         else:
             status = "done" if not src_exists else "failed"
         lib.db.execute("UPDATE operations SET status=?, error=COALESCE(error,'interrupted') WHERE id=?",
                        (status, op["id"]))
-        lib.db.execute("UPDATE batches SET status='partial' WHERE id=? AND status='applying'", (op["batch_id"],))
+        lib.db.execute("UPDATE batches SET status='partial' WHERE id=?", (op["batch_id"],))
         fixed += 1
     lib.db.execute("UPDATE batches SET status='partial' WHERE status='applying'")
+    lib.db.execute("UPDATE batches SET files=(SELECT COUNT(*) FROM operations WHERE batch_id=batches.id "
+                   "AND status='done'), bytes=COALESCE((SELECT SUM(size) FROM operations WHERE batch_id=batches.id "
+                   "AND status='done'),0) WHERE status='partial'")
     return fixed

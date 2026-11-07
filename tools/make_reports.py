@@ -15,6 +15,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -40,6 +41,8 @@ AREAS = {
     "test_video": "Video compressor",
     "test_story": "Story maker",
     "test_ui_smoke": "Desktop UI — end to end",
+    "test_storage": "Selective reset, interruption recovery and storage",
+    "test_insights": "Storage charts, timeline, offline map and filtered browsing",
 }
 
 
@@ -61,12 +64,13 @@ def pretty(name: str) -> str:
 
 def run_tests(tmp: Path) -> dict:
     xml_path = tmp / "junit.xml"
-    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", MEMORIA_SHOT_LABEL="<b>Sample library</b><br>Generated test media")
     if os.name == "nt":
         env.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
     print("Running tests…")
     t0 = datetime.now()
-    subprocess.run([PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", f"--junitxml={xml_path}"],
+    subprocess.run([PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", f"--junitxml={xml_path}",
+                    f"--basetemp={tmp / 'pytest'}"],
                    cwd=ROOT, env=env)
     wall = (datetime.now() - t0).total_seconds()
     root = ET.parse(xml_path).getroot()
@@ -120,6 +124,33 @@ def versions() -> list[tuple[str, str]]:
     return rows
 
 
+def refresh_images(tmp: Path) -> None:
+    """Publish screenshots made by the passing end-to-end test, never a user's library."""
+    overview = next(tmp.rglob("01-overview.png"))
+    shots = overview.parent
+    names = {
+        "welcome": "00-welcome", "overview": "01-overview", "photos": "02-photos",
+        "viewer": "photos-viewer", "duplicates": "03-duplicates", "duplicates-folders": "03-duplicates-folders",
+        "similar": "04-similar", "similar-videos": "04-similar-videos", "blurry": "04-similar-blurry",
+        "tidy": "05-tidy", "organize": "06-organize", "editor-crop": "07-editor-crop",
+        "editor-video": "07-editor-video", "story": "08-story", "video": "09-video", "health": "10-health",
+        "compare": "11-compare", "history": "12-history", "people": "13-people",
+        "people-lookalike": "13-people-lookalike", "albums": "14-albums", "albums-make": "14-albums-make",
+        "toast": "20-after-apply-toast",
+    }
+    for name in ("dark-overview", "dark-photos", "dark-similar", "insights-storage", "insights-timeline",
+                 "insights-india", "insights-world", "dark-insights", "photos-largest", "library-filters",
+                 "storage-reset", "storage-reset-hard"):
+        names[name] = name
+    sources = {dest: shots / f"{source}.png" for dest, source in names.items()}
+    sources["confirm"] = next(shots.glob("dialog-Move*.png"))
+    for path in sources.values():
+        if not path.is_file():
+            raise FileNotFoundError(f"Expected documentation screenshot was not generated: {path.name}")
+    for dest, path in sources.items():
+        shutil.copyfile(path, ROOT / "docs" / "images" / f"{dest}.png")
+
+
 def render(tests: dict, bench: dict | None, gt: dict | None) -> str:
     e = html.escape
     cases = tests["cases"]
@@ -133,8 +164,8 @@ def render(tests: dict, bench: dict | None, gt: dict | None) -> str:
         by_mod[c["module"]].append(c)
 
     def tile(value, label, color=""):
-        style = f' style="color:{color}"' if color else ""
-        return f'<div class="card"><p>{e(label)}</p><h4 style="font-size:26px;margin:4px 0 0"{style}>{e(str(value))}</h4></div>'
+        style = "font-size:26px;margin:4px 0 0" + (f";color:{color}" if color else "")
+        return f'<div class="card"><p>{e(label)}</p><h4 style="{style}">{e(str(value))}</h4></div>'
 
     parts = [f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -179,7 +210,10 @@ td.num{{text-align:right;white-space:nowrap}} details summary{{cursor:pointer;fo
             parts.append(f"<tr><td>{e(s['stage'])}</td><td class='num'>{s['seconds']:.2f} s</td><td>{e(s['note'])}</td></tr>")
         parts.append("</table>")
     else:
-        parts.append("<p>Benchmark not run for this report (<code>--no-bench</code>).</p>")
+        parts.append("<p>Benchmark not run for this report (<code>--no-bench</code>) to avoid generating a large "
+                     "media copy. Tests exercise 10,000 synthetic catalogue entries representing 300 GB, bounded "
+                     "paging/queues, dense similarity, crash recovery and interactive UI flows. This is not a "
+                     "measurement of real 200–300 GB library throughput.</p>")
     parts.append("</section><section id='truth'><h2>Test library ground truth</h2>")
     if gt:
         rows = [("Total files", gt["total_files"]), ("Total size", f"{gt['total_bytes'] / 1e6:.1f} MB"),
@@ -200,7 +234,8 @@ td.num{{text-align:right;white-space:nowrap}} details summary{{cursor:pointer;fo
     parts.append("""</table></section><section id="repro"><h2>Reproduce</h2>
 <pre><code>.\\.venv\\Scripts\\python -m pytest -q
 .\\.venv\\Scripts\\python tools\\benchmark.py --photos 500
-.\\.venv\\Scripts\\python tools\\make_reports.py        # regenerates this page</code></pre></section>
+.\\.venv\\Scripts\\python tools\\make_reports.py --no-bench --refresh-images
+# Regenerates this report and documentation images using disposable test media.</code></pre></section>
 <footer>Memoria quality report · <a href="index.html">Documentation home</a></footer></main></div></body></html>""")
     return "\n".join(parts)
 
@@ -209,11 +244,14 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--photos", type=int, default=500)
     ap.add_argument("--no-bench", action="store_true")
+    ap.add_argument("--refresh-images", action="store_true", help="refresh docs images from the passing UI test")
     a = ap.parse_args()
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
         tests = run_tests(tmp)
         bench = None if a.no_bench else run_bench(tmp, a.photos)
+        if a.refresh_images and all(c["status"] == "passed" for c in tests["cases"]):
+            refresh_images(tmp)
     page = render(tests, bench, ground_truth())
     OUT.write_text(page, encoding="utf-8")
     print(f"Wrote {OUT}")

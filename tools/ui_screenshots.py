@@ -71,6 +71,14 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
             time.sleep(0.02)
         pump(0.3)
 
+    def insights_idle(page, timeout=30):
+        end = time.time() + timeout
+        while (page.bg.running or page.timer.isActive() or not page.tabs.isEnabled()) and time.time() < end:
+            pump(0.05)
+        if not page.tabs.isEnabled() or page.bg.running:
+            raise RuntimeError(f"Insights did not finish: {page.status.text()}")
+        pump()
+
     def shot(widget=None, name="shot", keep_toast=False):
         if not keep_toast and widget is None:
             win.toast.hide()
@@ -78,6 +86,8 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
             win.lib_label.setText(os.environ["MEMORIA_SHOT_LABEL"])
         (widget or win).grab().save(str(outdir / f"{name}.png"))
 
+    if os.environ.get("MEMORIA_SHOT_LABEL"):
+        win.welcome.set_recent([])
     shot(name="00-welcome")
     win.open_library(library)
     idle()
@@ -85,7 +95,7 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
         win.run_checkup()          # read-only "Check everything" → sidebar badges + cached results
         idle()
     order = ["overview", "photos", "duplicates", "similar", "tidy", "organize", "editor", "story", "video", "health",
-             "compare", "history", "people", "albums"]
+             "compare", "history", "people", "albums", "insights"]
     for i, key in enumerate(order, 1):
         if key not in win.page_classes:
             continue
@@ -158,6 +168,9 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                 page.save()
                 idle()
             elif key == "story":
+                page.output.set_path(outdir.parent / "Stories")
+                if os.environ.get("MEMORIA_SHOT_LABEL"):
+                    page.output.path_label.setText(r"D:\Memoria Exports\Stories")
                 ids = [r["id"] for r in page.lib.files("kind='image' AND error IS NULL AND rel_path LIKE 'DCIM%'",
                                                        order="rel_path")][:4]
                 page.add_ids(ids)
@@ -165,6 +178,9 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                 page.caption.setText("Weekend in the hills")
                 pump(3.0)
             elif key == "video":
+                page.output.set_path(outdir.parent / "Compressed videos")
+                if os.environ.get("MEMORIA_SHOT_LABEL"):
+                    page.output.path_label.setText(r"D:\Memoria Exports\Compressed videos")
                 page._check_all(True)
                 pump(2.0)
                 shot(name=f"{i:02d}-{key}-selected")
@@ -238,6 +254,51 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                 page.path.setText(str(other))
                 page.run_compare()
                 idle()
+                if os.environ.get("MEMORIA_SHOT_LABEL"):
+                    page.path.setText(r"E:\Photos Backup")
+            elif key == "history" and os.environ.get("MEMORIA_SHOT_LABEL"):
+                original_short = page._short
+                page._short = lambda path, short=original_short: short(path).replace(
+                    str(Path(library).parent), r"D:\Sample outputs")
+                page.refresh()
+            elif key == "insights":
+                from memoria.engine import catalogue, geography, storage
+                from memoria.ui.library_filters import FilterDialog
+                from memoria.ui.storage_dialog import StorageDialog
+                insights_idle(page)
+                shot(name="insights-storage")
+                page.tabs.setCurrentIndex(1)
+                page._period("2023")
+                insights_idle(page)
+                shot(name="insights-timeline")
+                page.tabs.setCurrentIndex(2)
+                page._map_bounds(geography.INDIA)
+                insights_idle(page)
+                shot(name="insights-india")
+                page._map_bounds(geography.WORLD)
+                insights_idle(page)
+                shot(name="insights-world")
+                win.browse_filtered(catalogue.Filters())
+                photos = win.page("photos")
+                photos.sort.setCurrentIndex(photos.sort.findData("largest"))
+                pump()
+                shot(name="photos-largest")
+                filters = FilterDialog(win, win.ctx.library, photos.filters)
+                filters.show()
+                pump()
+                shot(filters, "library-filters")
+                filters.close()
+                photos.sort.setCurrentIndex(photos.sort.findData("newest"))
+                reset = StorageDialog(win, storage.usage(win.ctx.library))
+                reset.show()
+                pump()
+                shot(reset, "storage-reset")
+                reset.preset(True)
+                pump()
+                shot(reset, "storage-reset-hard")
+                reset.close()
+                win.go(key)
+                pump()
         shot(name=f"{i:02d}-{key}")
         if key == "similar":
             for t in range(1, page.tabs.count()):
@@ -297,7 +358,7 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
         win.show()
         win.open_library(library)
         idle()
-        for key in ("overview", "photos", "duplicates", "similar", "history"):
+        for key in ("overview", "photos", "duplicates", "similar", "history", "insights"):
             win.go(key)
             pump()
             idle()
@@ -313,6 +374,16 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
             elif key == "photos":
                 pg.grid.setCurrentIndex(pg.grid.model().index(3, 0))
                 pump()
+            elif key == "insights":
+                from memoria.engine import geography
+                pg.tabs.setCurrentIndex(2)
+                pg._map_bounds(geography.WORLD)
+                insights_idle(pg)
+            elif key == "history" and os.environ.get("MEMORIA_SHOT_LABEL"):
+                original_short = pg._short
+                pg._short = lambda path, short=original_short: short(path).replace(
+                    str(Path(library).parent), r"D:\Sample outputs")
+                pg.refresh()
             shot(name=f"dark-{key}")
         th.use("light")
         app.setPalette(th.qpalette())

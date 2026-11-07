@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from memoria.engine import actions, duplicates, health, organize, scanner
+from memoria.engine import actions, albums, batch, compare, duplicates, health, organize, scanner
 from memoria.engine.config import longpath
 from memoria.engine.db import SCHEMA_VERSION, Library, LibraryInUse, LibraryTooNew, LibraryUnavailable
 
@@ -159,3 +159,191 @@ def test_paths_longer_than_260_characters(library):
     assert res.ok and res.done >= 1
     assert actions.undo(library, res.batch_id).ok
     assert os.path.exists(longpath(target))
+
+
+@pytest.fixture
+def tiny_library(tmp_path):
+    root = tmp_path / "tiny"
+    root.mkdir()
+    (root / "one.txt").write_bytes(b"original")
+    lib = Library(root)
+    scanner.scan(lib)
+    yield lib
+    lib.close()
+
+
+def test_copy_undo_rejects_modified_and_legacy_unverified_outputs(tiny_library, tmp_path):
+    lib = tiny_library
+    row = dict(lib.files()[0])
+    res = actions.apply(lib, "batch", "Copy", batch.plan_copy_to(lib, [row], tmp_path / "export"))
+    op = actions.operations(lib, res.batch_id)[0]
+    assert op["hash"]
+    dst = Path(op["dst"])
+    dst.write_bytes(b"edited by user")
+    assert actions.undo(lib, res.batch_id).failed == 1
+    assert dst.read_bytes() == b"edited by user"
+    lib.db.execute("UPDATE operations SET hash=NULL WHERE id=?", (op["id"],))
+    assert actions.undo(lib, res.batch_id).failed == 1
+    assert dst.exists()
+
+
+def test_recycle_import_undo_preserves_album_identity(tiny_library):
+    lib = tiny_library
+    row = dict(lib.files()[0])
+    aid = albums.create(lib, "Original", [row["id"]])
+    res = actions.apply(lib, "batch", "Recycle", batch.plan_recycle(lib, [row]))
+    (lib.root / "two.txt").write_bytes(b"unrelated")
+    scanner.scan(lib)
+    assert lib.file_by_rel("two.txt")["id"] != row["id"]
+    assert actions.undo(lib, res.batch_id).ok
+    assert lib.file_by_rel("one.txt")["id"] == row["id"]
+    assert lib.db.execute("SELECT f.name FROM files f JOIN album_items i ON i.file_id=f.id "
+                          "WHERE i.album_id=?", (aid,)).fetchone()[0] == "one.txt"
+
+
+def test_failed_stat_keeps_catalogue(tiny_library, monkeypatch):
+    lib = tiny_library
+    before = snapshot_rows(lib)
+    def denied(*args, **kwargs):
+        raise PermissionError("test access failure")
+    monkeypatch.setattr(scanner._Entry, "stat", denied)
+    res = scanner.scan(lib)
+    assert res.unreadable_files == 1 and res.removed == 0
+    assert snapshot_rows(lib) == before
+
+
+def test_missing_survives_rescan_and_return_preserves_fingerprint(tiny_library):
+    lib = tiny_library
+    health.run_health(lib)
+    before = dict(lib.files()[0])
+    p = lib.root / "one.txt"
+    contents, st = p.read_bytes(), p.stat()
+    p.unlink()
+    scanner.scan(lib)
+    report = health.run_health(lib)
+    assert report.counts["missing"] == 1
+    assert report.problems[0]["rel_path"] == "one.txt"
+    (lib.root / "new.txt").write_bytes(b"new")
+    scanner.scan(lib)
+    assert lib.file_by_rel("new.txt")["id"] != before["id"]
+    p.write_bytes(contents)
+    os.utime(p, (st.st_atime, st.st_mtime))
+    scanner.scan(lib)
+    assert lib.file_by_rel("one.txt")["id"] == before["id"]
+    assert lib.file_by_rel("one.txt")["baseline_hash"] == before["baseline_hash"]
+    assert health.run_health(lib).counts["missing"] == 0
+
+
+def test_reconcile_crash_between_move_and_catalogue(tiny_library, monkeypatch):
+    lib = tiny_library
+    health.run_health(lib)
+    row = dict(lib.files()[0])
+    original = actions.safe_move
+    def crash(src, dst):
+        original(src, dst)
+        raise SystemExit("test interruption")
+    with monkeypatch.context() as m:
+        m.setattr(actions, "safe_move", crash)
+        with pytest.raises(SystemExit):
+            actions.apply(lib, "batch", "Recycle", batch.plan_recycle(lib, [row]))
+    assert actions.reconcile(lib) == 1
+    entry = actions.batches(lib)[0]
+    assert entry["files"] == 1
+    scanner.scan(lib)
+    assert actions.undo(lib, entry["id"]).ok
+    assert lib.file_by_rel("one.txt")["baseline_hash"] == row["baseline_hash"]
+
+
+def test_locked_recovery_retains_history_and_undo(tiny_library, monkeypatch):
+    lib = tiny_library
+    res = actions.apply(lib, "batch", "Recycle", batch.plan_recycle(lib, [dict(lib.files()[0])]))
+    def locked(*args, **kwargs):
+        raise PermissionError("test locked file")
+    with monkeypatch.context() as m:
+        m.setattr(actions.shutil.os, "unlink", locked)
+        with pytest.raises(PermissionError):
+            actions.empty_recovery(lib)
+    assert actions.operations(lib, res.batch_id)[0]["status"] == "done"
+    assert actions.undo(lib, res.batch_id).done == 1
+
+
+def test_unavailable_backup_never_reports_complete(tiny_library, tmp_path, monkeypatch):
+    with pytest.raises(LibraryUnavailable):
+        compare.compare(tiny_library, tmp_path / "not-present")
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    sub = backup / "unreadable"
+    sub.mkdir()
+    real = scanner.os.scandir
+    def denied(path):
+        if str(path) == str(sub):
+            raise PermissionError("test subfolder unavailable")
+        return real(path)
+    monkeypatch.setattr(scanner.os, "scandir", denied)
+    with pytest.raises(LibraryUnavailable):
+        compare.compare(tiny_library, backup)
+
+
+def test_published_output_survives_cancel_in_history(tiny_library, tmp_path):
+    from memoria.engine.progress import Cancelled
+    from memoria.engine.videotools import publish_file
+    temp = tmp_path / "temp"
+    temp.write_bytes(b"finished output")
+    with pytest.raises(Cancelled):
+        with actions.created_batch(tiny_library, "edit", "Edit") as result:
+            dst = publish_file(temp, tmp_path / "edited.txt")
+            raise Cancelled()
+    assert result.done == 1 and dst.exists()
+    assert actions.undo(tiny_library, result.batch_id).done == 1
+    assert not dst.exists()
+
+
+def test_created_output_crash_reconciliation(tiny_library, tmp_path, monkeypatch):
+    from memoria.engine.videotools import publish_file
+    temp, dest = tmp_path / "temp", tmp_path / "created.txt"
+    temp.write_bytes(b"created")
+    rename = os.rename
+    def crash(src, dst):
+        rename(src, dst)
+        raise SystemExit("test crash after publication")
+    with pytest.raises(SystemExit):
+        with actions.created_batch(tiny_library, "story", "Story"):
+            with monkeypatch.context() as m:
+                m.setattr(os, "rename", crash)
+                publish_file(temp, dest)
+    assert actions.reconcile(tiny_library) == 1
+    entry = actions.batches(tiny_library)[0]
+    assert entry["files"] == 1
+    assert actions.undo(tiny_library, entry["id"]).done == 1
+    assert not dest.exists()
+
+
+def test_v3_migration_reserves_recovered_ids(tmp_path):
+    import json
+    from memoria.engine.db import SCHEMA, MIGRATIONS
+    folder = tmp_path / ".memoria"
+    folder.mkdir()
+    db = sqlite3.connect(folder / "memoria.db")
+    db.row_factory = sqlite3.Row
+    db.executescript(SCHEMA)
+    for step in (2, 3):
+        for sql in MIGRATIONS[step]:
+            db.execute(sql)
+    db.execute("INSERT INTO files(id,rel_path,folder,name,ext,kind,size,mtime) "
+               "VALUES (99,'parked.txt','','parked.txt','.txt','other',4,1)")
+    row = dict(db.execute("SELECT * FROM files").fetchone())
+    db.execute("INSERT INTO parked_files VALUES (1,99,?)", (json.dumps(row),))
+    db.execute("INSERT INTO album_items VALUES (1,99,0)")
+    db.execute("DELETE FROM files")
+    db.execute("PRAGMA user_version=3")
+    db.commit()
+    db.close()
+    lib = Library(tmp_path)
+    try:
+        (tmp_path / "new.txt").write_bytes(b"new")
+        scanner.scan(lib)
+        assert lib.file_by_rel("new.txt")["id"] > 99
+        assert lib.restore_parked(1, "parked.txt")
+        assert lib.file_by_rel("parked.txt")["id"] == 99
+    finally:
+        lib.close()

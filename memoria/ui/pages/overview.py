@@ -48,7 +48,7 @@ class OverviewPage(Page):
         self.t_photos, self.t_videos, self.t_size, self.t_span = Tile(text="Photos"), Tile(text="Videos"), \
             Tile(text="Library size"), Tile(text="Covers")
         tiles = hbox(self.t_photos, self.t_videos, self.t_size, self.t_span, spacing=12)
-        self.trust = Banner("", "trust")
+        self.trust = Banner("", "info")
         self.pending = Banner("", "info")
         grid = QGridLayout()
         grid.setSpacing(12)
@@ -57,7 +57,7 @@ class OverviewPage(Page):
                  ("\uE7AA", "Albums", "albums"), ("\uE716", "People", "people"),
                  ("\uEA18", "Health check", "health"), ("\uE81C", "History & recovery", "history"),
                  ("\uE786", "Story maker", "story"), ("\uE714", "Video compressor", "video"),
-                 ("\uE895", "Compare & sync", "compare")]
+                 ("\uE895", "Compare & sync", "compare"), ("\uE9D9", "Library insights", "insights")]
         self.cards = {}
         for i, (g, t, k) in enumerate(specs):
             c = ToolCard(g, t, k, ctx)
@@ -97,6 +97,7 @@ class OverviewPage(Page):
         self.cards["video"].set(f"{fmt_n(st['videos'], 'video')} in this library. Make smaller copies for sharing."
                                 if st["videos"] else "Make smaller copies of videos for sharing.")
         self.cards["compare"].set("Check a backup drive or old laptop folder against this library and copy what's missing.")
+        self.cards["insights"].set("Explore folder sizes, file types, capture dates and an offline GPS map.")
         from ...engine import albums, faces
         n_albums = len(albums.albums(lib))
         self.cards["albums"].set(f"{fmt_n(n_albums, 'album')}. Make more from dates, places or people." if n_albums else
@@ -116,8 +117,8 @@ class OverviewPage(Page):
         self.updating.setText("")
         rf, rs = d["recovery"]
         self.trust.setText(
-            f"<b>Your files are safe.</b> Memoria has only read this library unless you approved a change. "
-            f"Recovery holds {fmt_n(rf, 'file')} ({fmt_size(rs)}); every change is listed in History and can be undone.")
+            f"<b>Recovery is not a backup.</b> Recovery holds {fmt_n(rf, 'file')} ({fmt_size(rs)}). "
+            "Keep a separate backup before cleaning up. Use Health check to review missing or unreadable files.")
         if d["dup_groups"] is not None:
             n = d["dup_copies"]
             nf = d["dup_folders"]

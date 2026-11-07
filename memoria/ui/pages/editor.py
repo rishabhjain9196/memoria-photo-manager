@@ -776,13 +776,15 @@ class EditorPage(Page):
         lib = self.lib
 
         def work(prog):
-            outputs = fn(prog.step(0, 2, title))
+            with actions.created_batch(lib, "edit", title) as batch:
+                outputs = fn(prog.step(0, 2, title))
             if not isinstance(outputs, (list, tuple)):
                 outputs = [outputs]
             outputs = [Path(p) for p in outputs if p]
-            batch = None
             if lib is not None and outputs:
-                batch = actions.record_created(lib, "edit", title, [(str(sources_for(p)), str(p)) for p in outputs])
+                for p in outputs:
+                    lib.db.execute("UPDATE operations SET src=? WHERE batch_id=? AND dst=?",
+                                   (str(sources_for(p)), batch.batch_id, str(p)))
                 if any(self._inside(lib, p) for p in outputs):
                     from ...engine import scanner
                     scanner.index(lib, prog.step(1, 2, "Adding the new files to the library"))
@@ -805,7 +807,7 @@ class EditorPage(Page):
                               f"{fmt_n(len(failures), 'file')} could not be saved. The originals were not touched.",
                               "\n".join(f"{Path(f).name}: {m}" for f, m in failures)).exec()
 
-        self.run(title, work, done)
+        self.run(title, work, done, on_cancel=self.ctx.library_modified.emit)
 
     @staticmethod
     def _inside(lib, p: Path) -> bool:

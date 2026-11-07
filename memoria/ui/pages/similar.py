@@ -54,8 +54,8 @@ class GroupReview(QWidget):
         self.g_title = label("", "h2")
         self.g_reason = label("", "", wrap=True)
         self.g_reason.setStyleSheet(f"color: {theme.OK};")
-        hint = label(f"Ticked {noun}s will move to Recovery. Click a tick box to change it; Space toggles the "
-                     "selected one.", "small")
+        hint = label(f"Nothing is selected automatically. Ticked {noun}s will move to Recovery. Space toggles the "
+                     "selected one.", "small", wrap=True)
         self.preview = Preview(self.ctx, 300)
         right = QWidget()
         right.setLayout(vbox(hbox(self.g_title, None, self.best_btn), self.g_reason, hint, self.grid, spacing=6))
@@ -98,7 +98,7 @@ class GroupReview(QWidget):
 
     def _show(self, groups) -> None:
         self.groups = groups
-        self.marked = {i: {f["id"] for f in g.files if f["id"] != g.best_id} for i, g in enumerate(groups)}
+        self.marked = {i: set() for i, g in enumerate(groups)}
         self.page.update_badge()
         if not groups:
             self.stack.setCurrentWidget(self.none)

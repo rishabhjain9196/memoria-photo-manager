@@ -174,6 +174,15 @@ class AlbumsPage(Page):
         row = self.a_list.currentRow()
         return self.saved[row] if 0 <= row < len(self.saved) else None
 
+    def open_album(self, album_id: int) -> None:
+        self.refresh()
+        self.tabs.setCurrentIndex(0)
+        for i, album in enumerate(self.saved):
+            if album["id"] == album_id:
+                self.a_list.setCurrentRow(i)
+                return
+        self.ctx.toast_requested.emit("That album is no longer available.", "")
+
     def _show_album(self, row: int) -> None:
         a = self._album()
         if a is None:

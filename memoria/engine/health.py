@@ -52,10 +52,13 @@ def _decode_ok(path) -> Optional[str]:
 
 def run_health(lib: Library, progress: Optional[Progress] = None, decode_images: bool = True) -> HealthReport:
     progress = progress or Progress()
-    sres = scan(lib, progress)
+    scan(lib, progress)
     rows = [dict(r) for r in lib.files()]
     rep = HealthReport(counts={k: 0 for k in STATUS_LABEL})
-    rep.counts["missing"] = sres.removed
+    missing = lib.missing()
+    rep.counts["missing"] = len(missing)
+    rep.problems.extend({**r, "status": "missing", "detail": "Not found at its last known location. "
+                         "The catalogue and fingerprint are retained in case it returns."} for r in missing)
     total = len(rows)
     total_bytes = sum(r["size"] for r in rows) or 1
 
@@ -95,7 +98,7 @@ def run_health(lib: Library, progress: Optional[Progress] = None, decode_images:
     with lib.transaction() as db:
         db.executemany("UPDATE files SET baseline_hash=?, baseline_size=?, baseline_mtime=?, checked_at=?, "
                        "chash=? WHERE id=?", updates)
-    order = {"damaged": 0, "unreadable": 1, "edited": 2}
+    order = {"damaged": 0, "unreadable": 1, "missing": 2, "edited": 3}
     rep.problems.sort(key=lambda p: (order[p["status"]], p["rel_path"]))
     progress.update(total_bytes, total_bytes, "Health check complete", force=True)
     return rep
