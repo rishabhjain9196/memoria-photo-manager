@@ -102,11 +102,13 @@ class Page(QWidget):
 
     def apply_actions(self, kind: str, title: str, acts: list[Action], *, summary: str, details: list[str],
                       confirm_text: str, note: str, done_message: Callable[[actions.BatchResult], str],
-                      after: Optional[Callable[[actions.BatchResult], None]] = None, rescan: bool = False) -> None:
+                      after: Optional[Callable[[actions.BatchResult], None]] = None, rescan: bool = False,
+                      require_ack: Optional[str] = None) -> None:
         if not acts:
             return
         ids = [a.file_id for a in acts if a.file_id is not None]
-        if not confirm(self, title, summary, details, confirm_text, note=note, thumbs=self.ctx.thumbs, file_ids=ids):
+        if not confirm(self, title, summary, details, confirm_text, note=note, thumbs=self.ctx.thumbs, file_ids=ids,
+                       require_ack=require_ack, danger=bool(require_ack), note_kind="warn" if require_ack else "trust"):
             return
         lib = self.lib
 
@@ -146,7 +148,7 @@ class Page(QWidget):
 
 def recovery_note() -> str:
     return ("<b>Nothing is deleted.</b> Files are moved to this library's Recovery folder and every move "
-            "is recorded. You can undo it from <b>History &amp; recovery</b> at any time.")
+            "is recorded. You can undo it from <b>History &amp; recovery</b> until Recovery is emptied.")
 
 
 def recycle_summary(n: int, size: int) -> str:

@@ -234,12 +234,15 @@ plain-text JSON preview). See <a href="#diagnostics">Aggregate diagnostics</a> f
 <h3>Schema versioning</h3>
 <p><code>PRAGMA user_version</code> records the schema version. The v1 schema is frozen; later changes are numbered
 steps in <code>db.MIGRATIONS</code>, applied in transactions on open. A catalogue with a higher version than the app
-raises <code>LibraryTooNew</code> rather than being misread. Current version: <b>6</b>. Back up the catalogue before upgrading
+raises <code>LibraryTooNew</code> rather than being misread. Current version: <b>7</b>. Back up the catalogue before upgrading
 if you need to return to an older application build.</p>
 <p>Version 6 adds the metadata fields and defaults <code>metadata_version</code> to 0. Scanner analysis includes media
 with an older/missing marker even when <code>analyzed=1</code>; each completed batch stores the new fields and current
 marker. Cancelled refreshes resume incrementally. Legacy parked/missing snapshots inherit default 0 when restored.
 IDs, relationships and health baselines are not reset. Invalid optional EXIF numbers are logged and left NULL.</p>
+<p>Version 7 adds <code>duplicate_kept</code>, containing signatures of unchanged Keep both/all review groups.
+It does not change the media-analysis version. Signatures cover group identity and reviewed file IDs, paths, sizes,
+modified times and hashes. Saved decisions stay local to the catalogue and are not exported in diagnostics.</p>
 <table>
   <tr><th>Table</th><th>Since</th><th>Purpose</th></tr>
   <tr><td><code>parked_files</code> (<code>op_id</code>, <code>file_id</code>, <code>data</code> JSON)</td><td>v2</td><td>Catalogue rows of files in Recovery, restored on undo; dropped when Recovery is emptied.</td></tr>
@@ -251,6 +254,7 @@ IDs, relationships and health baselines are not reset. Invalid optional EXIF num
   <tr><td><code>video_sigs</code> (<code>file_id</code>, <code>size</code>, <code>mtime</code>, <code>duration</code>, <code>sig</code>)</td><td>created by <code>videosim</code></td><td>Cached frame signatures; valid only while size and mtime match.</td></tr>
   <tr><td><code>missing_files</code> (<code>file_id</code>, <code>rel_path</code>, <code>data</code> JSON)</td><td>v4</td><td>Absent-file snapshots retained across rescans and restored with the same identity when the path returns.</td></tr>
   <tr><td><code>storage_reset</code> (<code>id=1</code>, <code>options</code>, <code>phase</code>, <code>forgotten</code>)</td><td>v5</td><td>Pending selective reset; removed only after rebuilding finishes.</td></tr>
+  <tr><td><code>duplicate_kept</code> (<code>signature</code>)</td><td>v7</td><td>Remembered unchanged Keep both/all groups; preserved by safe reset, optionally cleared by custom/hard reset.</td></tr>
 </table>
 <h3><code>batches</code> and <code>operations</code> (journal)</h3>
 <table>
@@ -290,7 +294,8 @@ groups with equal (size, qhash) ──full_hash (xxh3-128 of whole file)──�
 (<code>(1)</code>, <code>copy</code>, <code>_copy</code>, <code>duplicate</code>, <code>~1</code>) + 2 for a copy-like folder
 (backup, download, whatsapp, temp, export…) + 0.1 per folder level. <code>plan_removal</code> emits <code>recycle</code>
 actions with <code>hash</code> = group hash (forces a fresh full hash of each copy) and a <code>guard</code> = (keeper path,
-hash) verified once per batch.</p>
+hash) verified once per batch. Explicit selected file IDs can instead remove one chosen copy or all shown copies;
+a survivor guard is omitted only when no shown member is being kept. Source hashes/stat checks remain.</p>
 
 <h3 id="p-dupfolders">Duplicate folders (<code>duplicates.find_all</code>, <code>find_duplicate_folders</code>, <code>plan_cleanup</code>)</h3>
 <ol>
@@ -316,6 +321,14 @@ hash) verified once per batch.</p>
       copy (junk and 0-byte files go along unguarded); folders get <code>rmdir</code> actions deepest-first, which pre-flight
       skips unless the folder is empty.</li>
 </ol>
+<p>Explicit folder choices are limited to members of the reviewed match. <code>inside</code> matches never permit
+removing the containing folder. Removing all <code>same</code> folders intentionally has no survivor requirement;
+it uses minimal file snapshots captured during Find, including fingerprints for empty/junk entries. Unverified
+snapshots reject the plan; newly added files cannot be included. The ordinary folder planner excludes all other
+planned removals from potential survivor guards and respects explicitly protected keep choices.</p>
+<p>Folders with explicit review choices are accounted for before rebuilding loose file groups, avoiding overlapping
+individual plans. The UI stages selections before one shared confirmation, with a mandatory acknowledgement for
+Remove both/all. Only Keep decisions persist; Include all and later scans never replay prior Remove-all choices.</p>
 <p>Cost is O(files × folder depth) in memory after hashing: ≈0.1 s for the sample library with cached hashes.</p>
 
 <h3 id="p-sim">Similarity &amp; best shot (<code>similar</code>)</h3>
@@ -751,11 +764,9 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>222 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
-<a href="report.html">quality report</a> records the last full-suite snapshot (209 tests, before notifications).
-The notification update was separately verified with 18 notification, live-index and end-to-end UI tests; all passed.
-The map navigation/label update passed 20 map, album/place and end-to-end UI regression tests.
-Fake-tray/offscreen tests do not verify actual Windows popup appearance or OS delivery policy.</p>
+<p><b>234 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. See the generated
+<a href="report.html">quality report</a> for full-suite outcomes and timings. Fake-tray/offscreen tests do not verify
+actual Windows popup appearance or OS delivery policy.</p>
 <table>
   <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
   <tr><td><code>test_engine.py</code></td><td>29</td><td>Hash pre-filter semantics; incremental scan; counts, errors, dates and date sources; EXIF rotation; HEIC and video analysis; duplicate groups vs ground truth incl. the &gt;1.28 MB regression; removal + undo restores an identical tree; changed keeper/copy are skipped; user keeper override/exclusion; bursts and best frame; near-duplicates prefer original; exact copies and screenshots excluded from Similar; blur detection; organise plan/apply/undo and uncertain dates; tidy categories and apply/undo (folders recreated); health baseline, bit-flip damage, edit detection; compare read-only + two-way sync + undo; overlapping folder rejection; verified copy failure leaves nothing; never overwrites; crash reconciliation; cancellation; Empty Recovery.</td></tr>
@@ -771,8 +782,11 @@ Fake-tray/offscreen tests do not verify actual Windows popup appearance or OS de
   <tr><td><code>test_ui_smoke.py</code></td><td>4</td><td>Drives the real window offscreen: Check everything, every page (find, preview, viewer, plan, health, compare, story preview, video compress, similar videos), a batch move to Recovery undone with Ctrl+Z, a duplicate removal undone from History, an edited photo
     (crop + adjustments) and an edited video (trim + contrast) saved and undone; light/dark screenshots, reset UI,
     thumbnail budgets/invalidation, single selection and opt-in cleanup.</td></tr>
-  <tr><td><code>test_storage.py</code></td><td>13</td><td>Selective clearing, media/history preservation, transaction rollback,
-    process termination, cancellation/resume, changed media, low-space and compaction recovery.</td></tr>
+  <tr><td><code>test_storage.py</code></td><td>14</td><td>Selective clearing, media/history and duplicate-choice preservation,
+    transaction rollback, process termination, cancellation/resume, changed media, low-space and compaction recovery.</td></tr>
+  <tr><td><code>test_duplicate_choices.py</code></td><td>11</td><td>Explicit one/all selections, cancellation and Undo,
+    changed/new/previously empty files, protected folder/file overlaps, keep-choice persistence/invalidation,
+    schema-6 upgrade, storage reset, required acknowledgement and visible save failures.</td></tr>
   <tr><td><code>test_insights.py</code></td><td>9</td><td>Folder/type totals, literal search, combined filters, leap dates,
     saved-album links, India/world switching, bounded 10,000-row paging, visible offline labels, mouse/touchpad/keyboard
     zoom, drag geometry, stale-result rejection and map responsiveness during a blocked background query.</td></tr>

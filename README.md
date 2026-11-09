@@ -49,8 +49,12 @@ the rendered page).
   pass that runs every finder and puts count badges in the sidebar.
 - **Find → Review → Confirm → Apply → Undo** for file clean-up, with plain-language reasons for suggestions.
   Irreversible personal catalogue clearing has a separate acknowledgement.
-- **Exact duplicates are proven**, not guessed: files are compared by full-content hash (xxh3-128), and the kept copy is
-  verified before anything moves.
+- **Exact duplicates are proven**, not guessed: files are compared by full-content hash (xxh3-128). Normal removal
+  verifies a surviving copy. Explicit **Remove both/all** instead requires acknowledgement and still rechecks each
+  reviewed file before moving it to Recovery.
+- **Duplicate choices**: remove one selected copy/folder, remove both/all shown copies, or keep both/all.
+  Keep choices persist for unchanged groups; **Show previous choices** reveals them. Remove-all choices are never
+  replayed automatically, and containing folders with unique files cannot both be removed.
 - **People**: finds faces with two small open models (YuNet + SFace, run by OpenCV), groups the same person
   together, and lets you name, join and correct groups, find look-alikes, and search Photos & videos by name. All
   offline; face data stays in the library's catalogue and can be forgotten with one click.
@@ -144,7 +148,7 @@ These documents describe unreleased source updates after 1.4; an existing packag
 | Review clean-up first | The shared file-plan confirmation states what will happen, with counts and sizes. Creative tools have explicit Save/Export controls. |
 | Originals are protected | "Remove" moves files to `.memoria\recovery\<batch>\<original path>`. **Empty Recovery** permanently deletes them and requires acknowledgement. Undo can delete unchanged generated copies. |
 | File operations are recoverable | Moves, copies and published outputs are journaled for Undo. Empty Recovery and acknowledged deletion of personal catalogue data cannot be undone. |
-| No stale decisions | Just before acting, each file's size and modified time are re-checked. Duplicates are also re-hashed, and the kept copy is verified. Changed files are skipped and reported. |
+| No stale decisions | File information and duplicate content hashes are re-checked. Normal cleanup also verifies a surviving copy; acknowledged Remove both/all intentionally has no survivor requirement. Changed files are skipped and reported. |
 | Nothing is overwritten | Name clashes get a new name, such as `IMG_1234 (2).jpg`. |
 | Copies are proven | Each copy is written to a temporary name, compared byte for byte, then renamed. |
 | One window per library | A lock file prevents two Memoria windows (or processes) from changing the same library. |
@@ -213,7 +217,7 @@ memoria-photo-manager/
 ├── memoria/                    application package
 │   ├── engine/                 UI-independent engine (testable without Qt)
 │   │   ├── actions.py          journaled executor: apply · undo · reconcile · Recovery
-│   │   ├── db.py               Library + schema v6 (files, extended metadata, journal, retained rows, reset state)
+│   │   ├── db.py               Library + schema v7 (metadata, journal, retained rows, reset state, duplicate choices)
 │   │   ├── catalogue.py · geography.py · storage.py  filters/aggregates, offline map, selective reset
 │   │   ├── diagnostics.py      allowlisted aggregate reports and bounded performance metrics
 │   │   ├── scanner.py          incremental scan + parallel analysis
@@ -266,7 +270,9 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_video.py` | 7 | Compression shrinks and verifies, sources are untouched, target size is met, cancel cleans up. |
 | `tests/test_story.py` | 30 | Exact output sizes, every template, panorama seams, EXIF rotation, story-video duration. |
 | `tests/test_ui_smoke.py` | 4 | Drives every page in both themes; checks Undo, thumbnails, opt-in cleanup, reset confirmations and the resumable reset UI. |
-| `tests/test_storage.py` | 13 | Safe/custom/hard reset, retained media and Undo, atomic rollback, abrupt process exit, cancellation/retry, updated media and low-space compaction. |
+| `tests/test_storage.py` | 14 | Safe/custom/hard reset, retained media/Undo and duplicate choices, rollback, interruption, cancellation/retry and low-space compaction. |
+| `tests/test_duplicate_choices.py` | 11 | Explicit one/all removal, Undo, cancellation, changed/new files, folder overlap protection, remembered choices, v6 upgrade and acknowledgement UI. |
+| `tests/test_notifications.py` | 10 | Private event routing, preferences, focus/background handling, partial failures, cancellation, Undo preservation and shutdown. |
 | `tests/test_insights.py` | 9 | Folder/type totals, filters, leap dates, album links, bounded 10,000-file browsing, offline place labels, wheel/touchpad/keyboard zoom, drag panning and stale-query handling. |
 | `tests/test_metadata.py` | 21 | Real EXIF/video extraction, schema-5 backfill, retained-row migration, cancellation/resume, numeric sorting with unknowns last, combined metadata filters and preview UI. |
 | `tests/test_diagnostics.py` | 9 | Cached-only summaries, sensitive-field exclusion, opt-in and bounded metrics, real Windows memory counters, atomic writes, task timing and library-switch/disable safety. |
@@ -369,8 +375,11 @@ restart. Do not reset/delete the catalogue to install this change.
   explicit "Keep only best in every group" shortcut remains available.
 - Editor, Story maker and Video compressor outputs are recorded in History when a library is open,
   including completed outputs kept after cancellation.
-- Opening an older catalogue upgrades it to schema v6. The upgraded catalogue requires this version
+- Opening an older catalogue upgrades it to schema v7. The upgraded catalogue requires this version
   or newer; keep a backup of the catalogue before upgrading if you need to return to an older release.
+- Schema v7 stores duplicate Keep both/all decisions; it does not force another media-analysis pass on a current
+  v6 catalogue. New/changed review groups are not silently hidden. Tick **Show previous choices** to revisit kept
+  groups; checking one or choosing a removal forgets its previous keep decision. Completed removals remain in History.
 - Unified multi-folder libraries are not included in this update.
 
 ### Storage & reset
@@ -380,9 +389,9 @@ photos, try **Rescan library (F5)** first.
 
 - **Safe rebuild (soft)** is the default: clear photo/video thumbnails, analysis and similarity caches,
   then re-index originals in place. Saved albums, people/names/corrections, health fingerprints,
-  missing-file records, Recovery and Undo history remain.
+  missing-file records, duplicate keep choices, Recovery and Undo history remain.
 - **Custom reset:** tick only the categories you want to clear. Clearing People, Albums, Health
-  fingerprints or missing-file records requires acknowledgement and **cannot be undone**.
+  fingerprints, missing-file records or previous duplicate choices requires acknowledgement and **cannot be undone**.
   Forgetting missing records also removes their album/face links.
 - **Start fresh (hard)** selects all these categories. It resets the catalogue's user data and analysis,
   not your media or operating-system settings. Stable file identities and the operation journal are

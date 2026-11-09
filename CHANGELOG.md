@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Explicit duplicate review choices
+- Added Remove 1 (the selected copy/folder), Remove both/all shown copies, and Keep both/all for files and identical
+  folder groups. Containing folders with unique files cannot both be removed.
+- Remove both/all needs an explicit acknowledgement that no shown copy may remain in the library. It still uses
+  per-file content/stat checks, Recovery and the existing Undo journal; normal cleanup retains survivor guards.
+- Explicit all-folder removal uses reviewed file snapshots, never newly discovered contents. Changed files are
+  skipped; folders are removed only when empty. Kept choices and other planned removals are respected across groups.
+- Schema v7 remembers unchanged Keep both/all groups. Show previous choices reveals them without selecting them;
+  new group members or detected changes invalidate the match. Removal choices are not automatically replayed.
+- Safe rebuild preserves keep choices; a custom/hard reset can clear them with acknowledgement. No new media-analysis
+  version or full re-analysis is required for an already-current catalogue.
+- Selected-size/count summaries include explicit removals of every copy. A stale selection signal when the final
+  duplicate group disappeared is now blocked while rebuilding the empty result list.
+- Full regression suite: 234 passed. Refreshed the quality report and directly related duplicate/reset/safety screenshots
+  using generated test media, without a large-library benchmark or access to original user photos.
+
 ### Offline map navigation and labels
 - Wheel and pixel-only touchpad scrolling zoom immediately, including over map margins; zero-motion gesture
   events no longer zoom out. Added +/− buttons, keyboard zoom/arrow panning, and click-drag panning.

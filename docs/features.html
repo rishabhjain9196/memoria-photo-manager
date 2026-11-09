@@ -187,7 +187,8 @@ currently shown, <b>Open in default app</b>, <b>Show in folder</b>, and Esc to c
 <figure><img src="images/library-filters-video.png" alt="Video and dimension filters"><figcaption>Inclusive ranges with explicit units. Resolution uses pixel count, not a quality judgement.</figcaption></figure>
 <figure><img src="images/library-filters-camera.png" alt="Camera and exposure filters"><figcaption>Photographic fields are available only when present in standard EXIF metadata.</figcaption></figure>
 <figure><img src="images/photos-video-metadata.png" alt="Video length sorting and metadata preview"><figcaption>Length sorting with reported frame rate, codecs and estimated overall bitrate in the preview.</figcaption></figure>
-<p>Opening an older catalogue upgrades it to schema v6 and refreshes media analysis once. This reads originals in place,
+<p>Opening an older catalogue upgrades it to schema v7. Catalogues from before v6 refresh media analysis once;
+v7 itself only adds saved duplicate keep choices and does not repeat that analysis. This reads originals in place,
 preserves identities and health fingerprints, and resumes after cancellation. Older files in Recovery or missing
 records refresh when restored. The preview details scroll when many metadata fields are available.</p>
 <p><b>Interpretation:</b> bitrate is file bytes × 8 ÷ duration, including audio/container overhead, not a video-quality
@@ -264,8 +265,10 @@ folders</b>. Typical sources: phone backups, an old laptop copied onto a drive t
 reorganising.</p>
 <h3>How to use</h3>
 <ol>
-  <li>Click <b>Find duplicates</b>. Files are compared byte by byte; only files that share a size are read, so this is quick.</li>
-  <li>The tiles show duplicate folders, extra file copies and the space you can free.</li>
+  <li>Click <b>Find duplicates</b>. Candidate files are compared byte by byte after a size/hash prefilter.
+      Leftovers in matched folders are also fingerprinted to make explicit all-folder removal safe.</li>
+  <li>The tiles show duplicate folders, extra file copies and the size currently selected for Recovery.
+      Moving to Recovery does not itself free disk space.</li>
   <li><b>Duplicate folders</b> are listed first. A folder is listed when another folder holds <i>exactly the same files</i>,
       or <i>all of its files and more</i>. Sub-folders are included and names or layout don't matter (leftovers like
       Thumbs.db and empty files are ignored). Only the <b>highest</b> folder is shown: if all of "Old Laptop" is a copy of
@@ -274,23 +277,42 @@ reorganising.</p>
       size of videos, other files and sub-folders</b> — and the files inside. For identical folders, select one and click
       <b>Keep this folder instead</b> to keep it. When an original-looking folder sits inside a backup folder, the entry is
       shown but not ticked.</li>
-  <li><b>Duplicate files</b> follow: copies that are not already handled by a duplicate folder. Each group (left list) shows its copies with a <b>KEEP</b> badge on the one Memoria suggests keeping and <b>COPY</b> on
-      the others. The note explains the choice: copies in backup/download folders, names like "(1)" or "copy", or newer
-      copies are moved; the original-looking one is kept.</li>
+  <li><b>Duplicate files</b> follow: copies not already handled by a folder group. <b>KEEP</b> marks files left in place
+      and <b>MOVE</b> marks planned removals. The default still prefers an original-looking copy;
+      hover a thumbnail for its reason.</li>
   <li>To keep a different copy, select it and click <b>Keep this copy instead</b>.</li>
-  <li>Untick a folder or group to leave it exactly as it is (<b>Include all / Include none</b> for everything).</li>
+  <li><b>Remove 1:</b> select the exact copy or folder, then click Remove 1. Only that item is marked; the others stay.</li>
+  <li><b>Remove both / Remove all (N):</b> mark every shown member for Recovery. For folders, this is available only
+      for identical groups, never a containing folder that may hold unique files.</li>
+  <li><b>Keep both / Keep all (N):</b> leave every shown member untouched and remember the choice.
+      Unchanged kept groups are hidden by default. <b>Show previous choices</b> reveals them unchecked.
+      Tick a revealed group or choose a removal to replace that keep decision.</li>
+  <li>Unticking is temporary exclusion for this review. <b>Include all</b> uses suggested removals, not previous
+      Remove-all choices, and does not override remembered keeps. <b>Include none</b> excludes everything for this review.</li>
   <li>Click <b>Move duplicates to Recovery</b>, read the confirmation, confirm.</li>
 </ol>
+<div class="callout warn">Remove both/all can remove the last copy from the library. It requires a separate checkbox
+acknowledgement. Files go to Recovery, not permanent deletion; Undo remains available only while Recovery is intact.
+Review the result and your separate backup before ever emptying Recovery.</div>
+<p>Keep decisions are tied to the reviewed group members, locations and file signatures, not just filenames.
+New members or detected changes require review again. Folder choices take precedence over individual review of the
+files inside those folders. Completed removals are listed in History; removal choices are not replayed after rescanning.
+Storage &amp; reset can clear saved keep choices explicitly.</p>
 <h3>What changes</h3>
-<p>The extra copies move into Recovery, keeping their folder structure there. The kept copy is not touched. Right before
-moving, each copy is re-read to prove it is still identical to the kept copy, and the kept copy itself is checked.</p>
-<p>A duplicate folder moves as a whole: every file in it goes to Recovery, each one checked against an identical copy that
+<p>Selected copies move into Recovery, keeping their folder structure there. Normal removal checks a surviving copy.
+Explicit Remove both/all has no survivor requirement, but each reviewed file is still checked against its recorded
+content hash and file information. Changed files are skipped.</p>
+<p>With normal folder cleanup, reviewed contents go to Recovery; meaningful files are checked against an identical copy that
 stays in the library, and the emptied folders are then removed. If a file in it has changed, or something new has appeared
 in the folder, that file and its folder stay where they are. Undo puts the whole folder back.</p>
+<p>For explicit removal of all identical folders, only files captured in the review are included, including fingerprinted
+leftovers. New files are not added to that plan. Unreadable/unverified contents prevent this choice from being planned.</p>
 <figure><img src="images/duplicates-folders.png" alt="Duplicate folders"><figcaption>"Old Laptop" holds exactly the same
 files as "Albums" — shown once, at the top folder, with sizes and counts of photos and videos for each folder.</figcaption></figure>
 <figure><img src="images/duplicates.png" alt="Duplicates"><figcaption>Large 6 MB duplicates are handled correctly (the
 old command-line tool skipped every file over 1.28 MB).</figcaption></figure>
+<figure><img src="images/duplicates-choices.png" alt="Explicit remove one, remove all and keep all choices"><figcaption>Choices are staged for review; no files move until Apply is confirmed.</figcaption></figure>
+<figure><img src="images/duplicates-remove-all-confirm.png" alt="Acknowledgement before removing every shown copy"><figcaption>Removing every shown copy requires explicit acknowledgement and retains Recovery-based Undo.</figcaption></figure>
 </section>
 
 <section id="similar">
@@ -573,8 +595,8 @@ library it checks which steps finished and records them in History, so the chang
 <p>Open it below the library name in the sidebar. For normal new/changed files, try F5 first.</p>
 <ul>
   <li><b>Safe rebuild (soft):</b> clear thumbnails, file analysis and similar-video caches, then re-index originals
-      in place. Albums, people/corrections, health fingerprints and missing records remain.</li>
-  <li><b>Custom:</b> choose individual categories. Clearing people, saved albums, health baselines or missing records
+      in place. Albums, people/corrections, health fingerprints, missing records and duplicate keep choices remain.</li>
+  <li><b>Custom:</b> choose individual categories. Clearing people, saved albums, health baselines, missing records or duplicate keep choices
       requires acknowledgement and cannot be undone. Forgetting missing records also removes their album/face links.</li>
   <li><b>Start fresh (hard):</b> select all catalogue-data categories. Stable file identities, operation history,
       original media, exports and Recovery remain. This is not deletion of the database folder.</li>

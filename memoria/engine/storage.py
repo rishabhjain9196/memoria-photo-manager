@@ -21,6 +21,7 @@ class ResetOptions:
     albums: bool = False
     health: bool = False
     missing: bool = False
+    duplicate_choices: bool = False
     compact: bool = False
 
 
@@ -89,6 +90,8 @@ def _clear_catalogue(lib: Library, options: ResetOptions) -> None:
         if options.albums:
             db.execute("DELETE FROM album_items")
             db.execute("DELETE FROM albums")
+        if options.duplicate_choices:
+            db.execute("DELETE FROM duplicate_kept")
         db.execute("INSERT INTO storage_reset VALUES (1,?,'caches',?)",
                    (json.dumps(asdict(options)), json.dumps(forgotten)))
 

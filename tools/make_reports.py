@@ -34,6 +34,7 @@ AREAS = {
     "test_batch": "Batch actions and Check everything",
     "test_videosim": "Similar videos",
     "test_dupfolders": "Duplicate folders",
+    "test_duplicate_choices": "Explicit duplicate choices, remembered keeps and all-copy removal safety",
     "test_faces": "People (face recognition)",
     "test_albums": "Albums and places",
     "test_photoedit": "Photo editor",

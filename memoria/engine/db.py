@@ -130,6 +130,9 @@ MIGRATIONS: dict[int, list[str]] = {
         "ALTER TABLE files ADD COLUMN focal_length_mm REAL",
         "ALTER TABLE files ADD COLUMN lens TEXT",
     ],
+    7: [
+        "CREATE TABLE duplicate_kept (signature TEXT PRIMARY KEY)",
+    ],
 }
 SCHEMA_VERSION = max(MIGRATIONS)
 METADATA_VERSION = 1

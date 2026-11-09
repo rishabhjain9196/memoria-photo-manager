@@ -15,6 +15,7 @@ CHOICES = {
     "albums": ("Saved albums", "Album definitions are lost. Exported folders and photos stay untouched."),
     "health": ("Health fingerprints", "Loses the old reference for detecting damage. Run Health check to establish a new baseline."),
     "missing": ("Missing-file records", "Forget missing entries and their album/face links. No files are deleted."),
+    "duplicate_choices": ("Previous Keep both/all choices", "Show previously kept duplicate groups for review again."),
     "compact": ("Shrink storage files", "Optional: returns unused database space to disk. Needs temporary disk space."),
 }
 
@@ -77,7 +78,7 @@ class StorageDialog(QDialog):
         self._selection_changed()
 
     def _selection_changed(self) -> None:
-        destructive = any(self.boxes[key].isChecked() for key in ("people", "albums", "health", "missing")
+        destructive = any(self.boxes[key].isChecked() for key in ("people", "albums", "health", "missing", "duplicate_choices")
                           if key in self.boxes)
         self.ack.setVisible(destructive)
         self.go_btn.setEnabled(any(box.isChecked() for box in self.boxes.values()) and

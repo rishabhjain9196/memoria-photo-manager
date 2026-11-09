@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import os
 import re
+import hashlib
+import json
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -113,6 +115,8 @@ def keeper_reason(keeper, other) -> str:
 
 def _make_group(h: str, members: list) -> DuplicateGroup:
     members = sorted((dict(m) for m in members), key=keeper_score)
+    for member in members:
+        member["chash"] = h
     keeper = members[0]
     g = DuplicateGroup(hash=h, size=keeper["size"], files=members, keeper_id=keeper["id"])
     g.reasons[keeper["id"]] = "Kept: best name and location"
@@ -130,23 +134,57 @@ def find_duplicates(lib: Library, progress: Optional[Progress] = None, media_onl
 
 
 def plan_removal(lib: Library, groups: list[DuplicateGroup], keepers: Optional[dict[str, int]] = None,
-                 excluded: Optional[set[int]] = None) -> list[Action]:
+                 excluded: Optional[set[int]] = None, *,
+                 removals: Optional[dict[str, set[int]]] = None) -> list[Action]:
     """Actions moving every non-keeper to Recovery. ``keepers`` overrides keeper per group hash;
-    ``excluded`` file ids are left untouched."""
+    ``excluded`` file ids are left untouched. Explicit ``removals`` may select every copy;
+    those still require their reviewed hash/mtime but intentionally have no surviving-copy guard."""
     keepers = keepers or {}
     excluded = excluded or set()
     actions = []
     for g in groups:
         keep_id = keepers.get(g.hash, g.keeper_id)
-        keeper = next(f for f in g.files if f["id"] == keep_id)
-        kpath = str(lib.abspath(keeper["rel_path"]))
+        ids = {f["id"] for f in g.files}
+        chosen = set((removals or {}).get(g.hash, ids - {keep_id}))
+        if not chosen <= ids or keep_id not in ids:
+            raise ValueError("Duplicate choices no longer match the reviewed files. Find duplicates again.")
+        chosen -= excluded
+        remaining = [f for f in g.files if f["id"] not in chosen]
+        keeper = next((f for f in remaining if f["id"] == keep_id), None)
+        if keeper is None and remaining:
+            keeper = min(remaining, key=keeper_score)
+        guards = [(str(lib.abspath(keeper["rel_path"])), g.hash)] if keeper else []
         for f in g.files:
-            if f["id"] == keep_id or f["id"] in excluded:
+            if f["id"] not in chosen:
                 continue
             actions.append(Action(op="recycle", src=str(lib.abspath(f["rel_path"])), size=f["size"],
-                                  mtime=f["mtime"], hash=g.hash, guards=[(kpath, g.hash)],
-                                  reason=f"Duplicate of {keeper['rel_path']}", file_id=f["id"]))
+                                  mtime=f["mtime"], hash=g.hash, guards=guards,
+                                  reason=f"Duplicate of {keeper['rel_path']}" if keeper else
+                                  "All shown copies explicitly selected for Recovery", file_id=f["id"]))
     return actions
+
+
+def _signature(value) -> str:
+    return hashlib.sha256(json.dumps(value, separators=(",", ":"), ensure_ascii=True).encode("ascii")).hexdigest()
+
+
+def _row_signature(rows) -> str:
+    return _signature(sorted((r["id"], r["rel_path"], r["size"], r["mtime"], r.get("chash")) for r in rows))
+
+
+def file_review_key(group: DuplicateGroup) -> str:
+    return "file:" + _signature((group.hash, _row_signature(group.files)))
+
+
+def kept_choices(lib: Library) -> set[str]:
+    return {row[0] for row in lib.db.execute("SELECT signature FROM duplicate_kept")}
+
+
+def remember_keep(lib: Library, signature: str, keep: bool) -> None:
+    if keep:
+        lib.db.execute("INSERT OR IGNORE INTO duplicate_kept VALUES (?)", (signature,))
+    else:
+        lib.db.execute("DELETE FROM duplicate_kept WHERE signature=?", (signature,))
 
 
 # ============================================================================ duplicate folders
@@ -177,7 +215,7 @@ class FolderMatch:
     """Whole folders that are duplicates.
 
     ``same``: the folders hold exactly the same files (byte for byte; names and layout may differ);
-    one is kept. ``inside``: every file in ``folders[0]`` is also in ``folders[1]``, which holds more.
+    one is kept by default. ``inside``: every file in ``folders[0]`` is also in ``folders[1]``, which holds more.
     """
     kind: str
     folders: list[FolderInfo]
@@ -223,16 +261,24 @@ class FolderMatch:
 class DuplicateReport:
     groups: list[DuplicateGroup]      # every set of identical photos/videos
     folders: list[FolderMatch]        # whole duplicate folders, highest level only
+    folder_files: dict[str, list[dict]] = field(default_factory=dict)
+    folder_signatures: dict[str, str] = field(default_factory=dict)
+
+    def folder_review_key(self, match: FolderMatch) -> str:
+        return "folder:" + _signature((match.id, [self.folder_signatures[f.path] for f in match.folders]))
 
     def redundant_folders(self, keepers: Optional[dict[str, str]] = None,
-                          include: Optional[set[str]] = None) -> list[str]:
-        paths = [f.path for m in self.folders if include is None or m.id in include for f in m.redundant(keepers)]
+                          include: Optional[set[str]] = None,
+                          removals: Optional[dict[str, set[str]]] = None) -> list[str]:
+        paths = [path for m in self.folders if include is None or m.id in include
+                 for path in (removals or {}).get(m.id, {f.path for f in m.redundant(keepers)})]
         return _outermost(paths)
 
-    def loose_groups(self, keepers: Optional[dict[str, str]] = None) -> list[DuplicateGroup]:
+    def loose_groups(self, keepers: Optional[dict[str, str]] = None,
+                     covered: Iterable[str] = ()) -> list[DuplicateGroup]:
         """File groups once duplicate folders are accounted for: copies inside a folder listed as a
         duplicate are handled with that folder, not one by one."""
-        red = {p.lower() for p in self.redundant_folders(keepers)}
+        red = {p.lower() for p in (*self.redundant_folders(keepers), *covered)}
         out = []
         for g in self.groups:
             left = [f for f in g.files if not _under_any(f["folder"], red)]
@@ -287,7 +333,22 @@ def find_all(lib: Library, progress: Optional[Progress] = None) -> DuplicateRepo
             groups.append(_make_group(h, media))
     groups.sort(key=lambda g: g.wasted, reverse=True)
     progress.update(1, 1, "Comparing folders…", force=True)
-    return DuplicateReport(groups, find_duplicate_folders(rows, ident))
+    folders = find_duplicate_folders(rows, ident)
+    paths = {f.path.lower(): f.path for match in folders for f in match.folders}
+    snapshots = {path: [] for path in paths.values()}
+    hashes = {r["id"]: h for h, members in ident.items() for r in members}
+    for row in rows:
+        matched = [paths[parent] for parent in _parents(row["folder"].lower()) if parent in paths]
+        if not matched:
+            continue
+        snapshot = {key: row[key] for key in ("id", "rel_path", "folder", "name", "size", "mtime")}
+        snapshot["chash"] = hashes.get(row["id"])
+        if row["size"] == 0 or is_junk(row["name"]):
+            snapshot["chash"] = full_hash(lib.abspath(row["rel_path"]))
+        for path in matched:
+            snapshots[path].append(snapshot)
+    return DuplicateReport(groups, folders, snapshots,
+                           {path: _row_signature(items) for path, items in snapshots.items()})
 
 
 def find_duplicate_folders(rows: list[dict], identical: dict[str, list]) -> list[FolderMatch]:
@@ -416,21 +477,51 @@ def find_duplicate_folders(rows: list[dict], identical: dict[str, list]) -> list
 
 def plan_cleanup(lib: Library, report: DuplicateReport, folders: Iterable[str] = (),
                  folder_keepers: Optional[dict[str, str]] = None, files: Iterable[str] = (),
-                 file_keepers: Optional[dict[str, int]] = None, excluded: Optional[set[int]] = None) -> list[Action]:
+                 file_keepers: Optional[dict[str, int]] = None, excluded: Optional[set[int]] = None, *,
+                 file_removals: Optional[dict[str, set[int]]] = None,
+                 folder_removals: Optional[dict[str, set[str]]] = None) -> list[Action]:
     """Actions for the chosen duplicate folders (``folders``: match ids) and file groups (``files``:
     hashes of ``report.loose_groups``).
 
     Every file moved out of a duplicate folder is guarded by an identical copy that stays in the
-    library; a folder whose files can't all be matched to a remaining copy is left alone. Emptied
-    folders are removed afterwards (only if nothing else appeared in them).
+    library, unless every folder of an identical group was explicitly selected. That exception
+    moves only files in the original review snapshot. Containing folders with unique files cannot
+    be selected this way. Emptied folders are removed only if nothing else appeared in them.
     """
     from .scanner import walk_dirs
     from .tidy import is_junk
     fk = folder_keepers or {}
+    folder_removals, file_removals = folder_removals or {}, file_removals or {}
+    matches = {m.id: m for m in report.folders}
+    if not folder_removals.keys() <= matches.keys():
+        raise ValueError("Folder choices no longer match this review. Find duplicates again.")
+    covered, protected, removing, unguarded = [], set(excluded or ()), [], set()
+    included = set(folders)
+    for match in report.folders:
+        members = {f.path for f in match.folders}
+        if match.id in folder_removals:
+            chosen = folder_removals[match.id]
+            allowed = members if match.kind == "same" else {match.folders[0].path}
+            if not chosen <= allowed:
+                raise ValueError("A containing folder may hold unique files and cannot be removed here.")
+            covered.extend(members)
+            for path in members - chosen:
+                protected.update(r["id"] for r in report.folder_files[path])
+        else:
+            chosen = {f.path for f in match.redundant(fk)}
+        if match.id in included:
+            removing.extend(chosen)
+            if match.kind == "same" and chosen == members:
+                unguarded.update(chosen)
+    removing = _outermost(removing)
+    loose = report.loose_groups(fk, covered)
+    for group in loose:
+        if group.hash in file_removals and not file_removals[group.hash]:
+            protected.update(f["id"] for f in group.files)
     wanted = set(files)
-    file_actions = plan_removal(lib, [g for g in report.loose_groups(fk) if g.hash in wanted], file_keepers, excluded)
+    file_actions = plan_removal(lib, [g for g in loose if g.hash in wanted], file_keepers, protected,
+                                removals=file_removals)
     gone = {a.file_id for a in file_actions}
-    removing = report.redundant_folders(fk, set(folders))
     rows = [dict(r) for r in lib.files()]
 
     def owner(r, keys: dict[str, str]) -> Optional[str]:
@@ -450,16 +541,24 @@ def plan_cleanup(lib: Library, report: DuplicateReport, folders: Iterable[str] =
             elif r["chash"] and r["size"] > 0 and r["id"] not in gone:
                 survivors[r["chash"]].append(r)
         bad = next((p for p in removing for r in mine[p]
-                    if r["size"] > 0 and not is_junk(r["name"]) and not survivors.get(r["chash"] or "")), None)
+                    if r["id"] in protected or (p not in unguarded and r["size"] > 0 and
+                    not is_junk(r["name"]) and not survivors.get(r["chash"] or ""))), None)
         if bad is None:
             break
         removing.remove(bad)
 
     actions: list[Action] = []
     for p in removing:
-        for r in sorted(mine[p], key=lambda r: r["rel_path"].lower()):
+        members = report.folder_files[p] if p in unguarded else mine[p]
+        if p in unguarded and any(not r["chash"] for r in members):
+            raise ValueError("Some reviewed folder contents could not be fingerprinted. "
+                             "Find duplicates again before choosing Remove both/all.")
+        for r in sorted(members, key=lambda r: r["rel_path"].lower()):
             src = str(lib.abspath(r["rel_path"]))
-            if r["size"] > 0 and not is_junk(r["name"]):
+            if p in unguarded:
+                actions.append(Action(op="recycle", src=src, size=r["size"], mtime=r["mtime"], hash=r["chash"],
+                                      reason="All identical folders explicitly selected for Recovery", file_id=r["id"]))
+            elif r["size"] > 0 and not is_junk(r["name"]):
                 keep = min(survivors[r["chash"]], key=keeper_score)
                 actions.append(Action(op="recycle", src=src, size=r["size"], mtime=r["mtime"], hash=r["chash"],
                                       guards=[(str(lib.abspath(keep["rel_path"])), r["chash"])],

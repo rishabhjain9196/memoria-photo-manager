@@ -34,6 +34,7 @@ def catalogue(tmp_path):
         lib.db.execute("INSERT INTO face_scans VALUES (?,?,?,1)", (row["id"], row["size"], row["mtime"]))
     lib.db.execute("CREATE TABLE video_sigs(file_id INTEGER PRIMARY KEY, sig TEXT)")
     lib.db.execute("INSERT INTO video_sigs VALUES (?,'test')", (rows[0]["id"],))
+    lib.db.execute("INSERT INTO duplicate_kept VALUES ('file:reviewed')")
     result = actions.apply(lib, "batch", "Recycle", batch.plan_recycle(lib, [rows[1]]))
     (root / rows[2]["rel_path"]).unlink()
     scanner.scan(lib)
@@ -59,6 +60,7 @@ def test_safe_rebuild_keeps_media_metadata_and_undo(catalogue):
     assert lib.db.execute("SELECT name FROM people").fetchone()[0] == "Keep this name"
     assert lib.db.execute("SELECT COUNT(*) FROM album_items").fetchone()[0] == 3
     assert lib.db.execute("SELECT COUNT(*) FROM faces").fetchone()[0] == 3
+    assert lib.db.execute("SELECT COUNT(*) FROM duplicate_kept").fetchone()[0] == 1
     assert lib.missing()[0]["id"] == rows[2]["id"]
     assert actions.undo(lib, bid).ok
     restored = lib.file(rows[1]["id"])
@@ -71,10 +73,11 @@ def test_safe_rebuild_keeps_media_metadata_and_undo(catalogue):
 def test_hard_reset_only_clears_catalogue_selections(catalogue):
     lib, rows, bid = catalogue
     before = media_snapshot(lib)
-    options = storage.ResetOptions(people=True, albums=True, health=True, missing=True)
+    options = storage.ResetOptions(people=True, albums=True, health=True, missing=True, duplicate_choices=True)
     storage.reset(lib, options)
     assert media_snapshot(lib) == before
-    for table in ("people", "faces", "face_scans", "face_rejects", "albums", "album_items", "video_sigs", "missing_files"):
+    for table in ("people", "faces", "face_scans", "face_rejects", "albums", "album_items", "video_sigs",
+                  "missing_files", "duplicate_kept"):
         assert lib.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
     assert lib.file(rows[0]["id"])["baseline_hash"] is None
     parked = json.loads(lib.db.execute("SELECT data FROM parked_files").fetchone()[0])
@@ -84,7 +87,7 @@ def test_hard_reset_only_clears_catalogue_selections(catalogue):
     assert full_hash(lib.abspath(rows[1]["rel_path"])) == rows[1]["baseline_hash"]
 
 
-@pytest.mark.parametrize("category", ["people", "albums", "health", "missing"])
+@pytest.mark.parametrize("category", ["people", "albums", "health", "missing", "duplicate_choices"])
 def test_custom_reset_leaves_unselected_data(catalogue, category):
     lib, rows, _ = catalogue
     options = storage.ResetOptions(thumbnails=False, analysis=False, videos=False)
@@ -93,6 +96,7 @@ def test_custom_reset_leaves_unselected_data(catalogue, category):
     assert bool(lib.db.execute("SELECT 1 FROM albums").fetchone()) == (category != "albums")
     assert bool(lib.file(rows[0]["id"])["baseline_hash"]) == (category != "health")
     assert bool(lib.missing()) == (category != "missing")
+    assert bool(lib.db.execute("SELECT 1 FROM duplicate_kept").fetchone()) == (category != "duplicate_choices")
     assert lib.db.execute("SELECT COUNT(*) FROM video_sigs").fetchone()[0] == 1
 
 

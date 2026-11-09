@@ -160,7 +160,9 @@ then simply tells the truth about those rules.</p>
   <tr><td>I4</td><td>File operations are journaled</td><td>File mutations are journaled in SQLite before they run
     (<code>pending</code>) and after (<code>done</code>).</td><td>Toast with Undo; History lists every step.</td></tr>
   <tr><td>I5</td><td>No stale decisions</td><td>Pre-flight checks size and modified time of each file; duplicates are
-    re-hashed in full and the kept copy is verified too.</td><td>"3 files skipped because they changed since you reviewed."</td></tr>
+    re-hashed in full and a surviving copy is verified for normal cleanup. Explicit Remove both/all keeps the
+    source checks but intentionally has no survivor guard.</td><td>Skipped-file feedback; an extra acknowledgement
+    before leaving no shown copy in the library.</td></tr>
   <tr><td>I6</td><td>No overwrites</td><td>Moves, copies and undo choose a non-clashing name ("IMG_1 (2).jpg").</td>
     <td>Undo reports "restored as …" if a clash occurred.</td></tr>
   <tr><td>I7</td><td>Copies are proven</td><td>Copy to temporary name → full-content hash compare → rename.</td>
@@ -204,7 +206,7 @@ then simply tells the truth about those rules.</p>
 <table>
   <tr><th>Situation</th><th>Response</th></tr>
   <tr><td>User edits a photo between "Find" and "Apply"</td><td>Pre-flight detects size/mtime change → skipped, reported.</td></tr>
-  <tr><td>The copy chosen to keep is deleted or changed by another app</td><td>Guard check fails → its duplicates are not moved.</td></tr>
+  <tr><td>The copy chosen to keep is deleted or changed by another app</td><td>Normal cleanup's guard fails → its duplicates are not moved. Explicit all-copy removal does not claim to keep a survivor.</td></tr>
   <tr><td>Power cut halfway through a 5,000-file move</td><td>Journal shows which moves completed; batch is marked
       <i>Partly done</i> and can be undone.</td></tr>
   <tr><td>Undo target name now taken by a new file</td><td>Restored under a new name; nothing overwritten.</td></tr>
