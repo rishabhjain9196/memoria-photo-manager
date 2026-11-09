@@ -103,16 +103,21 @@ class Page(QWidget):
     def apply_actions(self, kind: str, title: str, acts: list[Action], *, summary: str, details: list[str],
                       confirm_text: str, note: str, done_message: Callable[[actions.BatchResult], str],
                       after: Optional[Callable[[actions.BatchResult], None]] = None, rescan: bool = False,
-                      require_ack: Optional[str] = None) -> None:
+                      require_ack: Optional[str] = None, confirm_action: bool = True,
+                      before_apply: Optional[Callable[[], None]] = None) -> bool:
         if not acts:
-            return
+            return False
         ids = [a.file_id for a in acts if a.file_id is not None]
-        if not confirm(self, title, summary, details, confirm_text, note=note, thumbs=self.ctx.thumbs, file_ids=ids,
-                       require_ack=require_ack, danger=bool(require_ack), note_kind="warn" if require_ack else "trust"):
-            return
+        if confirm_action and not confirm(self, title, summary, details, confirm_text, note=note,
+                                          thumbs=self.ctx.thumbs, file_ids=ids, require_ack=require_ack,
+                                          danger=bool(require_ack), note_kind="warn" if require_ack else "trust"):
+            return False
         lib = self.lib
 
         def work(prog):
+            prog.check()
+            if before_apply:
+                before_apply()
             if not rescan:
                 return actions.apply(lib, kind, title, acts, prog)
             res = actions.apply(lib, kind, title, acts, prog.step(0, 2, title))
@@ -143,7 +148,7 @@ class Page(QWidget):
             if after:
                 after(res)
 
-        self.run(title, work, done, on_cancel=lambda: self.ctx.library_modified.emit(), notify_success=False)
+        return self.run(title, work, done, on_cancel=lambda: self.ctx.library_modified.emit(), notify_success=False)
 
 
 def recovery_note() -> str:

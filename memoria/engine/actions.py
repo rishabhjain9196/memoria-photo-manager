@@ -107,7 +107,7 @@ def safe_move(src: Path, dst: Path) -> None:
 
 
 def _now() -> str:
-    return datetime.now().isoformat(sep=" ", timespec="seconds")
+    return datetime.now().isoformat(sep=" ", timespec="microseconds")
 
 
 def apply(lib: Library, kind: str, title: str, actions: list[Action],
@@ -307,7 +307,7 @@ def _log(db, batch_id, seq, a: Action, dst, status, error=None) -> int:
 # History, undo, recovery
 # ---------------------------------------------------------------------------------------
 def batches(lib: Library) -> list[dict]:
-    rows = lib.db.execute("SELECT * FROM batches WHERE status!='nothing' ORDER BY created_at DESC, id DESC").fetchall()
+    rows = lib.db.execute("SELECT * FROM batches WHERE status!='nothing' ORDER BY created_at DESC, rowid DESC").fetchall()
     return [dict(r) for r in rows]
 
 

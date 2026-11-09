@@ -53,6 +53,9 @@ the rendered page).
   verifies a surviving copy. Explicit **Remove both/all** instead requires acknowledgement and still rechecks each
   reviewed file before moving it to Recovery.
 - **Duplicate choices**: remove one selected copy/folder, remove both/all shown copies, or keep both/all.
+  Remove buttons confirm and execute **only the current group**, then refresh the list. Optional **Quick remove**
+  skips those popups after one acknowledgement; it starts off in every new library window. **Apply marked groups**
+  remains a separate, always-confirmed bulk action.
   Keep choices persist for unchanged groups; **Show previous choices** reveals them. Remove-all choices are never
   replayed automatically, and containing folders with unique files cannot both be removed.
 - **People**: finds faces with two small open models (YuNet + SFace, run by OpenCV), groups the same person
@@ -147,7 +150,7 @@ These documents describe unreleased source updates after 1.4; an existing packag
 | Promise | How it is enforced |
 |---|---|
 | Looking preserves originals | Scanning, analysis, comparison and health checks read media and update `.memoria`. Opt-in diagnostics additionally writes aggregate reports in the source checkout. |
-| Review clean-up first | The shared file-plan confirmation states what will happen, with counts and sizes. Creative tools have explicit Save/Export controls. |
+| Review clean-up first | File-plan confirmations state counts and sizes. Duplicate Quick remove skips group confirmations only after explicit session consent; bulk Apply and Empty Recovery still ask. Creative tools have explicit Save/Export controls. |
 | Originals are protected | "Remove" moves files to `.memoria\recovery\<batch>\<original path>`. **Empty Recovery** permanently deletes them and requires acknowledgement. Undo can delete unchanged generated copies. |
 | File operations are recoverable | Moves, copies and published outputs are journaled for Undo. Empty Recovery and acknowledged deletion of personal catalogue data cannot be undone. |
 | No stale decisions | File information and duplicate content hashes are re-checked. Normal cleanup also verifies a surviving copy; acknowledged Remove both/all intentionally has no survivor requirement. Changed files are skipped and reported. |
@@ -252,7 +255,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 209 tests; runtime depends on the machine
+.\.venv\Scripts\python -m pytest -q                       # 240 tests; runtime depends on the machine
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 .\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + documentation screenshots
@@ -273,7 +276,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_story.py` | 30 | Exact output sizes, every template, panorama seams, EXIF rotation, story-video duration. |
 | `tests/test_ui_smoke.py` | 4 | Drives every page in both themes; checks Undo, thumbnails, opt-in cleanup, reset confirmations and the resumable reset UI. |
 | `tests/test_storage.py` | 14 | Safe/custom/hard reset, retained media/Undo and duplicate choices, rollback, interruption, cancellation/retry and low-space compaction. |
-| `tests/test_duplicate_choices.py` | 11 | Explicit one/all removal, Undo, cancellation, changed/new files, folder overlap protection, remembered choices, v6 upgrade and acknowledgement UI. |
+| `tests/test_duplicate_choices.py` | 14 | Group-scoped one/all removal, actual list refresh and Undo; quick-mode consent, changed-file protection and confirmed bulk Apply; same-timestamp History order; cancellation, folder overlap protection, remembered choices and v6 upgrade. |
 | `tests/test_notifications.py` | 10 | Private event routing, preferences, focus/background handling, partial failures, cancellation, Undo preservation and shutdown. |
 | `tests/test_insights.py` | 9 | Folder/type totals, filters, leap dates, album links, bounded 10,000-file browsing, offline place labels, wheel/touchpad/keyboard zoom, drag panning and stale-query handling. |
 | `tests/test_metadata.py` | 21 | Real EXIF/video extraction, schema-5 backfill, retained-row migration, cancellation/resume, numeric sorting with unknowns last, combined metadata filters and preview UI. |

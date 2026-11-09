@@ -327,8 +327,14 @@ it uses minimal file snapshots captured during Find, including fingerprints for 
 snapshots reject the plan; newly added files cannot be included. The ordinary folder planner excludes all other
 planned removals from potential survivor guards and respects explicitly protected keep choices.</p>
 <p>Folders with explicit review choices are accounted for before rebuilding loose file groups, avoiding overlapping
-individual plans. The UI stages selections before one shared confirmation, with a mandatory acknowledgement for
-Remove both/all. Only Keep decisions persist; Include all and later scans never replay prior Remove-all choices.</p>
+individual plans. Group Remove buttons build a plan for only the current group, confirm, execute and refresh the
+results. The separate bulk Apply uses marked groups and always confirms. Group Remove both/all requires an
+acknowledgement unless session-only Quick remove has already been explicitly acknowledged. Quick mode bypasses only
+the group confirmation, never engine validation or permanent-deletion safeguards. A saved Keep decision is cleared
+in the worker after confirmation, not when a cancelled dialog is prepared. Only Keep decisions persist; Include all
+and later scans never replay prior Remove-all choices.</p>
+<p>History sorts by creation time, with insertion order breaking equal timestamps rather than random batch IDs.
+New action batches record microsecond timestamps so rapid group actions retain their chronological Undo order.</p>
 <p>Cost is O(files × folder depth) in memory after hashing: ≈0.1 s for the sample library with cached hashes.</p>
 
 <h3 id="p-sim">Similarity &amp; best shot (<code>similar</code>)</h3>
@@ -640,7 +646,9 @@ selections are discarded. Reset does not delete <code>.memoria</code> or recover
       selections/scroll/later pages, and invalidates only refreshed rows' pixmaps. Final notifications run after worker
       callbacks; close/library-change guards reject obsolete completion callbacks. Maintenance resets remain gated.</li>
   <li><b>Shared change flow:</b> <code>Page.apply_actions</code> → <code>ConfirmDialog</code> → <code>runner.run(apply [+ index])</code>
-      → <code>library_modified</code> → toast with Undo (batch id) → failure dialog if needed.</li>
+      → <code>library_modified</code> → toast with Undo (batch id) → failure dialog if needed. Confirmation defaults on;
+      only acknowledged duplicate Quick remove opts out. An optional worker-side pre-apply hook clears the current
+      group's remembered keep choice after confirmation.</li>
   <li><b>PhotoGrid:</b> <code>QListView</code> (icon mode, uniform sizes, batched layout) + <code>PhotoModel</code> holding plain
       dicts + <code>PhotoDelegate</code> custom painting (rounded thumbnail, badge, tick box, video tag, captions). Thumbnails
       load on demand through a byte-budgeted <code>ThumbCache</code>, invalidated on library changes. Photos loads at most 500 rows.</li>
@@ -772,9 +780,8 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>237 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
-<a href="report.html">quality report</a> records the last full-suite snapshot (234 passed, before the compressor
-loading fix). That fix separately passed 14 video and end-to-end UI tests. Fake-tray/offscreen tests do not verify
+<p><b>240 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
+<a href="report.html">quality report</a> records the last full regression run. Fake-tray/offscreen tests do not verify
 actual Windows popup appearance or OS delivery policy.</p>
 <table>
   <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
@@ -795,9 +802,11 @@ actual Windows popup appearance or OS delivery policy.</p>
     thumbnail budgets/invalidation, single selection and opt-in cleanup.</td></tr>
   <tr><td><code>test_storage.py</code></td><td>14</td><td>Selective clearing, media/history and duplicate-choice preservation,
     transaction rollback, process termination, cancellation/resume, changed media, low-space and compaction recovery.</td></tr>
-  <tr><td><code>test_duplicate_choices.py</code></td><td>11</td><td>Explicit one/all selections, cancellation and Undo,
+  <tr><td><code>test_duplicate_choices.py</code></td><td>14</td><td>Explicit one/all selections, cancellation and Undo,
     changed/new/previously empty files, protected folder/file overlaps, keep-choice persistence/invalidation,
-    schema-6 upgrade, storage reset, required acknowledgement and visible save failures.</td></tr>
+    schema-6 upgrade, storage reset, required acknowledgement and visible save failures; actual group-scoped removal
+    and list refresh, quick-mode consent/reset, same-size/mtime changed-file protection, always-confirmed bulk Apply
+    and same-timestamp History ordering.</td></tr>
   <tr><td><code>test_insights.py</code></td><td>9</td><td>Folder/type totals, literal search, combined filters, leap dates,
     saved-album links, India/world switching, bounded 10,000-row paging, visible offline labels, mouse/touchpad/keyboard
     zoom, drag geometry, stale-result rejection and map responsiveness during a blocked background query.</td></tr>

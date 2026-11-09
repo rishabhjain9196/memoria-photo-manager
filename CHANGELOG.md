@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Direct duplicate removal and optional quick mode
+- Remove 1 and Remove both/all now confirm and execute only the current group, instead of silently marking a bulk
+  plan. The list refreshes afterwards; other marked groups are untouched. Keep both/all still saves a keep decision.
+- Added Quick remove, off by default in every new library window. Enabling it requires one acknowledgement that
+  Remove both/all can leave no shown copy in the library. Subsequent group actions skip confirmation popups, but still
+  verify files, use Recovery/Undo and report changed files or failures. Bulk Apply and Empty Recovery still ask.
+- Renamed plan-only controls to Use as bulk keeper, Bulk plan size and Apply marked groups to distinguish them from
+  immediate group actions. Cancelling a group confirmation preserves its previous Keep choice.
+- Fixed same-timestamp History ordering, which could make Undo last pick an earlier rapid action. New batches use
+  microsecond timestamps, with insertion order breaking timestamp ties, including older records.
+- Full regression suite: 240 passed. Refreshed the quality report and duplicate screenshots using generated test media,
+  including direct/quick removal, actual list updates, Undo and rejection of changed files with unchanged size/mtime.
+- No schema change, cache reset or media re-analysis is required.
+
 ### Video compressor opening freeze
 - Replaced eager per-video table items and thumbnail icons with a virtual table model. Opening the page reads only
   the metadata needed for its columns; cached thumbnails are requested for visible rows rather than the whole library.

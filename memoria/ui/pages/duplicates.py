@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QHeaderView, QListW
 
 from ...engine import duplicates
 from .. import theme
-from ..widgets import (Banner, EmptyState, MessageDialog, PhotoGrid, Preview, Tile, button, fmt_n, fmt_size, hbox, label,
+from ..widgets import (Banner, ConfirmDialog, EmptyState, MessageDialog, PhotoGrid, Preview, Tile, button, fmt_n, fmt_size, hbox, label,
                        show_in_explorer, vbox)
 from .base import Page, recovery_note, recycle_summary
 
@@ -45,6 +45,7 @@ class DuplicatesPage(Page):
         self.file_removals: dict[str, set[int]] = {}
         self.folder_removals: dict[str, set[str]] = {}
         self.kept: set[str] = set()
+        self._group_action_running = False
         self.entries: list[tuple[str, object]] = []     # per list row: ("head"|"folder"|"file", item)
 
         self.stack = QStackedWidget()
@@ -65,7 +66,7 @@ class DuplicatesPage(Page):
 
         self.t_folders = Tile(text="Duplicate folders")
         self.t_copies = Tile(text="Extra file copies")
-        self.t_space = Tile(text="Selected size")
+        self.t_space = Tile(text="Bulk plan size")
         self.list = QListWidget()
         self.list.setIconSize(QSize(48, 48))
         self.list.setFixedWidth(340)
@@ -79,13 +80,14 @@ class DuplicatesPage(Page):
         self.grid = PhotoGrid(ctx.thumbs, cell=170, captions=2)
         self.grid.setSelectionMode(PhotoGrid.SelectionMode.SingleSelection)
         self.grid.current_item.connect(self._file_selected)
-        self.keep_btn = button("Keep this copy instead", on_click=self._keep_selected)
+        self.keep_btn = button("Use as bulk keeper", on_click=self._keep_selected,
+                               tip="Choose the copy retained by the bulk plan below. This does not move files.")
         self.keep_btn.setEnabled(False)
         self.group_title = label("", "h2", wrap=True)
         self.group_note = label("", "muted", wrap=True)
         self.remove_one = button("Remove 1", on_click=lambda: self._choose_file("one"),
-                                 tip="Select a copy first. Only that copy will be marked for Recovery.")
-        self.remove_all = button("Remove both", on_click=lambda: self._choose_file("all"))
+                                 tip="Move only the selected copy to Recovery, then refresh this group.")
+        self.remove_all = button("Remove both", "danger", on_click=lambda: self._choose_file("all"))
         self.keep_all = button("Keep both", on_click=lambda: self._choose_file("keep"))
         file_view = QWidget()
         file_view.setLayout(vbox(hbox(self.group_title, None, self.keep_btn), self.group_note, self.grid,
@@ -94,8 +96,8 @@ class DuplicatesPage(Page):
         # -- whole-folder view
         self.f_title = label("", "h2", wrap=True)
         self.f_note = label("", "muted", wrap=True)
-        self.f_keep_btn = button("Keep this folder instead", on_click=self._keep_folder,
-                                 tip="Keep the selected folder and move the other copy to Recovery")
+        self.f_keep_btn = button("Use as bulk keeper", on_click=self._keep_folder,
+                                 tip="Choose the folder retained by the bulk plan below. This does not move files.")
         self.f_open_btn = button("Show in folder", on_click=self._open_folder)
         self.table = QTreeWidget()
         self.table.setColumnCount(len(COLUMNS))
@@ -115,8 +117,8 @@ class DuplicatesPage(Page):
         self.f_grid.setSelectionMode(PhotoGrid.SelectionMode.SingleSelection)
         self.f_grid.current_item.connect(self.preview.show_row)
         self.f_remove_one = button("Remove 1", on_click=lambda: self._choose_folder("one"),
-                                   tip="Mark only the selected duplicate folder for Recovery.")
-        self.f_remove_all = button("Remove both", on_click=lambda: self._choose_folder("all"))
+                                   tip="Move only the selected duplicate folder to Recovery, then refresh the list.")
+        self.f_remove_all = button("Remove both", "danger", on_click=lambda: self._choose_folder("all"))
         self.f_keep_all = button("Keep both", on_click=lambda: self._choose_folder("keep"))
         folder_view = QWidget()
         folder_view.setLayout(vbox(self.f_title, self.f_note, self.table,
@@ -134,19 +136,31 @@ class DuplicatesPage(Page):
         split.setStretchFactor(1, 1)
         split.setChildrenCollapsible(False)
         self.summary = label("", "")
-        self.apply_btn = button("Move duplicates to Recovery", "primary", self.apply)
+        self.apply_btn = button("Apply marked groups…", "primary", self.apply,
+                                tip="Confirm the combined bulk plan for all included groups. Quick mode does not skip this.")
+        self.quick_remove = QCheckBox("Quick remove: skip confirmation popups")
+        self.quick_remove.setToolTip("Ask once when enabling, then Remove 1/both/all acts on the current group "
+                                     "without further confirmation. Resets with this library window. Errors still appear.")
+        self.quick_remove.toggled.connect(self._quick_changed)
+        self.quick_warning = Banner(
+            "<b>Quick remove is on.</b> Remove buttons move the current group's chosen items immediately, including "
+            "all copies. Undo works until Recovery is emptied. Bulk Apply and Empty Recovery still ask.", "warn")
+        self.quick_warning.hide()
+        self.action_note = label("", "small", wrap=True)
         sel_all = button("Include all", "link", lambda: self._set_all(True),
                          tip="Use suggested removals. Previous Keep choices stay excluded; Remove all is not restored.")
         sel_none = button("Include none", "link", lambda: self._set_all(False),
                           tip="Exclude every group for this review. Use Keep both/all to remember a choice.")
         results = QWidget()
-        lay = vbox(hbox(self.t_folders, self.t_copies, self.t_space, spacing=12), Banner(recovery_note(), "trust"), split,
+        lay = vbox(hbox(self.t_folders, self.t_copies, self.t_space, spacing=12), Banner(recovery_note(), "trust"),
+                   hbox(self.quick_remove, None), self.quick_warning, self.action_note, split,
                    hbox(sel_all, sel_none, 12, self.summary, None, self.apply_btn), spacing=10)
         lay.setStretchFactor(split, 1)
         results.setLayout(lay)
         self.stack.addWidget(results)
         self.results = results
         self.body.addWidget(self.stack, 1)
+        self.ctx.runner.finished.connect(self._group_finished)
 
     # ------------------------------------------------------------------ lifecycle
     def refresh(self) -> None:
@@ -164,6 +178,7 @@ class DuplicatesPage(Page):
         self.apply_btn.setEnabled(not busy and self._has_selection())
         self.list.setEnabled(not busy)
         self.show_previous.setEnabled(not busy)
+        self.quick_remove.setEnabled(not busy)
         self._choice_buttons()
 
     def find(self) -> None:
@@ -349,8 +364,8 @@ class DuplicatesPage(Page):
             self.f_title.setText(f"Everything in “{red[0].path}” is also in “{keep}”")
         note = ("Compared byte by byte, including every sub-folder. File names and layout don't matter; Thumbs.db-style "
                 "leftovers and empty files are ignored. ")
-        note += (f"{len(targets)} selected folder(s) will move to Recovery when you apply."
-                 if targets else "Keep both/all — nothing here will change.")
+        note += (f"Bulk plan: {len(targets)} folder(s) marked for Recovery."
+                 if targets else "No folders marked in the bulk plan.")
         if len(targets) == len(m.folders):
             note += " WARNING: no folder in this group will stay in the library."
         if self.report.folder_review_key(m) in self.kept:
@@ -359,7 +374,8 @@ class DuplicatesPage(Page):
             names = ", ".join(f"“{f.path}”" for f in red)
             note += f" Not ticked at first because “{keep}” looks like a backup and {names} like the original."
         if m.kind == "same":
-            note += " To keep a different one, select it in the table and click “Keep this folder instead”."
+            note += " Use “Use as bulk keeper” to change that plan."
+        note += " Remove buttons act on this group only, not the other marked groups."
         self.f_note.setText(note)
         self.table.blockSignals(True)
         self.table.clear()
@@ -457,12 +473,13 @@ class DuplicatesPage(Page):
                           "tip": f"{f['rel_path']}\n{reason}: {explanation}"})
         self.grid.set_items(items)
         self.group_title.setText(f"{len(g.files)} identical copies of {self._keeper(g)['name']}")
-        note = f"{len(targets)} to Recovery; {len(g.files) - len(targets)} kept. "
+        note = f"Bulk plan: {len(targets)} to Recovery; {len(g.files) - len(targets)} kept. "
         if len(targets) == len(g.files):
             note += "WARNING: no shown copy will stay in the library. "
         if duplicates.file_review_key(g) in self.kept:
             note += "This previous keep choice is remembered. "
-        self.group_note.setText(note + "Select a copy for Remove 1. Choices take effect only when you apply below.")
+        self.group_note.setText(note + "Select a copy for Remove 1. Remove buttons act on this group only; "
+                                "the bottom button applies all marked groups.")
         if previous:
             index = next((i for i, f in enumerate(g.files) if f["id"] == previous[0]["id"]), None)
             if index is not None:
@@ -505,6 +522,87 @@ class DuplicatesPage(Page):
         (self.kept.add if keep else self.kept.discard)(key)
         return True
 
+    def _quick_changed(self, enabled):
+        accepted = False
+        if enabled and self._review_ready():
+            dialog = ConfirmDialog(
+                self, "Enable quick removal for this library window?",
+                "Remove 1 and Remove both/all will move the current group's selected items straight to Recovery.",
+                ["Other marked groups are not included.",
+                 "<b>Remove both/all can leave no copy of that group in the library.</b>",
+                 "Undo is available only while Recovery remains intact. Errors and partial failures still appear.",
+                 "Bulk Apply, Empty Recovery and other tools keep their confirmations."],
+                "Enable quick remove", danger=True,
+                require_ack="I understand that quick Remove both/all may leave no copy in the library.")
+            accepted = dialog.exec() == dialog.DialogCode.Accepted and dialog.ack.isChecked()
+            dialog.deleteLater()
+        self.quick_remove.blockSignals(True)
+        self.quick_remove.setChecked(accepted)
+        self.quick_remove.blockSignals(False)
+        self.quick_warning.setVisible(accepted)
+        self.action_note.setText("Quick remove enabled for this library window." if accepted else
+                                 "Quick remove is off. Group removal asks for confirmation.")
+
+    def _group_finished(self, outcome):
+        if self._group_action_running:
+            if outcome == "failed":
+                self.action_note.setText("Removal did not finish. Review the error details and History.")
+            elif outcome == "cancelled":
+                self.action_note.setText("Removal stopped. Completed changes remain in History.")
+            self._group_action_running = False
+
+    def _remove_group(self, kind, group, targets):
+        lib = self.lib
+        try:
+            if kind == "file":
+                plan = duplicates.plan_removal(lib, [group], self.keepers, removals={group.hash: targets})
+                key = duplicates.file_review_key(group)
+                all_selected = len(targets) == len(group.files)
+            else:
+                choices = {**self.folder_removals, group.id: targets}
+                plan = duplicates.plan_cleanup(lib, self.report, folders=[group.id],
+                                               folder_keepers=self.folder_keepers,
+                                               file_removals=self.file_removals, folder_removals=choices)
+                key = self.report.folder_review_key(group)
+                all_selected = len(targets) == len(group.folders)
+        except (ValueError, OSError, sqlite3.Error) as error:
+            MessageDialog(self, "Duplicate choices need another review", str(error)).exec()
+            return
+        files = [action for action in plan if action.op == "recycle"]
+        if not files:
+            self.action_note.setText("Nothing can be moved safely with this choice. Find duplicates again.")
+            return
+        details = ["<b>Only the current group is affected.</b> Other marked groups are not included.",
+                   "Reviewed file information and hashes are checked again. Changed files are skipped.",
+                   "The duplicate list refreshes when the operation finishes."]
+        if all_selected:
+            details.append("<b>Every shown copy in this group is selected. No shown copy will be kept.</b>")
+        elif kind == "folder":
+            details.append("Only the selected folder is moved; a proven copy is retained outside it.")
+        else:
+            details.append("Only the selected copy is moved; another proven copy is retained.")
+        quick = self.quick_remove.isChecked()
+        title = "Move this duplicate group to Recovery" if all_selected else "Move selected duplicate to Recovery"
+        def result_message(result):
+            return (f"Moved selected items to Recovery ({fmt_size(result.bytes)})." if result.done else
+                    "No items were moved.")
+        def finished(result):
+            self.action_note.setText(("Stopped part-way. " if result.cancelled else "") + result_message(result) +
+                                     (" Some items were skipped or failed; review the results."
+                                      if result.skipped or result.failed else " Duplicate results are refreshing."))
+        started = self.apply_actions(
+            "duplicates", title, plan, summary=recycle_summary(len(files), sum(a.size for a in files)),
+            details=details, confirm_text=f"Move {fmt_n(len(files), 'file')}", note=recovery_note(),
+            require_ack=("I understand that no shown copy may remain in the library."
+                         if all_selected and not quick else None),
+            confirm_action=not quick, before_apply=lambda: duplicates.remember_keep(lib, key, False),
+            done_message=result_message, after=finished)
+        if started:
+            self._group_action_running = True
+            self.action_note.setText("Checking the selected items and moving them to Recovery…")
+        else:
+            self.action_note.setText("No files moved. This group's previous choice is unchanged.")
+
     def _choose_file(self, mode):
         if not self._review_ready():
             return
@@ -513,12 +611,18 @@ class DuplicatesPage(Page):
         if group is None or (mode == "one" and not selected):
             self.ctx.toast_requested.emit("Select the duplicate copy you want to remove first.", "")
             return
-        if not self._remember(duplicates.file_review_key(group), mode == "keep"):
-            return
-        self.file_removals[group.hash] = ({selected[0]["id"]} if mode == "one" else
-                                          {f["id"] for f in group.files} if mode == "all" else set())
-        (self.included.discard if mode == "keep" else self.included.add)(group.hash)
-        self._rebuild()
+        if mode == "keep":
+            if not self._remember(duplicates.file_review_key(group), True):
+                return
+            self.file_removals[group.hash] = set()
+            self.included.discard(group.hash)
+            self._rebuild()
+            self.action_note.setText("Keep choice saved. No files moved." +
+                                     (" This group stays visible because Show previous choices is on."
+                                      if self.show_previous.isChecked() else ""))
+        else:
+            self._remove_group("file", group, {selected[0]["id"]} if mode == "one" else
+                               {f["id"] for f in group.files})
 
     def _choose_folder(self, mode):
         if not self._review_ready():
@@ -530,12 +634,18 @@ class DuplicatesPage(Page):
         if match.kind != "same" and (mode == "all" or mode == "one" and selected == match.keeper):
             self.ctx.toast_requested.emit("The containing folder can hold unique files. It cannot be removed here.", "")
             return
-        if not self._remember(self.report.folder_review_key(match), mode == "keep"):
-            return
-        self.folder_removals[match.id] = ({selected} if mode == "one" else
-                                          {f.path for f in match.folders} if mode == "all" else set())
-        (self.included_folders.discard if mode == "keep" else self.included_folders.add)(match.id)
-        self._rebuild()
+        if mode == "keep":
+            if not self._remember(self.report.folder_review_key(match), True):
+                return
+            self.folder_removals[match.id] = set()
+            self.included_folders.discard(match.id)
+            self._rebuild()
+            self.action_note.setText("Keep choice saved. No files moved." +
+                                     (" This group stays visible because Show previous choices is on."
+                                      if self.show_previous.isChecked() else ""))
+        else:
+            self._remove_group("folder", match, {selected} if mode == "one" else
+                               {f.path for f in match.folders})
 
     def _choice_buttons(self):
         group = self._current("file")
@@ -613,7 +723,7 @@ class DuplicatesPage(Page):
             parts.append(f"{fmt_n(n_folders, 'folder')} ({fmt_size(folder_size)})")
         if groups:
             parts.append(f"{fmt_n(file_count, 'copy', 'copies')} ({fmt_size(file_size)})")
-        self.summary.setText(" and ".join(parts) + " will move to Recovery" if parts else "Nothing included")
+        self.summary.setText("Bulk plan: " + " and ".join(parts) if parts else "No groups marked for bulk Apply")
         self.t_space.set(fmt_size(folder_size + file_size))
         self.apply_btn.setEnabled(bool(parts) and not self.busy)
 
