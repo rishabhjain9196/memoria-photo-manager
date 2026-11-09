@@ -90,7 +90,7 @@ class AlbumsPage(Page):
         self.videos = QCheckBox("Include videos")
         self.videos.setChecked(True)
         self.gap_label = label("New album after")
-        self.suggest_btn = button("Suggest albums", "primary", self.suggest)
+        self.suggest_btn = button("Suggest albums", "primary", lambda: self.suggest())
         options = hbox(self.mode, 12, self.gap_label, self.gap, 12, label("At least"), self.min_items,
                        label("items"), 12, self.videos, None, self.suggest_btn, spacing=6)
         self.s_list = QListWidget()

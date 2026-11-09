@@ -780,8 +780,9 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>240 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
-<a href="report.html">quality report</a> records the last full regression run. Fake-tray/offscreen tests do not verify
+<p><b>243 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
+<a href="report.html">quality report</a> records the last full regression run (240 passed, before the Suggest albums
+button fix). That fix separately passed 14 album and end-to-end UI tests. Fake-tray/offscreen tests do not verify
 actual Windows popup appearance or OS delivery policy.</p>
 <table>
   <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
@@ -792,7 +793,7 @@ actual Windows popup appearance or OS delivery policy.</p>
   <tr><td><code>test_safety.py</code></td><td>21</td><td>Unplugged drive, unreadable folder, real deletions still removed, undo keeps ids/thumbnails/fingerprints, organise undo keeps ids, Empty Recovery drops parked rows, cross-process lock, re-entrant lock released on close, schema migration from v1, refusal of newer catalogues, paths over 260 characters.</td></tr>
   <tr><td><code>test_videosim.py</code></td><td>7</td><td>Similar-video groups and best pick vs ground truth, identical copies excluded, signature cache and invalidation, cancellation, recycle/undo round trip.</td></tr>
   <tr><td><code>test_faces.py</code></td><td>8</td><td>Expected people/negative examples, incremental scanning, changed-photo rescans and missing-photo metadata retention; naming, merging and corrections; look-alike ranking; Recovery/Undo preserves faces; hide/unhide, forget-all and non-ASCII model paths.</td></tr>
-  <tr><td><code>test_albums.py</code></td><td>7</td><td>Offline place names and distances; date-range wording; event albums (three-day trip kept together, no screenshots or duplicate copies, time-ordered; splits without trip logic); place and people albums; album edits never touch files; export into folders with byte-identical copies, no overwrite, undo, refusal inside <code>.memoria</code>; Windows-safe folder names.</td></tr>
+  <tr><td><code>test_albums.py</code></td><td>10</td><td>Offline place names and distances; date-range wording; event albums (three-day trip kept together, no screenshots or duplicate copies, time-ordered; splits without trip logic); place and people albums; real Suggest button clicks in all modes with visible results or empty states; album edits never touch files; export into folders with byte-identical copies, no overwrite, undo, refusal inside <code>.memoria</code>; Windows-safe folder names.</td></tr>
   <tr><td><code>test_dupfolders.py</code></td><td>6</td><td>Nested copies reported once at the top folder, contained folders, renamed copies, junk ignored, folder stats (counts and sizes), originals preferred as containers, remaining file groups, keeper override, folder clean-up + undo restores the exact tree, a changed kept copy or a new file keeps the folder, no remaining copy → not planned, ground truth on the sample library.</td></tr>
   <tr><td><code>test_photoedit.py</code></td><td>20</td><td>Identity recipe, exact rotate/flip pixel mapping, pixel-exact crops and aspect boxes, straighten leaves no empty corners, adjustments move the right way, filters, resize never upscales, EXIF date kept + Orientation reset + GPS stripped, formats/quality, PNG alpha, HEIC → JPEG, split tiles reassemble exactly, join sizes and cap, size estimate, partial failures, cancellation leaves nothing.</td></tr>
   <tr><td><code>test_videoedit.py</code></td><td>12</td><td>Rotated sources baked upright, recipe planning, trim without overwrite, default output folder, speed changes duration and keeps audio, rotate/crop/mute/max height, fast filtered preview frames, split points, join landscape + portrait, frame extraction, cancelled export/split leave nothing.</td></tr>

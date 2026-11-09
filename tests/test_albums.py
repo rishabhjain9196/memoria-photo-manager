@@ -109,3 +109,60 @@ def test_folder_names_are_windows_safe():
     assert albums.folder_name("CON") == "_CON"
     assert albums.folder_name("Trip. ") == "Trip"
     assert albums.folder_name("") == "Album"
+
+
+@pytest.mark.parametrize("mode", ["event", "place", "person"])
+def test_suggest_button_uses_selected_mode_and_displays_results(library, monkeypatch, mode):
+    import sys
+    import time
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+    from memoria.ui.pages.albums import AlbumsPage, MODES
+    from memoria.ui.tasks import TaskRunner
+    from memoria.ui.widgets import AppContext
+
+    app = QApplication.instance() or QApplication([])
+    runner = TaskRunner()
+    ctx = AppContext(runner)
+    ctx.set_library(library)
+    page = AlbumsPage(ctx)
+    page.resize(1440, 900)
+    page.show()
+    page.tabs.setCurrentIndex(1)
+    page.mode.setCurrentIndex([key for key, _ in MODES].index(mode))
+    app.processEvents()
+    before = _snapshot(library.root)
+    started, errors, slot_errors = [], [], []
+    runner.started.connect(started.append)
+    runner.error.connect(lambda *args: errors.append(args))
+    monkeypatch.setattr(sys, "excepthook", lambda typ, value, tb: slot_errors.append(value))
+    try:
+        QTest.mouseClick(page.suggest_btn, Qt.MouseButton.LeftButton)
+        assert not slot_errors, slot_errors
+        assert started == ["Suggesting albums"]
+        deadline = time.monotonic() + 10
+        while runner.busy and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(.01)
+        app.processEvents()
+        assert not runner.busy and not errors and not slot_errors, (errors, slot_errors)
+        assert page.suggest_btn.isEnabled()
+        if mode == "person":
+            assert not page.suggestions and not page.save_btn.isEnabled()
+            assert page.s_title.text() == "No albums to suggest"
+        else:
+            assert page.suggestions and page.save_btn.isEnabled()
+            assert all(s.kind == mode and len(s.file_ids) >= 3 for s in page.suggestions)
+            assert page.s_list.count() == len(page.suggestions)
+            assert page.s_grid.items()
+        assert not albums.albums(library)  # suggestions require a separate Save click
+        assert _snapshot(library.root) == before
+    finally:
+        runner.cancel()
+        runner.wait()
+        app.processEvents()
+        page.close()
+        page.deleteLater()
+        app.processEvents()

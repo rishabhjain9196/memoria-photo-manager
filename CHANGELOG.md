@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Suggest albums button
+- Fixed the button passing Qt's checked-state flag as the album mode, which raised an error before a background
+  task could start. It now uses the selected Events & trips, Places or People mode.
+- Added real mouse-click regressions for all three modes, including visible results/empty states and unchanged
+  original files. The end-to-end UI flow now clicks the button instead of calling the suggestion method directly.
+- Extended that flow to click primary finder, preview, save, compression, cleanup and Undo buttons, requiring each
+  background task to start and finish rather than accepting previously cached results as proof that a button worked.
+- Verified with 14 album and end-to-end UI tests. No cache reset or library rescan is required.
+
 ### Direct duplicate removal and optional quick mode
 - Remove 1 and Remove both/all now confirm and execute only the current group, instead of silently marking a bulk
   plan. The list refreshes afterwards; other marked groups are untouched. Keep both/all still saves a keep decision.

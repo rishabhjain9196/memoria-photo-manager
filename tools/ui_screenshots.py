@@ -70,6 +70,16 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
             app.processEvents()
             time.sleep(0.02)
         pump(0.3)
+        if win.runner.busy:
+            raise RuntimeError(f"Task did not finish: {win.runner.title}")
+
+    def click_task(control):
+        if not control.isVisible() or not control.isEnabled():
+            raise RuntimeError(f"Task button is unavailable: {control.text()}")
+        control.click()
+        if not win.runner.busy:
+            raise RuntimeError(f"Button did not start a task: {control.text()}")
+        idle()
 
     def insights_idle(page, timeout=30):
         end = time.time() + timeout
@@ -92,8 +102,8 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
     win.open_library(library)
     idle()
     if interactive_flows:
-        win.run_checkup()          # read-only "Check everything" → sidebar badges + cached results
-        idle()
+        win.go("overview")
+        click_task(win.page("overview").check_btn)
     order = ["overview", "photos", "duplicates", "similar", "tidy", "organize", "editor", "story", "video", "health",
              "compare", "history", "people", "albums", "insights"]
     for i, key in enumerate(order, 1):
@@ -120,8 +130,7 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                     sel.select(page.grid.model().index(r, 0), QItemSelectionModel.SelectionFlag.Select)
                 pump()
             elif key == "duplicates":
-                page.find()
-                idle()
+                click_task(page.find_btn)
                 page.f_grid.setCurrentIndex(page.f_grid.model().index(0, 0))
                 pump(0.4)
                 shot(name=f"{i:02d}-duplicates-folders")
@@ -131,13 +140,11 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                 page.grid.setCurrentIndex(page.grid.model().index(1, 0))
                 pump()
             elif key == "similar":
-                page.find()
-                idle()
+                click_task(page.photos.find_btn)
                 page.grid.setCurrentIndex(page.grid.model().index(0, 0))
                 pump()
             elif key == "organize":
-                page.build_plan()
-                idle()
+                click_task(page.preview_btn)
             elif key == "editor":
                 ids = [r["id"] for r in page.lib.files("kind='image' AND error IS NULL AND rel_path LIKE 'DCIM%'",
                                                        order="rel_path")][:2]
@@ -152,21 +159,19 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                 page.p_aspect.setCurrentIndex(page.p_aspect.findData("4:5"))
                 pump(1.5)
                 shot(name=f"{i:02d}-{key}-crop")
-                page._toggle_crop()          # Done → show the cropped result
+                page.p_crop_btn.click()      # Done → show the cropped result
                 pump(1.5)
                 shot(name=f"{i:02d}-{key}-photo")
-                page.save()
-                idle()
+                click_task(page.save_btn)
                 page.files.setCurrentRow(2)  # first video
                 pump(2.5)
                 page.timeline.setValue(600)
                 page.v_sliders["contrast"].s.setValue(20)
                 pump(2.5)
-                page._set_trim("end")
+                page.set_end_btn.click()
                 pump(1.0)
                 shot(name=f"{i:02d}-{key}-video")
-                page.save()
-                idle()
+                click_task(page.save_btn)
             elif key == "story":
                 page.output.set_path(outdir.parent / "Stories")
                 if os.environ.get("MEMORIA_SHOT_LABEL"):
@@ -184,16 +189,13 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                 page._check_all(True)
                 pump(2.0)
                 shot(name=f"{i:02d}-{key}-selected")
-                page._compress()
-                idle()
+                click_task(page.compress_btn)
             elif key == "health":
-                page.check()
-                idle()
+                click_task(page.run_btn)
             elif key == "people":
                 import json
                 from memoria.engine import faces as _faces
-                page.find()
-                idle()
+                click_task(page.find_btn)
                 exp = Path(library) / "expected.json"
                 want = json.loads(exp.read_text()).get("people", {}) if exp.exists() else {}
                 for person in ("Abraham Lincoln", "Mark Twain"):
@@ -210,7 +212,7 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                     page.list.setCurrentRow(unnamed)
                     pump()
                     page.faces.item(0).setSelected(True)
-                    page.find_similar()
+                    page.like_btn.click()
                     pump(0.5)
                     shot(name=f"{i:02d}-{key}-lookalike")
                 page.list.setCurrentRow(0)
@@ -219,17 +221,18 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                 pump(0.5)
             elif key == "albums":
                 page.tabs.setCurrentIndex(1)
-                page.suggest("event")
-                idle()
+                page.mode.setCurrentIndex(0)
+                click_task(page.suggest_btn)
                 trip = next((r for r, s in enumerate(page.suggestions) if "–" in s.name and "·" in s.name), 0)
                 page.s_list.setCurrentRow(trip)
                 pump(0.5)
                 shot(name=f"{i:02d}-{key}-make")
-                page.save()
+                page.save_btn.click()
                 pump()
-                page.suggest("person")
-                idle()
-                page.save()
+                page.tabs.setCurrentIndex(1)
+                page.mode.setCurrentIndex(2)
+                click_task(page.suggest_btn)
+                page.save_btn.click()
                 pump()
                 page.tabs.setCurrentIndex(0)
                 pump()
@@ -252,8 +255,7 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                         d.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(page.lib.abspath(r["rel_path"]), d)
                 page.path.setText(str(other))
-                page.run_compare()
-                idle()
+                click_task(page.cmp_btn)
                 if os.environ.get("MEMORIA_SHOT_LABEL"):
                     page.path.setText(r"E:\Photos Backup")
             elif key == "history" and os.environ.get("MEMORIA_SHOT_LABEL"):
@@ -317,6 +319,7 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                 page.tabs.setCurrentIndex(t)
                 pump()
                 if page.videos is not None and page.tabs.currentWidget() is page.videos and interactive_flows:
+                    click_task(page.videos.find_btn)
                     page.videos.grid.setCurrentIndex(page.videos.grid.model().index(0, 0))
                     pump()
                 name = "videos" if page.tabs.currentWidget() is page.videos else "blurry"
@@ -335,23 +338,20 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
         for r in (0, 1, 2):
             ph.grid.selectionModel().select(ph.grid.model().index(r, 0), QItemSelectionModel.SelectionFlag.Select)
         pump()
-        ph.recycle_selected()
-        idle()
+        click_task(ph.b_recycle)
         win.undo_last()
         idle()
         win.go("duplicates")
         pump()
         idle()
         page = win.page("duplicates")
-        page.apply()
-        idle()
+        click_task(page.apply_btn)
         shot(name="20-after-apply-toast", keep_toast=True)
         win.go("history")
         pump()
         shot(name="21-history-after-apply")
         hist = win.page("history")
-        hist.undo()
-        idle()
+        click_task(hist.undo_btn)
         shot(name="22-history-after-undo")
         win.go("overview")
         pump()
