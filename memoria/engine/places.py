@@ -8,6 +8,7 @@ from __future__ import annotations
 import gzip
 import threading
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -70,12 +71,47 @@ def nearest(lat: float, lon: float, max_km: float = 75.0) -> Optional[Place]:
         return None
     meta, la, lo = _load()
     p, q = np.radians(lat), np.radians(lon)
+    # Latitude alone safely excludes distant towns, including across the date line and near poles.
+    candidates = np.flatnonzero(np.abs(la - p) <= (max_km + 12.0) / EARTH_KM)
+    if not len(candidates):
+        return None
+    la, lo = la[candidates], lo[candidates]
     a = np.sin((la - p) / 2) ** 2 + np.cos(p) * np.cos(la) * np.sin((lo - q) / 2) ** 2
     d = 2 * EARTH_KM * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
     i = int(np.argmin(d))
     if d[i] > max_km:
         return None
     near = np.flatnonzero(d <= d[i] + 12.0)
-    j = int(max(near, key=lambda k: meta[k][3]))
-    name, region, country, pop = meta[j]
+    j = int(max(near, key=lambda k: meta[candidates[k]][3]))
+    index = candidates[j]
+    name, region, country, pop = meta[index]
     return Place(name, region, country, float(np.degrees(la[j])), float(np.degrees(lo[j])), pop, float(d[j]))
+
+
+@lru_cache(maxsize=1)
+def _map_places() -> tuple[Place, ...]:
+    meta, la, lo = _load()
+    return tuple(sorted((Place(name, region, country, float(np.degrees(la[i])), float(np.degrees(lo[i])),
+                              pop, 0.0) for i, (name, region, country, pop) in enumerate(meta)),
+                        key=lambda place: -place.population))
+
+
+def map_labels(bounds: tuple[float, float, float, float], limit: int = 160) -> list[dict]:
+    """Bounded label candidates, anchored at settlements rather than invented region centres."""
+    south, north, west, east = bounds
+    country_view, region_view = east - west > 90, east - west > 12
+    seen, labels = set(), []
+    for place in _map_places():
+        if not (south <= place.lat <= north and west <= place.lon <= east):
+            continue
+        key = (place.country,) if country_view else (
+            (place.country, place.region or place.name) if region_view else
+            (place.country, place.region, place.name))
+        if key in seen:
+            continue
+        seen.add(key)
+        labels.append({"lat": place.lat, "lon": place.lon,
+                       "text": place.country if country_view else place.label})
+        if len(labels) >= limit:
+            break
+    return labels

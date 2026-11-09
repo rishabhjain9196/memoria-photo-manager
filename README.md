@@ -267,7 +267,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_story.py` | 30 | Exact output sizes, every template, panorama seams, EXIF rotation, story-video duration. |
 | `tests/test_ui_smoke.py` | 4 | Drives every page in both themes; checks Undo, thumbnails, opt-in cleanup, reset confirmations and the resumable reset UI. |
 | `tests/test_storage.py` | 13 | Safe/custom/hard reset, retained media and Undo, atomic rollback, abrupt process exit, cancellation/retry, updated media and low-space compaction. |
-| `tests/test_insights.py` | 6 | Folder/type totals, literal search, combined filters, leap-day boundaries, album links, India/world GPS selection, bounded 10,000-file browsing and interactive charts in both themes. |
+| `tests/test_insights.py` | 9 | Folder/type totals, filters, leap dates, album links, bounded 10,000-file browsing, offline place labels, wheel/touchpad/keyboard zoom, drag panning and stale-query handling. |
 | `tests/test_metadata.py` | 21 | Real EXIF/video extraction, schema-5 backfill, retained-row migration, cancellation/resume, numeric sorting with unknowns last, combined metadata filters and preview UI. |
 | `tests/test_diagnostics.py` | 9 | Cached-only summaries, sensitive-field exclusion, opt-in and bounded metrics, real Windows memory counters, atomic writes, task timing and library-switch/disable safety. |
 | `tests/test_live_index.py` | 4 | Completed pictures visible before indexing finishes, stable selected previews, locked utilities/context menus, timed commits, cancellation/resume and thumbnail invalidation. |
@@ -417,9 +417,13 @@ Open **Library insights** in the sidebar (or Overview):
   are excluded from the chart.
 - **Map:** bundled Natural Earth outlines keep GPS entirely offline. Auto starts with India for Indian
   coverage (or an empty map), switching to the world when coordinates fall outside the approximate India
-  outline. India/World buttons override the viewport; the mouse wheel zooms. Markers cluster locations
-  into a bounded grid. Click a marker or its keyboard-accessible list entry to browse those coordinates.
-  Invalid/missing GPS is excluded. Borders are approximate; this is not authoritative country geocoding.
+  outline. Scroll with a mouse/touchpad or use **+ / −** to zoom; drag to pan. With map focus, **+ / −**
+  and arrow keys also navigate. India/World/Auto reset the view. Navigation stays responsive while photo
+  clusters refresh, without reloading the other charts for every zoom.
+  Bundled GeoNames labels show countries, cities/towns and their state/region names; zoom in for more detail.
+  Markers cluster locations into a bounded grid. Click one or its named list entry to browse those coordinates.
+  Nearby names describe approximate group centres, not addresses. Invalid/missing GPS is excluded.
+  Borders are approximate; this is not authoritative geocoding or a street/landmark map.
 
 In **Photos & videos**, choose **Largest first** to find the biggest photos/videos. Filters combine
 folder/subfolders, photo/video/other/problem type, file format, inclusive date range, minimum/maximum

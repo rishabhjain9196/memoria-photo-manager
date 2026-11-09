@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Optional
 
-from . import geography
+from . import geography, places
 from .db import Library, METADATA_VERSION
 
 PAGE_SIZE = 500
@@ -297,5 +297,9 @@ def map_data(lib: Library, filters: Filters, bounds=None) -> dict:
         f"MIN(f.lon) AS west,MAX(f.lon) AS east,COUNT(*) AS count FROM files f WHERE {sql} "
         "AND f.lat BETWEEN ? AND ? AND f.lon BETWEEN ? AND ? GROUP BY x,y",
         [west, (east - west) / 64, south, (north - south) / 40, *params, south, north, west, east])]
+    for cell in cells:
+        place = places.nearest(cell["lat"], cell["lon"])
+        cell["place"] = f"{place.label}, {place.country}" if place else ""
     return {"bounds": bounds, "cells": cells, "gps_count": gps_count,
+           "labels": places.map_labels(bounds),
             "visible_count": sum(c["count"] for c in cells)}

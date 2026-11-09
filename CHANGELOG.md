@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Offline map navigation and labels
+- Wheel and pixel-only touchpad scrolling zoom immediately, including over map margins; zero-motion gesture
+  events no longer zoom out. Added +/− buttons, keyboard zoom/arrow panning, and click-drag panning.
+- Map navigation stays enabled while photo clusters refresh. View-only changes do not rerun storage, timeline or
+  album queries; obsolete responses cannot reset a newer view. Dragging a marker does not open its photos.
+- Reused bundled GeoNames data for country, city/town and accompanying state/region names, with zoom-dependent
+  selection and collision-limited labels. Photo groups show approximate nearby place names, not street addresses.
+- Cached vector paths avoid rebuilding every country outline for each interaction. Nearby-place lookup prefilters
+  latitude without changing its distance/population ranking. No online tiles, GPS uploads, new dependencies or reset.
+- Verified with 20 map, album/place and end-to-end UI regression tests; refreshed the map screenshots in both themes.
+
 ### Key-event notifications
 - Desktop notifications default to background/minimised delivery; an active Memoria dialog/viewer counts as foreground.
 - Sidebar Notifications offers per-device delivery/category settings and a bounded, in-memory recent-event list.

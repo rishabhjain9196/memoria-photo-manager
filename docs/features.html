@@ -210,11 +210,17 @@ Undated files are excluded. Dates can come from camera metadata, filenames or mo
 <figure><img src="images/insights-timeline.png" alt="Monthly counts and saved album links"><figcaption>Drill down through dates and open an existing album directly.</figcaption></figure>
 <h3>Offline GPS map</h3>
 <p>Auto starts with India for Indian coverage or an empty map, and switches to world coverage when coordinates fall
-outside the bundled approximate India outline. India/World buttons override the view. Wheel to zoom; click a marker
-or its keyboard-accessible list entry to browse its files. Markers cluster nearby coordinates to keep rendering bounded.</p>
+outside the bundled approximate India outline. India/World/Auto reset the view. Scroll with a mouse or touchpad,
+or use <b>+ / −</b> to zoom; <b>drag to pan</b>. With keyboard focus on the map, + / − and arrow keys also work.
+Zoom/pan redraw immediately and stay available while photo clusters refresh. Click a photo marker or its
+keyboard-accessible list entry to browse its files; dragging a marker does not open it.</p>
+<p>Bundled GeoNames data adds country, city/town and accompanying <b>state/region names</b>. Zoom in to reveal more
+settlements; labels are prioritised and spaced to avoid overlap. Coverage is mainly towns/cities with 15,000+
+residents, not every village, street, address or landmark. Region names accompany settlements; state boundary
+polygons are not drawn. Nearby names in the photo list describe approximate cluster centres, not exact addresses.</p>
 <p>No GPS is uploaded and no online tiles are fetched. Missing/invalid GPS is not plotted. The Natural Earth outlines
 are approximate and not authoritative country geocoding; borders and coastlines can affect automatic coverage.</p>
-<figure><img src="images/insights-india.png" alt="Offline India GPS map"><figcaption>India view with catalogue GPS clusters.</figcaption></figure>
+<figure><img src="images/insights-india.png" alt="Offline India GPS map with place labels and zoom controls"><figcaption>India view with offline place labels, zoom/pan controls and catalogue GPS clusters.</figcaption></figure>
 <figure><img src="images/insights-world.png" alt="Offline world map"><figcaption>World view is also available manually. The sample library uses generated locations.</figcaption></figure>
 </section>
 

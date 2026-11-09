@@ -22,6 +22,8 @@ class InsightsPage(Page):
         self.prefix = ""
         self.bounds = None
         self._closed = False
+        self._shown_key = self._mapped_key = None
+        self._auto_bounds = geography.INDIA
         self.folder = QComboBox()
         self.folder.setMinimumWidth(200)
         self.header_actions.addWidget(self.folder)
@@ -74,12 +76,19 @@ class InsightsPage(Page):
         map_split.addWidget(self.locations)
         self.map_note = label("", "small", wrap=True)
         map_tab = QWidget()
-        map_layout = vbox(hbox(button("Auto", on_click=lambda: self._map_bounds(None)),
+        self.zoom_in = button("+", on_click=lambda: self.map.zoom(1), tip="Zoom in (mouse wheel or +)")
+        self.zoom_out = button("−", on_click=lambda: self.map.zoom(-1), tip="Zoom out (mouse wheel or −)")
+        self.zoom_in.setAccessibleName("Zoom in")
+        self.zoom_out.setAccessibleName("Zoom out")
+        map_layout = vbox(hbox(self.zoom_in, self.zoom_out,
+                                   button("Auto", on_click=lambda: self._map_bounds(None)),
                                    button("India", on_click=lambda: self._map_bounds(geography.INDIA)),
                                    button("World", on_click=lambda: self._map_bounds(geography.WORLD)), None),
                               self.map_note, map_split,
-                              label("Offline · Made with Natural Earth · Approximate boundaries. Wheel to zoom; "
-                                    "click a marker or location in the list to browse. GPS is never uploaded.",
+                              label("Offline · Natural Earth outlines / GeoNames labels · Approximate boundaries. "
+                                    "Scroll or use +/− to zoom; drag or use arrow keys to pan. Click a photo marker "
+                                    "to browse. City/town and state/region names, not street or address detail. "
+                                    "GPS is never uploaded.",
                                     "small", wrap=True))
         map_layout.setStretchFactor(map_split, 1)
         map_tab.setLayout(map_layout)
@@ -136,16 +145,25 @@ class InsightsPage(Page):
             self.timer.start()
             return
         lib, filters, prefix, bounds, generation = self.lib, self.filters, self.prefix, self.bounds, self.ctx.generation
-        self.status.setText("Reading catalogue…")
-        self.tabs.setEnabled(False)
+        map_only = self._shown_key == (generation, filters, prefix)
+        self.status.setText("Updating photo locations… You can keep zooming or panning." if map_only else
+                            "Reading catalogue… Map navigation remains available.")
+        if not map_only:
+            for widget in (self.folders, self.types, self.time, self.album_list):
+                widget.setEnabled(False)
+            self.map.clear_points()
+            self.locations.clear()
+            self._mapped_key = None
         def work():
             try:
                 with self.ctx.diagnostics.measure("insights"):
-                    return {"generation": generation, "request": (filters, prefix, bounds),
-                            "distribution": catalogue.distribution(lib, filters),
-                            "time": catalogue.timeline(lib, filters, prefix),
-                            "albums": catalogue.matching_albums(lib, catalogue.in_period(filters, prefix)),
-                            "map": catalogue.map_data(lib, filters, bounds)}
+                    data = {"generation": generation, "request": (filters, prefix, bounds)}
+                    if not map_only:
+                        data.update(distribution=catalogue.distribution(lib, filters),
+                                    time=catalogue.timeline(lib, filters, prefix),
+                                    albums=catalogue.matching_albums(lib, catalogue.in_period(filters, prefix)))
+                    data["map"] = catalogue.map_data(lib, filters, bounds)
+                    return data
             finally:
                 lib.close_thread()
         self.bg.call(work)
@@ -153,13 +171,16 @@ class InsightsPage(Page):
     def _show(self, data):
         if self._closed:
             return
-        if data["generation"] != self.ctx.generation or data["request"] != (self.filters, self.prefix, self.bounds):
+        if data["generation"] != self.ctx.generation or data["request"][:2] != (self.filters, self.prefix):
             self.stale = True
             self.timer.start()
             return
-        self.timer.stop()
-        self.tabs.setEnabled(True)
-        self.status.setText("Click a bar or map marker to explore. Data reflects the last scan; F5 refreshes the library.")
+        if "distribution" not in data:
+            self._show_map(data)
+            return
+        self._shown_key = (self.ctx.generation, self.filters, self.prefix)
+        for widget in (self.folders, self.types, self.time, self.album_list):
+            widget.setEnabled(True)
         distribution = data["distribution"]
         self.summary.setText(f"{distribution['count']:,} indexed files · {fmt_size(distribution['bytes'])} · "
                              f"{self.filters.folder or 'Library root'}"
@@ -180,12 +201,25 @@ class InsightsPage(Page):
             item = QListWidgetItem("No saved albums in this period")
             item.setFlags(Qt.ItemFlag.NoItemFlags)
             self.album_list.addItem(item)
+        self._show_map(data)
+
+    def _show_map(self, data):
+        if data["request"][2] != self.bounds:
+            self.timer.start()
+            return
+        self.timer.stop()
+        self.status.setText("Click a bar or photo marker to explore. Data reflects the last scan; F5 refreshes the library.")
+        self._mapped_key = (self.ctx.generation, self.filters)
+        if self.bounds is None:
+            self._auto_bounds = data["map"]["bounds"]
         self.map.set_data(data["map"])
         self.map_note.setText(f"{data['map']['gps_count']:,} files have valid GPS; "
                               f"{data['map']['visible_count']:,} in this view. Files without GPS are not plotted.")
         self.locations.clear()
         for cell in sorted(data["map"]["cells"], key=lambda c: -c["count"]):
-            item = QListWidgetItem(f"{cell['count']:,} files · {cell['lat']:.3f}, {cell['lon']:.3f}")
+            name = f"Near {cell['place']}" if cell["place"] else "GPS group"
+            item = QListWidgetItem(f"{cell['count']:,} files · {name}\n{cell['lat']:.3f}, {cell['lon']:.3f}")
+            item.setToolTip(f"{name}. Approximate group centre, not an address. Select to browse these files.")
             item.setData(Qt.ItemDataRole.UserRole, cell)
             self.locations.addItem(item)
 
@@ -193,7 +227,9 @@ class InsightsPage(Page):
         if self._closed:
             return
         self.status.setText(f"Could not load insights: {error}")
-        self.tabs.setEnabled(False)
+        self.map.clear_points()
+        self.locations.clear()
+        self._mapped_key = None
         self.ctx.toast_requested.emit("Insights could not be loaded. Check the message above the charts.", "")
 
     def _filters(self):
@@ -243,8 +279,12 @@ class InsightsPage(Page):
 
     def _map_bounds(self, bounds):
         self.bounds = bounds
+        self.map.set_bounds(self._auto_bounds if bounds is None else bounds)
         self.timer.start()
 
     def _location(self, cell):
+        if self._mapped_key != (self.ctx.generation, self.filters):
+            self.ctx.toast_requested.emit("Photo locations are updating. Please wait before opening a group.", "")
+            return
         self.ctx.browse_requested.emit(replace(self.filters, location="gps",
                                                bbox=tuple(cell[key] for key in ("south", "north", "west", "east"))))

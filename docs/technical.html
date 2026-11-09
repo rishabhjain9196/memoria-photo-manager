@@ -196,7 +196,7 @@ plain-text JSON preview). See <a href="#diagnostics">Aggregate diagnostics</a> f
   <tr><td><code>pages/base</code></td><td>142</td><td><code>Page</code>: header, stale/refresh lifecycle, busy handling, <code>run</code>, <code>apply_actions</code> (the shared Confirm → Apply → Toast/Undo flow).</td></tr>
   <tr><td><code>cropcanvas</code></td><td>237</td><td><code>CropCanvas</code>: draws the preview, eight drag handles, rule-of-thirds grid and aspect lock; emits a crop normalised to the transformed image. <code>rotate_crop</code>/<code>flip_crop</code> keep the crop on the same content when rotating or mirroring.</td></tr>
   <tr><td><code>pages/*</code></td><td>5735</td><td>One per tool; preview work and Insights aggregates use workers. Photos uses SQL paging rather than full-catalogue Python filtering.</td></tr>
-  <tr><td><code>insight_charts</code></td><td>159</td><td>Accessible bar lists and a QPainter map with bounded markers and wheel zoom.</td></tr>
+  <tr><td><code>insight_charts</code></td><td>~280</td><td>Accessible bar lists; cached QPainter country paths, bounded place labels/markers, wheel/touchpad zoom and drag/keyboard panning.</td></tr>
   <tr><td><code>library_filters</code></td><td>239</td><td>Shared folder/type/format/date/size/GPS/face/person controls and validation.</td></tr>
   <tr><td><code>storage_dialog</code></td><td>84</td><td>Safe defaults, selective clearing, hard-reset acknowledgement and low-space resume option.</td></tr>
 </table>
@@ -576,9 +576,17 @@ expressions come from a fixed whitelist. Folder matching has a separator boundar
       the world. A 64×40 grid (up to 65×41 endpoint bins) bounds marker/list rows; each marker carries actual coordinate
       minima/maxima for exact browse-through filtering.</li>
   <li><code>geography.countries</code> caches 177 public-domain country outlines. QPainter draws locally; no WebEngine,
-      online tiles or new runtime dependency is used.</li>
+      online tiles or new runtime dependency is used. Vector paths are built once and transformed/clipped per frame.</li>
   <li>Insights coalesces rapid requests, rejects stale generation/filter results and closes worker connections.
-      Accessible bar/location lists complement map clicks and wheel zoom.</li>
+      Viewport-only requests reuse storage/timeline/album results. Zoom/pan immediately redraw the map without disabling
+      it; obsolete viewport results cannot snap it back. Accessible named location lists complement photo-marker clicks.</li>
+  <li><code>places.map_labels</code> reuses the bundled GeoNames table: population-prioritised country, region/city or
+      town candidates according to viewport width. At most 160 candidates and 60 non-overlapping on-map labels;
+      region names are anchored at settlements, not invented state centres. Nearby cluster names use the existing
+      distance/population ranking, with a safe latitude prefilter to reduce repeated distance calculations.</li>
+  <li>Wheel angle and pixel-only touchpad deltas support fractional steps; zero motion is ignored. Buttons and keyboard
+      +/− zoom, drag/arrow keys pan. Bounds are clamped to the world and minimum span; a drag never selects a marker.
+      No state boundary polygons, street tiles, address lookup or POI service is added.</li>
 </ul>
 </section>
 
@@ -743,9 +751,10 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>219 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
+<p><b>222 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
 <a href="report.html">quality report</a> records the last full-suite snapshot (209 tests, before notifications).
 The notification update was separately verified with 18 notification, live-index and end-to-end UI tests; all passed.
+The map navigation/label update passed 20 map, album/place and end-to-end UI regression tests.
 Fake-tray/offscreen tests do not verify actual Windows popup appearance or OS delivery policy.</p>
 <table>
   <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
@@ -764,8 +773,9 @@ Fake-tray/offscreen tests do not verify actual Windows popup appearance or OS de
     thumbnail budgets/invalidation, single selection and opt-in cleanup.</td></tr>
   <tr><td><code>test_storage.py</code></td><td>13</td><td>Selective clearing, media/history preservation, transaction rollback,
     process termination, cancellation/resume, changed media, low-space and compaction recovery.</td></tr>
-  <tr><td><code>test_insights.py</code></td><td>6</td><td>Folder/type totals, literal search, combined filters, leap dates,
-    saved-album links, India/world switching, bounded 10,000-row paging, mouse clicks and wheel zoom in both themes.</td></tr>
+  <tr><td><code>test_insights.py</code></td><td>9</td><td>Folder/type totals, literal search, combined filters, leap dates,
+    saved-album links, India/world switching, bounded 10,000-row paging, visible offline labels, mouse/touchpad/keyboard
+    zoom, drag geometry, stale-result rejection and map responsiveness during a blocked background query.</td></tr>
   <tr><td><code>test_metadata.py</code></td><td>21</td><td>Real EXIF/video fields, schema-5 migration, legacy retained rows,
     partial refresh/resume, missing-last numeric sorting, metadata range validation and preview/filter UI.</td></tr>
   <tr><td><code>test_diagnostics.py</code></td><td>9</td><td>Injected private-value exclusion, cached-only reports, bounded

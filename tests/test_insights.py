@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from memoria.engine import albums, catalogue, geography
+from memoria.engine import albums, catalogue, geography, places
 from memoria.engine.db import Library
 
 
@@ -110,6 +110,177 @@ def test_catalogue_scale_is_paged_and_map_is_bounded(indexed):
     mapped = catalogue.map_data(indexed, filters, geography.WORLD)
     assert mapped["gps_count"] == 10_000
     assert len(mapped["cells"]) <= 65 * 41
+
+
+def test_offline_labels_include_countries_states_and_towns(indexed):
+    india = places.map_labels(geography.INDIA)
+    assert any("Mumbai" in label["text"] and "Maharashtra" in label["text"] for label in india)
+    assert any("Leh" in label["text"] and "Ladakh" in label["text"] for label in india)
+    world = places.map_labels(geography.WORLD)
+    assert {"India", "France"} <= {label["text"] for label in world}
+    assert len(world) <= 160
+    bounds = (18.9, 19.3, 72.7, 73.1)
+    local = places.map_labels(bounds)
+    assert any("Mumbai" in label["text"] for label in local)
+    assert all(bounds[0] <= label["lat"] <= bounds[1] and bounds[2] <= label["lon"] <= bounds[3]
+               for label in local)
+    cells = catalogue.map_data(indexed, catalogue.Filters(folder="Trip"))["cells"]
+    assert any("Mumbai" in cell["place"] for cell in cells)
+    assert any("Delhi" in cell["place"] for cell in cells)
+
+
+def test_map_touchpad_wheel_pan_keyboard_and_visible_labels(indexed, tmp_path):
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    os.environ.setdefault("QT_QPA_FONTDIR", r"C:\Windows\Fonts")
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QFont, QWheelEvent
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+    from memoria.ui import theme
+    from memoria.ui.insight_charts import GeoChart
+    app = QApplication.instance() or QApplication([])
+    app.setFont(QFont("Segoe UI", 10))
+    chart = GeoChart()
+    chart.resize(900, 700)
+    chart.set_data(catalogue.map_data(indexed, catalogue.Filters(folder="Trip")))
+    chart.show()
+    changed, selected = [], []
+    chart.zoomed.connect(changed.append)
+    chart.chosen.connect(selected.append)
+
+    def wheel(angle=0, pixels=0, point=None):
+        point = point or chart.plot_rect().center()
+        event = QWheelEvent(point, QPointF(chart.mapToGlobal(point.toPoint())),
+                            QPoint(0, pixels), QPoint(0, angle), Qt.MouseButton.NoButton,
+                            Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.ScrollUpdate, False)
+        QApplication.sendEvent(chart, event)
+        app.processEvents()
+
+    try:
+        app.processEvents()
+        assert any("Maharashtra" in text for _, text in chart.label_hits)
+        assert 0 < len(chart.label_hits) <= 60
+        assert all(not rect.intersects(other) for i, (rect, _) in enumerate(chart.label_hits)
+                   for other, _ in chart.label_hits[i + 1:])
+        assert chart.grab().save(str(tmp_path / "map-offline-labels.png"))
+        start = chart.bounds
+        wheel()
+        assert chart.bounds == start and not changed  # zero-motion touchpad phases must not zoom out
+        wheel(pixels=30)
+        assert 17 < chart.bounds[3] - chart.bounds[2] < 34
+        wheel(pixels=-30)
+        assert chart.bounds == pytest.approx(start)
+        wheel(angle=15)
+        assert 17 < chart.bounds[3] - chart.bounds[2] < 34  # high-resolution wheel, not a full 2x jump
+        wheel(angle=-15)
+        assert chart.bounds == pytest.approx(start)
+        center = chart.project(chart.cells[0]["lat"], chart.cells[0]["lon"]).toPoint()
+        QTest.mousePress(chart, Qt.MouseButton.LeftButton, pos=center)
+        QTest.mouseMove(chart, center + QPoint(40, 35))
+        QTest.mouseRelease(chart, Qt.MouseButton.LeftButton, pos=center + QPoint(40, 35))
+        app.processEvents()
+        assert chart.bounds != start and not selected  # dragging a marker must not open its photos
+        moved = chart.project(chart.cells[0]["lat"], chart.cells[0]["lon"]).toPoint()
+        assert abs(moved.x() - center.x() - 40) <= 1 and abs(moved.y() - center.y() - 35) <= 1
+        chart.set_bounds(geography.WORLD)
+        app.processEvents()
+        wheel(angle=120, point=QPointF(15, 15))  # letterboxed area is still part of the map widget
+        assert chart.bounds[3] - chart.bounds[2] == pytest.approx(180)
+        QTest.keyClick(chart, Qt.Key.Key_Plus)
+        assert chart.bounds[3] - chart.bounds[2] == pytest.approx(90)
+        QTest.keyClick(chart, Qt.Key.Key_Minus)
+        assert chart.bounds[3] - chart.bounds[2] == pytest.approx(180)
+        before = chart.bounds
+        QTest.keyClick(chart, Qt.Key.Key_Right)
+        assert chart.bounds[2] > before[2]
+        for _ in range(12):
+            chart.zoom(4)
+        assert chart.bounds[3] - chart.bounds[2] == pytest.approx(.01)
+        for _ in range(12):
+            chart.zoom(-4)
+        assert chart.bounds == geography.WORLD
+        theme.use("dark")
+        app.setStyleSheet(theme.QSS)
+        chart.set_bounds(geography.INDIA)
+        app.processEvents()
+        assert chart.grab().save(str(tmp_path / "map-offline-labels-dark.png"))
+    finally:
+        chart.close()
+        chart.deleteLater()
+        app.processEvents()
+        theme.use("light")
+        app.setStyleSheet(theme.QSS)
+
+
+def test_zoom_remains_live_during_query_and_stale_results_cannot_reset_view(indexed, monkeypatch):
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    import threading
+    import time
+    from PySide6.QtWidgets import QApplication
+    from memoria.ui.pages.insights import InsightsPage
+    from memoria.ui.tasks import TaskRunner
+    from memoria.ui.widgets import AppContext
+    app = QApplication.instance() or QApplication([])
+    ctx = AppContext(TaskRunner())
+    ctx.set_library(indexed)
+    page = InsightsPage(ctx)
+    page.resize(1100, 800)
+    page.show()
+    entered, release = threading.Event(), threading.Event()
+    errors = []
+    page.bg.failed.connect(errors.append)
+
+    def wait(predicate, check_view=None):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            app.processEvents()
+            if check_view is not None:
+                assert page.map.bounds == check_view
+            if predicate():
+                return
+            time.sleep(.01)
+        assert predicate(), errors
+
+    try:
+        wait(lambda: page._mapped_key is not None and not page.bg.running)
+        page.tabs.setCurrentIndex(2)
+        original = catalogue.map_data
+        calls = []
+        def delayed(lib, filters, bounds):
+            calls.append(bounds)
+            if len(calls) == 1:
+                entered.set()
+                if not release.wait(10):
+                    raise TimeoutError("Map test gate timed out")
+            return original(lib, filters, bounds)
+        monkeypatch.setattr(catalogue, "map_data", delayed)
+        unwanted = []
+        for name in ("distribution", "timeline", "matching_albums"):
+            method = getattr(catalogue, name)
+            def watched(*args, name=name, method=method):
+                unwanted.append(name)
+                return method(*args)
+            monkeypatch.setattr(catalogue, name, watched)
+        page.zoom_in.click()
+        wait(entered.is_set)
+        assert page.map.isEnabled() and page.zoom_out.isEnabled()
+        first = page.map.bounds
+        page.zoom_in.click()
+        latest = page.map.bounds
+        assert latest != first and page.bg.running
+        release.set()
+        wait(lambda: len(calls) == 2 and not page.bg.running and not page.timer.isActive(), check_view=latest)
+        assert not errors and not unwanted
+        assert calls == [first, latest]
+        page.zoom_out.click()
+        assert page.map.bounds[3] - page.map.bounds[2] == pytest.approx(
+            (latest[3] - latest[2]) * 2)
+    finally:
+        release.set()
+        page.shutdown()
+        page.close()
+        page.deleteLater()
+        app.processEvents()
 
 
 def test_interactive_insights_and_filter_navigation(tmp_path, monkeypatch):

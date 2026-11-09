@@ -284,6 +284,11 @@ Filters are grouped into Files &amp; dates, Dimensions &amp; video, and Camera &
 drills through calendar boundaries and links to saved albums; the map clusters valid GPS into a bounded grid. It starts
 with India when the approximate outline contains the selected coordinates, otherwise the world. The UI states that
 boundaries and fallback dates are not authoritative. No GPS leaves the computer.</p>
+<p>Map navigation redraws locally while bounded photo-cluster queries run. The map is never disabled merely because
+a map query is pending, and stale responses cannot undo newer navigation. Wheel/touchpad gestures, +/− controls
+and drag/keyboard panning provide alternatives. A drag is not a photo-selection click. Offline country and
+city/town labels include state/region context; collision limits keep them readable. These are settlement labels
+over approximate country outlines, not street maps or authoritative state polygons.</p>
 <p>Photos is paged at 500 rows. Ctrl+A selects only the current page; totals still describe all matches. Filters and
 sorting do not change files. Keyboard-accessible chart rows and location lists complement custom map painting.
 Existing numbered navigation shortcuts are retained even though Insights adds a sidebar entry.</p>
