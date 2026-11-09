@@ -83,6 +83,8 @@ the rendered page).
   - story videos with Ken Burns motion, crossfades and music.
 - **Video compressor**:
   - quality presets, or a target size such as 16 MB for WhatsApp;
+  - a virtual video list loads cached thumbnails only for visible rows, rather than building every thumbnail on open;
+  - bounded background estimates for selected videos; Select all still means the complete list;
   - every copy must play, keep the same length and be smaller;
   - an SSIM quality score is reported.
 - **Health check** fingerprints every file and flags silent damage, such as bit rot or bad copies.
@@ -267,7 +269,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_safety.py` | 21 | Unavailable drives, unreadable files/folders, stable identities, retained missing files, verified Undo, failed Recovery deletion, crash recovery, output publication, schema migrations, paths over 260 characters. |
 | `tests/test_videosim.py` | 7 | Similar videos match ground truth, signature cache, cancellation, undo. |
 | `tests/test_batch.py` | 5 | Batch copy, move and recycle with undo; Check everything is read-only and correct. |
-| `tests/test_video.py` | 7 | Compression shrinks and verifies, sources are untouched, target size is met, cancel cleans up. |
+| `tests/test_video.py` | 10 | Verified compression and cancellation; 10,000-row lazy loading, bounded incremental probes, selection and external-file handoff. |
 | `tests/test_story.py` | 30 | Exact output sizes, every template, panorama seams, EXIF rotation, story-video duration. |
 | `tests/test_ui_smoke.py` | 4 | Drives every page in both themes; checks Undo, thumbnails, opt-in cleanup, reset confirmations and the resumable reset UI. |
 | `tests/test_storage.py` | 14 | Safe/custom/hard reset, retained media/Undo and duplicate choices, rollback, interruption, cancellation/retry and low-space compaction. |

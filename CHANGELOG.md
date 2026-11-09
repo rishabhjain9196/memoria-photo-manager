@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Video compressor opening freeze
+- Replaced eager per-video table items and thumbnail icons with a virtual table model. Opening the page reads only
+  the metadata needed for its columns; cached thumbnails are requested for visible rows rather than the whole library.
+- Header sizing samples at most 50 rows. The complete video list and Select all semantics are preserved.
+- Estimate probing has at most two outstanding requests to the existing single worker. Each completed probe updates
+  only its row and incremental totals instead of recalculating the entire selection. Deselecting stops further queued work.
+- Removed redundant selection-handoff reloads; external selections also work with an empty catalogue. Unavailable
+  additions are reported, duplicate input paths are deduplicated, and late probe results are ignored after shutdown.
+- Verified with 14 video/end-to-end UI tests, including 10,000 metadata-only video entries and real compression/Undo
+  flows. In a local synthetic refresh check, 2,000 rows fell from 0.49 s to 0.03 s; 10,000 rows took 0.14 s and requested
+  12 visible thumbnails. These are not real-library or drive throughput measurements. No schema change or reset.
+
 ### Explicit duplicate review choices
 - Added Remove 1 (the selected copy/folder), Remove both/all shown copies, and Keep both/all for files and identical
   folder groups. Containing folders with unique files cannot both be removed.

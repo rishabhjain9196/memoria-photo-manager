@@ -393,6 +393,14 @@ returning a misleading empty or incomplete backup inventory.</p>
 </ul>
 <p><b>Estimates</b> (no encoding): quality mode uses bits-per-pixel 0.09 / 0.055 / 0.032 × w × h × fps, capped at 90% of
 the source video bitrate.</p>
+<p><b>Compressor UI:</b> a <code>QAbstractTableModel</code>/<code>QTableView</code> holds lightweight row metadata,
+without allocating Qt items or scaled thumbnail icons for every cached video. Decoration data loads library thumbnails
+only on demand through the existing byte-budgeted cache; header sizing samples at most 50 rows. The metadata list is
+still complete, not paged. No media probe is submitted just by opening an unselected library list.</p>
+<p>At most two estimate requests are outstanding to the single probe worker. Per-key estimates and incremental totals
+avoid an entire-selection scan on each completion. Settings/selection changes rebuild the estimate state once;
+completed probes use the current settings. Deselecting removes queued demand; already-running work may finish.
+Shutdown stops further submissions and ignores late callbacks. Compression, output verification and Undo are unchanged.</p>
 
 <h3 id="p-story">Story rendering (<code>story</code>)</h3>
 <ul>
@@ -701,7 +709,7 @@ window/dialog because Qt's message-click signal has no event ID. Close disarms d
   <tr><td>Engine thread pools</td><td>Decode/analyse, hash, faces, similarity blocks, health reads</td><td>Pure functions; results returned to the worker which writes to SQLite.</td></tr>
   <tr><td>BackgroundCall threads</td><td>Read-only page insights (Overview and Library insights)</td><td>Latest valid result wins; Insights coalesces requests; connections closed per thread.</td></tr>
   <tr><td>Story preview thread</td><td>Debounced (250 ms) preview rendering at half size</td><td>Latest request wins; never touches the runner.</td></tr>
-  <tr><td>Video probe thread</td><td>Probes ticked videos lazily for estimates</td><td>Cached by path.</td></tr>
+  <tr><td>Video probe thread</td><td>Probes ticked videos lazily for estimates</td><td>Single worker; at most two outstanding requests, cached by path, per-result incremental UI updates.</td></tr>
   <tr><td>Story-video writer thread</td><td>Pipes frames to FFmpeg while the next frame renders</td><td>Bounded queue (4).</td></tr>
 </table>
 <p>SQLite: each thread gets its own connection via <code>threading.local</code>; WAL allows concurrent readers with one
@@ -764,13 +772,16 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>234 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. See the generated
-<a href="report.html">quality report</a> for full-suite outcomes and timings. Fake-tray/offscreen tests do not verify
+<p><b>237 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
+<a href="report.html">quality report</a> records the last full-suite snapshot (234 passed, before the compressor
+loading fix). That fix separately passed 14 video and end-to-end UI tests. Fake-tray/offscreen tests do not verify
 actual Windows popup appearance or OS delivery policy.</p>
 <table>
   <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
   <tr><td><code>test_engine.py</code></td><td>29</td><td>Hash pre-filter semantics; incremental scan; counts, errors, dates and date sources; EXIF rotation; HEIC and video analysis; duplicate groups vs ground truth incl. the &gt;1.28 MB regression; removal + undo restores an identical tree; changed keeper/copy are skipped; user keeper override/exclusion; bursts and best frame; near-duplicates prefer original; exact copies and screenshots excluded from Similar; blur detection; organise plan/apply/undo and uncertain dates; tidy categories and apply/undo (folders recreated); health baseline, bit-flip damage, edit detection; compare read-only + two-way sync + undo; overlapping folder rejection; verified copy failure leaves nothing; never overwrites; crash reconciliation; cancellation; Empty Recovery.</td></tr>
-  <tr><td><code>test_video.py</code> + <code>test_story.py</code></td><td>37</td><td>Compression shrinks and verifies, sources untouched, no overwrite, target mode within tolerance, cancellation cleans up; story sizes, every template, panorama seams, EXIF-rotated input, story-video duration and resolution.</td></tr>
+  <tr><td><code>test_video.py</code> + <code>test_story.py</code></td><td>40</td><td>Compression verification, source preservation,
+    no overwrite, target size and cancellation; 10,000-row lazy UI loading, bounded/incremental probes and selection
+    handoff; story sizes, templates, panorama seams, EXIF orientation, story-video duration and resolution.</td></tr>
   <tr><td><code>test_safety.py</code></td><td>21</td><td>Unplugged drive, unreadable folder, real deletions still removed, undo keeps ids/thumbnails/fingerprints, organise undo keeps ids, Empty Recovery drops parked rows, cross-process lock, re-entrant lock released on close, schema migration from v1, refusal of newer catalogues, paths over 260 characters.</td></tr>
   <tr><td><code>test_videosim.py</code></td><td>7</td><td>Similar-video groups and best pick vs ground truth, identical copies excluded, signature cache and invalidation, cancellation, recycle/undo round trip.</td></tr>
   <tr><td><code>test_faces.py</code></td><td>8</td><td>Expected people/negative examples, incremental scanning, changed-photo rescans and missing-photo metadata retention; naming, merging and corrections; look-alike ranking; Recovery/Undo preserves faces; hide/unhide, forget-all and non-ASCII model paths.</td></tr>

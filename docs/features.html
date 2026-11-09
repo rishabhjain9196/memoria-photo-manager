@@ -504,6 +504,10 @@ background.</figcaption></figure>
 <section id="video">
 <h2>Video compressor</h2>
 <p>Makes smaller copies of videos for WhatsApp, email or uploads. <b>Originals are never changed.</b></p>
+<p>The video list loads thumbnails only as rows become visible, avoiding an eager thumbnail pass over a large library.
+Opening the page does not probe every video. Estimates are checked in the background for ticked videos, with bounded
+pending work and incremental updates. <b>Select all</b> still selects the complete list, not just visible rows;
+Select none stops submitting further estimate checks. Actual compression starts only when you click Compress.</p>
 <h3>Settings</h3>
 <ul>
   <li><b>Quality preset:</b> High, Balanced (looks the same on a phone, much smaller) or Small.</li>

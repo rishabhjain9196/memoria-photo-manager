@@ -125,3 +125,135 @@ def test_compress_many_reports_each_file(clips, tmp_path):
     assert [r.ok for r in results] == [True, False, False]
     assert seen[-1][0] == seen[-1][1] == 3000
     assert all(b[0] >= a[0] for a, b in zip(seen, seen[1:]))
+
+
+@pytest.fixture
+def compressor_ui(tmp_path, monkeypatch):
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    os.environ.setdefault("QT_QPA_FONTDIR", r"C:\Windows\Fonts")
+    from PySide6.QtCore import QObject, Signal
+    from PySide6.QtWidgets import QApplication
+    from memoria.engine.db import Library
+    from memoria.ui.pages import video
+    from memoria.ui.tasks import TaskRunner
+    from memoria.ui.widgets import AppContext
+
+    class Prober(QObject):
+        probed = Signal(str, object, object)
+
+        def __init__(self, parent):
+            super().__init__(parent)
+            self.requests = []
+
+        def request(self, key, path, frame):
+            self.requests.append((key, path, frame))
+
+        def stop(self):
+            pass
+
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(video, "_Prober", Prober)
+    lib = Library(tmp_path)
+    ctx = AppContext(TaskRunner())
+    ctx.set_library(lib)
+    page = video.VideoPage(ctx)
+    yield app, lib, ctx, page
+    page.shutdown()
+    page.close()
+    page.deleteLater()
+    app.processEvents()
+    lib.close()
+
+
+def _catalogue_videos(lib, count):
+    with lib.transaction() as db:
+        db.executemany("INSERT INTO files(rel_path,folder,name,ext,kind,size,mtime,duration,width,height,"
+                       "analyzed,metadata_version) VALUES (?,'',?,'.mp4','video',1000000,1,10,1920,1080,1,1)",
+                       [(f"{i:05}.mp4", f"{i:05}.mp4") for i in range(count)])
+
+
+def test_compressor_large_list_only_loads_visible_thumbnails(compressor_ui, monkeypatch):
+    from PySide6.QtGui import QPixmap
+    from memoria.ui.pages.video import C_NAME
+    app, lib, ctx, page = compressor_ui
+    _catalogue_videos(lib, 10_000)
+    requested = []
+    thumb = QPixmap(80, 45)
+    thumb.fill()
+    monkeypatch.setattr(ctx.thumbs, "get", lambda fid: requested.append(fid) or thumb)
+    page._refresh_now()
+    assert page.model.rowCount() == 10_000
+    assert requested == [] and page.prober.requests == []  # no eager thumbnail decode or media probing
+    page.resize(1400, 900)
+    page.show()
+    app.processEvents()
+    assert 0 < len(set(requested)) < 100
+    assert not page._checked and not page.compress_btn.isEnabled()
+    page.table.scrollTo(page.model.index(9999, C_NAME))
+    app.processEvents()
+    assert 10_000 in requested and len(set(requested)) < 100
+    assert not page.prober.requests
+
+
+def test_compressor_bounds_probes_and_updates_only_completed_estimate(compressor_ui, monkeypatch):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from memoria.ui.pages.video import C_CHECK, C_EST, MAX_PENDING_PROBES
+    app, lib, ctx, page = compressor_ui
+    _catalogue_videos(lib, 1000)
+    page._refresh_now()
+    page.resize(1400, 900)
+    page.show()
+    app.processEvents()
+    first = page.model.index(0, C_CHECK)
+    QTest.mouseClick(page.table.viewport(), Qt.MouseButton.LeftButton, pos=page.table.visualRect(first).center())
+    assert first.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked
+    page._check_all(True)
+    assert len(page.checked_rows()) == 1000  # Select all retains its meaning; this is not pagination
+    assert len(page._pending) == len(page.prober.requests) == MAX_PENDING_PROBES
+    calls = []
+    estimate = vt.estimate
+    monkeypatch.setattr(vt, "estimate", lambda info, settings: calls.append(settings.mode) or estimate(info, settings))
+    info = ffmpeg.VideoInfo(duration=10, width=1920, height=1080, fps=30, bitrate_kbps=800)
+    page.r_target.setChecked(True)  # results arriving later must use the current settings
+    key = page.prober.requests[0][0]
+    page.prober.probed.emit(key, info, None)
+    assert calls == ["target"] and page._unknown == 999
+    assert len(page._pending) == MAX_PENDING_PROBES
+    assert len(page.prober.requests) == MAX_PENDING_PROBES + 1
+    assert page.model.index(page._row_of[key], C_EST).data() == "Already under 25 MB"
+    failed = page.prober.requests[1][0]
+    page.prober.probed.emit(failed, None, None)
+    assert page.model.index(page._row_of[failed], C_EST).data() == "Can't read"
+    assert page._unknown == 999 and len(calls) == 1
+    page._check_all(False)
+    submitted = len(page.prober.requests)
+    for pending in list(page._pending):
+        page.prober.probed.emit(pending, info, None)
+    assert len(page.prober.requests) == submitted and not page._probe_queue
+    assert page._unknown == 0 and not page.compress_btn.isEnabled()
+    assert first.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Unchecked
+
+
+def test_compressor_external_selection_with_empty_catalogue_and_shutdown(compressor_ui, tmp_path):
+    from PySide6.QtGui import QImage
+    from memoria.ui.pages.video import C_LEN, C_RES
+    app, lib, ctx, page = compressor_ui
+    path = tmp_path / "external.mp4"
+    path.write_bytes(b"synthetic probe input")
+    ctx.video_selection = [str(path), str(path)]
+    page._refresh_now()
+    assert not ctx.video_selection and len(page.checked_rows()) == page.model.rowCount() == 1
+    assert len(page.prober.requests) == 1 and page.prober.requests[0][2]
+    key = page.prober.requests[0][0]
+    image = QImage(32, 24, QImage.Format.Format_RGB32)
+    image.fill(0)
+    info = ffmpeg.VideoInfo(duration=12, width=640, height=480, fps=30)
+    page.prober.probed.emit(key, info, image)
+    assert page.model.index(0, C_LEN).data() == "0:12"
+    assert page.model.index(0, C_RES).data() == "640×480"
+    assert not page._rows[0]["thumb"].isNull()
+    page.shutdown()
+    page.prober.probed.emit(key, None, None)
+    assert page._info[key] is info
+    assert path.read_bytes() == b"synthetic probe input"
