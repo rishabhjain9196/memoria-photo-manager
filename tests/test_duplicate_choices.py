@@ -227,8 +227,26 @@ def test_history_orders_same_timestamp_actions_by_creation_not_random_id(library
     assert [batch["id"] for batch in actions.batches(library)] == ["a-second", "z-first"]
 
 
-def test_review_controls_persistence_and_remove_all_acknowledgement(library, tmp_path, monkeypatch):
+def _wait_review(app, window):
     import time
+    from memoria.ui.tasks import LatestCall
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        app.processEvents()
+        if not window.runner.busy and not any(worker.running for worker in window.findChildren(LatestCall)):
+            app.processEvents()
+            return
+        time.sleep(.01)
+    raise AssertionError("Duplicate review did not finish")
+
+
+def _check_panes(page, keys):
+    for pane in page.panes:
+        if pane.key is not None and pane.isVisible():
+            pane.remove_check.setChecked(pane.key in keys)
+
+
+def test_review_controls_persistence_and_remove_all_acknowledgement(library, tmp_path, monkeypatch):
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     os.environ.setdefault("QT_QPA_FONTDIR", r"C:\Windows\Fonts")
     from PySide6.QtCore import Qt
@@ -251,13 +269,13 @@ def test_review_controls_persistence_and_remove_all_acknowledgement(library, tmp
     page = window.page("duplicates")
     report = duplicates.find_all(library)
     page._show(report)
-    page._set_all(False)
+    _wait_review(app, window)
 
     def select(kind, key):
         index = next(i for i, (k, obj) in enumerate(page.entries) if k == kind and
                      (obj.hash if kind == "file" else obj.id) == key)
         page.list.setCurrentRow(index)
-        app.processEvents()
+        _wait_review(app, window)
 
     confirmations = []
     def deny_confirmation(parent, title, summary, details, text, **kwargs):
@@ -279,76 +297,69 @@ def test_review_controls_persistence_and_remove_all_acknowledgement(library, tmp
     failures = []
     monkeypatch.setattr(MessageDialog, "exec", lambda dialog: failures.append(dialog.windowTitle()) or 0)
     def idle():
-        deadline = time.monotonic() + 10
-        while window.runner.busy and time.monotonic() < deadline:
-            app.processEvents()
-            time.sleep(.01)
-        app.processEvents()
-        assert not window.runner.busy
+        _wait_review(app, window)
     try:
         group = file_group(report)
         select("file", group.hash)
-        page.grid.setCurrentIndex(page.grid.model_.index(0))
-        page.remove_one.click()
+        _check_panes(page, {group.files[0]["id"]})
+        idle()
+        page.move_btn.click()
         idle()
         assert confirmations[-1][1] == [group.files[0]["id"]] and not confirmations[-1][2]
-        assert not page._plan()  # cancelling a group action must not stage it for bulk Apply
-        assert sum(row["badge"] == "KEEP" for row in page.grid.items()) == 3
-        page.remove_all.click()
+        assert page.selected == {group.files[0]["id"]}
+        assert not actions.batches(library)
+        _check_panes(page, {row["id"] for row in group.files})
+        idle()
+        page.move_btn.click()
         idle()
         assert len(confirmations[-1][1]) == 3 and confirmations[-1][2]
-        assert not page._plan()
         assert not actions.batches(library)
         window.lib_label.setText("<b>Sample library</b><br>Generated test media")
+        window.toast.hide()
         assert window.grab().save(str(tmp_path / "duplicates-file-choices.png"))
         page.keep_all.click()
+        idle()
         assert all(kind != "file" or obj.hash != group.hash for kind, obj in page.entries)
         assert duplicates.file_review_key(group) in duplicates.kept_choices(library)
         page.show_previous.setChecked(True)
+        idle()
         select("file", group.hash)
-        page.remove_all.click()
+        assert not page.selected
+        _check_panes(page, {row["id"] for row in group.files})
+        idle()
+        page.move_btn.click()
         idle()
         assert duplicates.file_review_key(group) in duplicates.kept_choices(library)  # cancel preserves the keep
-        page._set_all(True)
-        assert group.hash not in page.included  # Include all must not override a remembered keep
-        item = page.list.currentItem()
-        item.setCheckState(Qt.CheckState.Checked)
-        assert duplicates.file_review_key(group) not in duplicates.kept_choices(library)
-        assert len(page._file_targets(group)) == 2
-        page.remove_all.click()
-        idle()
         page._show(duplicates.find_all(library))
-        assert len(page._file_targets(file_group(page.report))) == 2  # rescan never repeats Remove all
+        idle()
+        select("file", group.hash)
+        assert not page.selected  # a cancelled removal never replaces the remembered keep
 
-        page._set_all(False)
         match = folder_group(page.report)
         select("folder", match.id)
-        page.f_remove_all.click()
+        _check_panes(page, {folder.path for folder in match.folders})
+        idle()
+        page.move_btn.click()
         idle()
         assert len(confirmations[-1][1]) == sum(f.files for f in match.folders) and confirmations[-1][2]
-        assert not page._folder_targets(match)
-        assert all("✓ Kept" in page.table.topLevelItem(i).text(0) for i in range(page.table.topLevelItemCount()))
+        window.toast.hide()
         assert window.grab().save(str(tmp_path / "duplicates-folder-choices.png"))
-        page.apply()
-        idle()
         assert not actions.batches(library)
-        page.f_keep_all.click()
+        page.keep_all.click()
+        idle()
         assert page.report.folder_review_key(match) in duplicates.kept_choices(library)
-        assert not page._folder_targets(match)
-        assert all(row["badge"] == "KEEP" for row in page.f_grid.items())
         inside = next(m for m in page.report.folders if m.kind == "inside")
         select("folder", inside.id)
-        assert not page.f_remove_all.isEnabled()
-        before = dict(page.folder_removals)
-        page._choose_folder("all")
-        assert page.folder_removals == before
+        assert page.selected == {inside.folders[0].path}
+        larger = next(pane for pane in page.panes if pane.key == inside.folders[1].path)
+        assert "shared files only" in larger.remove_check.text()
         window.ctx.set_indexing(True)
-        assert not page.keep_all.isEnabled() and not page.f_keep_all.isEnabled()
+        assert not page.keep_all.isEnabled() and not page.move_btn.isEnabled()
         window.ctx.set_indexing(False)
         library.db.execute("CREATE TEMP TRIGGER reject_keep BEFORE INSERT ON duplicate_kept BEGIN "
                            "SELECT RAISE(ABORT,'test write failure'); END")
         before = duplicates.kept_choices(library)
-        page.f_keep_all.click()
+        page.keep_all.click()
         assert failures == ["Duplicate choice not saved"] and duplicates.kept_choices(library) == before
     finally:
         window.close()
@@ -360,7 +371,6 @@ def test_review_controls_persistence_and_remove_all_acknowledgement(library, tmp
 def test_group_removal_executes_only_current_group_refreshes_and_undoes(library, tmp_path, monkeypatch, quick):
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     os.environ.setdefault("QT_QPA_FONTDIR", r"C:\Windows\Fonts")
-    import time
     from PySide6.QtWidgets import QApplication
     from memoria.ui.main_window import MainWindow
     from memoria.ui.pages import base, duplicates as duplicate_ui
@@ -374,7 +384,9 @@ def test_group_removal_executes_only_current_group_refreshes_and_undoes(library,
     window.go("duplicates")
     page = window.page("duplicates")
     page._show(duplicates.find_all(library))
+    _wait_review(app, window)
     window.lib_label.setText("<b>Sample library</b><br>Generated test media")
+    window.toast.hide()
     before = snapshot(library)
     errors, confirmations = [], []
     window.runner.error.connect(lambda *args: errors.append(args))
@@ -382,8 +394,6 @@ def test_group_removal_executes_only_current_group_refreshes_and_undoes(library,
 
     def confirm(parent, title, summary, details, text, **kwargs):
         confirmations.append((title, kwargs.get("require_ack"), kwargs.get("file_ids")))
-        if title == "Move duplicates to Recovery":  # bulk remains separate and confirmed
-            return False
         assert not quick, "Quick group actions must not open another confirmation"
         return True
     monkeypatch.setattr(base, "confirm", confirm)
@@ -401,18 +411,14 @@ def test_group_removal_executes_only_current_group_refreshes_and_undoes(library,
     monkeypatch.setattr(duplicate_ui, "ConfirmDialog", QuickConsent)
 
     def idle():
-        deadline = time.monotonic() + 10
-        while window.runner.busy and time.monotonic() < deadline:
-            app.processEvents()
-            time.sleep(.01)
-        app.processEvents()
-        assert not window.runner.busy and not errors, errors
+        _wait_review(app, window)
+        assert not errors, errors
 
     def select(kind, key):
         index = next(i for i, (k, obj) in enumerate(page.entries) if k == kind and
                      (obj.hash if kind == "file" else obj.id) == key)
         page.list.setCurrentRow(index)
-        app.processEvents()
+        idle()
 
     try:
         assert not page.quick_remove.isChecked()
@@ -426,20 +432,23 @@ def test_group_removal_executes_only_current_group_refreshes_and_undoes(library,
         group = file_group(page.report)
         select("file", group.hash)
         removed = group.files[0]["rel_path"]
-        page.grid.setCurrentIndex(page.grid.model_.index(0))
-        page.remove_one.click()
+        _check_panes(page, {group.files[0]["id"]})
+        idle()
+        page.move_btn.click()
         idle()
         assert snapshot(library) == {path: data for path, data in before.items() if path != removed}
-        assert len(next(g for g in page.loose if g.hash == group.hash).files) == 2
+        assert len(next(g for g in page.report.loose_groups() if g.hash == group.hash).files) == 2
         first_batch = actions.batches(library)[0]["id"]
         assert window.toast.batch_id == first_batch
         if not quick:
             assert len(confirmations[-1][2]) == 1 and not confirmations[-1][1]
 
         select("file", group.hash)
-        page.remove_all.click()
+        _check_panes(page, {member["key"] for member in page.members})
         idle()
-        assert not any(g.hash == group.hash for g in page.loose)
+        page.move_btn.click()
+        idle()
+        assert not any(g.hash == group.hash for g in page.report.loose_groups())
         roots = {f["rel_path"] for f in group.files}
         assert snapshot(library) == {path: data for path, data in before.items() if path not in roots}
         second_batch = actions.batches(library)[0]["id"]
@@ -449,11 +458,7 @@ def test_group_removal_executes_only_current_group_refreshes_and_undoes(library,
         else:
             assert len(confirmations[-1][2]) == 2 and confirmations[-1][1]
 
-        count = len(confirmations)
-        page.apply()
-        idle()
-        assert len(confirmations) == count + 1 and confirmations[-1][0] == "Move duplicates to Recovery"
-        assert len(actions.batches(library)) == 2  # cancelled bulk confirmation touched no other group
+        assert len(actions.batches(library)) == 2  # no unselected group was executed
 
         window.undo_batch(second_batch)
         idle()
@@ -464,8 +469,10 @@ def test_group_removal_executes_only_current_group_refreshes_and_undoes(library,
         for remove_all in (False, True):
             match = folder_group(page.report)
             select("folder", match.id)
-            paths = {f.path for f in match.folders} if remove_all else {page._selected_folder()}
-            (page.f_remove_all if remove_all else page.f_remove_one).click()
+            paths = {f.path for f in match.folders} if remove_all else {match.keeper}
+            _check_panes(page, paths)
+            idle()
+            page.move_btn.click()
             idle()
             assert snapshot(library) == {path: data for path, data in before.items()
                                          if not any(path.startswith(folder + os.sep) for folder in paths)}
@@ -479,25 +486,135 @@ def test_group_removal_executes_only_current_group_refreshes_and_undoes(library,
         if quick:
             group = file_group(page.report)
             select("file", group.hash)
+            _check_panes(page, {group.files[0]["id"]})
+            idle()
             path = library.abspath(group.files[0]["rel_path"])
             stat = path.stat()
             altered = bytearray(path.read_bytes())
             altered[-1] ^= 1
             path.write_bytes(altered)
             os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
-            page.grid.setCurrentIndex(page.grid.model_.index(0))
-            page.remove_one.click()
+            page.move_btn.click()
             idle()
             assert path.read_bytes() == bytes(altered)
             assert actions.recovery_size(library) == (0, 0)
-            assert "No items were moved" in page.action_note.text()
             assert "skipped" in page.action_note.text()
 
         fresh_page = duplicate_ui.DuplicatesPage(window.ctx)
         assert not fresh_page.quick_remove.isChecked()  # consent is not persistent
+        fresh_page.shutdown()
         fresh_page.deleteLater()
         page.quick_remove.setChecked(False)
         assert not page.quick_warning.isVisible()
+    finally:
+        window.close()
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_subset_panes_remove_common_content_only_even_when_both_are_checked(library, tmp_path, monkeypatch):
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    from PySide6.QtWidgets import QApplication
+    from memoria.ui.main_window import MainWindow
+    from memoria.ui.pages import base, duplicates as duplicate_ui
+    from memoria.ui.widgets import ConfirmDialog
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.resize(1440, 900)
+    window.ctx.set_library(library)
+    window._show_library_ui(True)
+    window.show()
+    window.go("duplicates")
+    page = window.page("duplicates")
+    page._show(duplicates.find_all(library))
+    _wait_review(app, window)
+    before = snapshot(library)
+    prompts, errors = [], []
+    window.runner.error.connect(lambda *args: errors.append(args))
+    monkeypatch.setattr(base, "confirm", lambda *args, **kwargs: prompts.append(kwargs) or True)
+    class Consent(ConfirmDialog):
+        def exec(self):
+            self.ack.setChecked(True)
+            return self.DialogCode.Accepted
+    monkeypatch.setattr(duplicate_ui, "ConfirmDialog", Consent)
+    try:
+        page.quick_remove.setChecked(True)
+        assert page.quick_remove.isChecked()
+        for both in (False, True):
+            match = next(group for group in page.report.folders if group.kind == "inside")
+            page.list.setCurrentRow(next(i for i, (kind, group) in enumerate(page.entries)
+                                         if kind == "folder" and group.id == match.id))
+            _wait_review(app, window)
+            assert page.selected == {match.folders[0].path}
+            paths = {folder.path for folder in match.folders} if both else {match.folders[1].path}
+            _check_panes(page, paths)
+            _wait_review(app, window)
+            assert "unique" in page.selection_note.text()
+            removed = {library.rel(action.src) for action in page._selection_plan["actions"] if action.op == "recycle"}
+            assert "Holder\\unique.jpg" not in removed
+            assert "Holder\\photo.jpg" in removed
+            if both:
+                assert "Subset\\photo.jpg" in removed
+                window.lib_label.setText("<b>Sample library</b><br>Generated test media")
+                assert window.grab().save(str(tmp_path / "duplicates-subset.png"))
+            previous = len(prompts)
+            page.move_btn.click()
+            _wait_review(app, window)
+            assert not errors
+            assert len(prompts) == previous + 1  # subset review cannot be skipped by Quick remove
+            assert bool(prompts[-1]["require_ack"]) == both
+            assert snapshot(library) == {path: data for path, data in before.items() if path not in removed}
+            assert (library.root / "Holder" / "unique.jpg").exists()
+            window.undo_batch(window.toast.batch_id)
+            _wait_review(app, window)
+            assert not errors and snapshot(library) == before
+    finally:
+        window.close()
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_four_copy_table_moves_only_checked_rows(library, tmp_path, monkeypatch):
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    from memoria.ui.main_window import MainWindow
+    from memoria.ui.pages import base
+    shutil.copy2(library.root / "one.jpg", library.root / "four.jpg")
+    scanner.index(library)
+    before = snapshot(library)
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.resize(1440, 900)
+    window.ctx.set_library(library)
+    window._show_library_ui(True)
+    window.show()
+    window.go("duplicates")
+    page = window.page("duplicates")
+    page._show(duplicates.find_all(library))
+    _wait_review(app, window)
+    monkeypatch.setattr(base, "confirm", lambda *args, **kwargs: True)
+    try:
+        group = file_group(page.report)
+        assert len(group.files) == 4
+        page.list.setCurrentRow(next(i for i, (kind, obj) in enumerate(page.entries)
+                                     if kind == "file" and obj.hash == group.hash))
+        _wait_review(app, window)
+        assert page.detail.currentWidget() is page.many_view
+        chosen = page.copies.topLevelItem(1).data(0, Qt.ItemDataRole.UserRole)
+        for index in range(page.copies.topLevelItemCount()):
+            item = page.copies.topLevelItem(index)
+            item.setCheckState(0, Qt.CheckState.Checked if index == 1 else Qt.CheckState.Unchecked)
+        _wait_review(app, window)
+        assert page.selected == {chosen["key"]} and page._selection_plan["files"] == 1
+        window.lib_label.setText("<b>Sample library</b><br>Generated test media")
+        assert window.grab().save(str(tmp_path / "duplicates-many.png"))
+        page.move_btn.click()
+        _wait_review(app, window)
+        assert snapshot(library) == {path: data for path, data in before.items() if path != chosen["path"]}
+        window.undo_batch(window.toast.batch_id)
+        _wait_review(app, window)
+        assert snapshot(library) == before
     finally:
         window.close()
         window.deleteLater()

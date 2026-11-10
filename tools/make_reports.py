@@ -58,6 +58,10 @@ AREAS = {
     "test_responsive_views": "100k-entry responsiveness, asynchronous previews and lifecycle guards",
     "test_duplicate_paging": "Bounded duplicate-group and member review",
     "test_media_source_ui": "Guarded asynchronous editor, story and video sources",
+    "test_folder_comparison": "Shared-only subset review, unique content and Undo",
+    "test_recovery_accounting": "Read-only cumulative Recovery accounting and inspection",
+    "test_recovery_restore": "Reviewed logged/unlogged Recovery restoration and conflict safety",
+    "test_recovery_restore_ui": "Restoration preview, scoped conflict popups and bounded UI",
 }
 
 
@@ -159,9 +163,14 @@ def refresh_images(tmp: Path) -> None:
     sources = {dest: shots / f"{source}.png" for dest, source in names.items()}
     sources["confirm"] = next(shots.glob("dialog-Move*.png"))
     sources["live-index"] = next(tmp.rglob("live-index.png"))
+    sources["history"] = shots / "21-history-after-apply.png"
     for dest, source in (("duplicates-choices", "duplicates-file-choices"),
                          ("duplicates-remove-all-confirm", "duplicates-remove-all-confirm"),
                          ("duplicates-quick-mode", "duplicates-quick-mode"),
+                         ("duplicates-subset", "duplicates-subset"),
+                         ("duplicates-many", "duplicates-many"),
+                         ("recovery-restore-preview", "recovery-restore-preview"),
+                         ("recovery-restore-conflict", "recovery-restore-conflict"),
                          ("tidy-sidecars", "tidy-sidecars")):
         sources[dest] = next(tmp.rglob(f"{source}.png"))
     for path in sources.values():

@@ -4,9 +4,9 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QGridLayout, QWidget
 
-from ...engine import actions, health, organize, similar, tidy
+from ...engine import actions, health, organize, recovery, similar, tidy
 from .. import theme
-from ..tasks import BackgroundCall
+from ..tasks import LatestCall
 from ..widgets import Banner, Tile, button, fmt_date, fmt_n, fmt_size, glyph_label, hbox, label, scroll, vbox
 from .base import Page
 
@@ -67,9 +67,14 @@ class OverviewPage(Page):
         content.setLayout(vbox(tiles, self.pending, self.trust, 4, label("What Memoria can do for this library", "h2"),
                                grid, None, spacing=12))
         self.body.addWidget(scroll(content))
-        self.bg = BackgroundCall(self)
+        self.bg = LatestCall(self)
         self.bg.result.connect(self._insights)
-        self.bg.failed.connect(lambda e: self.updating.setText(""))
+        self.bg.failed.connect(self._insights_failed)
+
+    def _insights_failed(self, error):
+        self.updating.setText("")
+        self.trust.setText("Recovery accounting is unavailable — storage is not confirmed empty. "
+                           "Open History & recovery to inspect available roots and retry.")
 
     def on_busy_changed(self, busy: bool) -> None:
         self.rescan_btn.setEnabled(not busy)
@@ -116,11 +121,22 @@ class OverviewPage(Page):
     def _insights(self, d: dict) -> None:
         self.updating.setText("")
         rf, rs = d["recovery"]
+        report = d["recovery_accounting"]
         self.trust.setText(
-            f"<b>Recovery is not a backup.</b> Available Recovery holds {fmt_n(rf, 'file')} ({fmt_size(rs)}). "
+            f"<b>Recovery is not a backup.</b> Cumulative Recovery across all available roots: "
+            f"{fmt_n(rf, 'measured file')} ({fmt_size(rs)} logical bytes), not just the last cleanup. "
+            + (f"Latest cleanup: {fmt_size(report.latest.moved_bytes)} recorded as moved; "
+               f"{fmt_size(report.latest.bytes)} still measured in Recovery. " if report.latest else "")
+            + (f"Older cleanups retained: {fmt_size(report.older_bytes)}. " if report.latest else "")
+            + (f"Other journaled contents: {fmt_size(report.other_bytes)}. " if report.other_bytes else "")
+            + (f"Untracked / ambiguous: {fmt_n(report.untracked_files, 'file')} "
+               f"({fmt_size(report.untracked_bytes)}). " if report.untracked_files else "")
             + (f"{d['offline_roots']} media folder(s) offline; their Recovery is not included. " if d["offline_roots"] else "")
-            +
-            "Keep a separate backup before cleaning up. Use Health check to review missing or unreadable files.")
+            + ("INCOMPLETE: measured lower bounds only; unreadable items / skipped links are excluded. "
+               if not report.complete else "")
+            + ("Inspection needed. " if report.needs_inspection else "")
+            + "See History & recovery for the per-cleanup and per-root breakdown. "
+            "Moving to Recovery frees no disk space; logical bytes are not disk allocation. Keep a separate backup.")
         if d["dup_groups"] is not None:
             n = d["dup_copies"]
             nf = d["dup_folders"]
@@ -163,9 +179,11 @@ class OverviewPage(Page):
 def _insights(lib, cached: dict) -> dict:
     """Read-only summary for the tool cards (runs on a background thread)."""
     try:
-        d = {"recovery": actions.recovery_size(lib), "blurry": len(similar.find_blurry(lib)),
+        report = recovery.inspect(lib)
+        d = {"recovery": (report.files, report.bytes), "recovery_accounting": report,
+             "blurry": len(similar.find_blurry(lib)),
              "health": health.last_checked(lib), "batches": len(actions.batches(lib))}
-        d["offline_roots"] = sum(not source["online"] for source in lib.roots())
+        d["offline_roots"] = sum(not root.online for root in report.roots)
         d["maybe_dupes"] = lib.db.execute(
             "SELECT COUNT(*) FROM files WHERE kind!='other' AND size>0 AND size IN "
             "(SELECT size FROM files WHERE kind!='other' AND size>0 GROUP BY size HAVING COUNT(*)>1)").fetchone()[0]

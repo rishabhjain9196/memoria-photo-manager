@@ -343,12 +343,13 @@ it uses minimal file snapshots captured during Find, including fingerprints for 
 snapshots reject the plan; newly added files cannot be included. The ordinary folder planner excludes all other
 planned removals from potential survivor guards and respects explicitly protected keep choices.</p>
 <p>Folders with explicit review choices are accounted for before rebuilding loose file groups, avoiding overlapping
-individual plans. Group Remove buttons build a plan for only the current group, confirm, execute and refresh the
-results. The separate bulk Apply uses marked groups and always confirms. Group Remove both/all requires an
-acknowledgement unless session-only Quick remove has already been explicitly acknowledged. Quick mode bypasses only
-the group confirmation, never engine validation or permanent-deletion safeguards. A saved Keep decision is cleared
-in the worker after confirmation, not when a cancelled dialog is prepared. Only Keep decisions persist; Include all
-and later scans never replay prior Remove-all choices.</p>
+individual plans. The simplified UI selects content in one group only, using two/three panes or a bounded table.
+<code>plan_folder_selection</code> uses reviewed snapshots; selecting an <code>inside</code> container removes only
+verified shared meaningful files and never removes its containing folder. Unique/unmatched contents remain.
+Shared files whose linked components are not all selected are retained. Captured directory snapshots prevent
+absorbing newly created directories; nonempty directories are still protected at execution.
+All-copy selection needs acknowledgement unless ordinary Quick remove was already acknowledged; subsets and linked
+components always confirm. A saved Keep decision is cleared only in the worker after confirmation.</p>
 <p>History sorts by creation time, with insertion order breaking equal timestamps rather than random batch IDs.
 New action batches record microsecond timestamps so rapid group actions retain their chronological Undo order.</p>
 <p>Cost is O(files × folder depth) in memory after hashing: ≈0.1 s for the sample library with cached hashes.</p>
@@ -601,9 +602,26 @@ the recorded destination hash to match. Catalogue parking/moved paths and batch 
 Stray copy <code>.memoria-tmp</code> files are removed. Applying batches become partial. This does not repair
 arbitrary disk or SQLite corruption.</p>
 <h3>Recovery</h3>
-<p><code>recovery_size</code> walks the folder; <code>empty_recovery(lib, batch_ids=None)</code> deletes batch folders, marks
+<p><code>recovery.inspect</code> performs read-only, no-follow physical/journal accounting; <code>recovery_size</code>
+retains its tuple API through the shared accounting implementation. Cumulative logical bytes are separate from the
+latest cleanup, older retained cleanup bytes, other journalled contents and untracked/ambiguous files.
+Per-root/per-batch results report missing, size/type-changed, interrupted and uncertain entries.
+Unreadable/offline storage and skipped links are explicit; incomplete totals are lower bounds. The UI disables
+emptying when inspection is required. <code>inspection_path</code> verifies an existing location without creating it.
+No original media is read or hashed to account sizes. <code>empty_recovery(lib, batch_ids=None)</code> deletes batch folders, marks
 their recycle operations <code>purged</code> and batches <code>emptied</code> after successful removal. Errors propagate
 and preserve remaining recovery records. Undo and exporter rollback can separately delete generated copies.</p>
+<p><code>recovery_restore.preview</code> returns a read-only <code>RestorePlan</code> with logged, inferred or
+unresolved destinations; <code>map_destination</code> explicitly maps an ambiguous stored group.
+<code>execute</code> validates reviewed sources and destinations, restores eligible data and reports skipped,
+failed and cancelled work. Unlogged contents are adopted through clearly labelled <code>recovery_import</code>
+records, not fabricated historical deletions. Import batches are excluded from latest-cleanup accounting.</p>
+<p><code>actions.undo_recovery</code> filters reversal to Recovery-related work so unrelated exports/copies are not
+deleted. Existing files are never overwritten; grouped conflicts retain common names. The UI conflict callback
+crosses to the GUI thread through a queued request, polls cancellation while waiting, and remembers rename/skip
+choices for an exact destination folder or all remaining conflicts in that operation only. Ambiguous paths,
+traversal, app-storage targets, links/reparse parents and unavailable roots are not silently accepted.
+Post-restoration inventory scanning discovers unlogged files without decoding the entire library.</p>
 </section>
 
 <section id="p-insights">
@@ -807,7 +825,7 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>361 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
+<p><b>445 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
 <a href="report.html">quality report</a> records the test inventory and last full regression run.
 Focused suites now include synthetic 100,000-entry catalogues, root reconnection, compound operations, metadata
 Undo and smart albums. Fake-tray/offscreen tests do not verify
@@ -818,7 +836,7 @@ actual Windows popup appearance or OS delivery policy.</p>
   <tr><td><code>test_assets.py</code> + <code>test_companion_actions.py</code></td><td>25</td><td>Inferred companion membership and explicit review, preflight, shared collision names, rollback/cancel, interrupted publication and Undo.</td></tr>
   <tr><td><code>test_organisation.py</code> + <code>test_metadata_history.py</code></td><td>40</td><td>Tags/ratings/favourites/review states, keeper-wins metadata merges, idempotency, later-edit protection and reset-aware Undo.</td></tr>
   <tr><td><code>test_smart_albums.py</code></td><td>20</td><td>Validated dynamic rules, persistence, filter semantics, bounded queries and asynchronous album/file browsing.</td></tr>
-  <tr><td><code>test_responsive_views.py</code>, <code>test_duplicate_paging.py</code>, <code>test_library_views.py</code>, <code>test_media_source_ui.py</code></td><td>24</td><td>100k-entry bounds, held live-index previews, delayed I/O, stale/lifetime guards, root-aware media readers and full-plan selection across pages.</td></tr>
+  <tr><td><code>test_responsive_views.py</code>, <code>test_duplicate_paging.py</code>, <code>test_library_views.py</code>, <code>test_media_source_ui.py</code></td><td>25</td><td>100k-entry bounds, held live-index previews, delayed I/O, stale-result/error/lifetime guards, root-aware media readers and full-plan selection across pages.</td></tr>
   <tr><td><code>test_engine.py</code></td><td>30</td><td>Hash pre-filter semantics; incremental scan; counts, errors, dates and date sources; EXIF rotation; HEIC/HEIF and video analysis; duplicate groups vs ground truth incl. the &gt;1.28 MB regression; removal + undo restores an identical tree; changed keeper/copy are skipped; user keeper override/exclusion; bursts and best frame; near-duplicates prefer original; exact copies and screenshots excluded from Similar; blur detection; organise plan/apply/undo and uncertain dates; tidy categories, protected Apple .AAE sidecars, apply/undo (folders recreated); health baseline, bit-flip damage, edit detection; compare read-only + two-way sync + undo; overlapping folder rejection; verified copy failure leaves nothing; never overwrites; crash reconciliation; cancellation; Empty Recovery.</td></tr>
   <tr><td><code>test_video.py</code> + <code>test_story.py</code></td><td>41</td><td>Compression verification, source preservation,
     no overwrite, target size and cancellation; 10,000-row lazy UI loading, bounded/incremental probes and selection
@@ -837,11 +855,15 @@ actual Windows popup appearance or OS delivery policy.</p>
     selectable analysis-error details.</td></tr>
   <tr><td><code>test_storage.py</code></td><td>14</td><td>Selective clearing, media/history and duplicate-choice preservation,
     transaction rollback, process termination, cancellation/resume, changed media, low-space and compaction recovery.</td></tr>
-  <tr><td><code>test_duplicate_choices.py</code></td><td>14</td><td>Explicit one/all selections, cancellation and Undo,
+  <tr><td><code>test_duplicate_choices.py</code></td><td>16</td><td>Explicit one/all selections, cancellation and Undo,
     changed/new/previously empty files, protected folder/file overlaps, keep-choice persistence/invalidation,
     schema-6 upgrade, storage reset, required acknowledgement and visible save failures; actual group-scoped removal
-    and list refresh, quick-mode consent/reset, same-size/mtime changed-file protection, always-confirmed bulk Apply
+    and list refresh, adaptive pane/table controls, subset shared-only selection, quick-mode consent/reset, same-size/mtime changed-file protection
     and same-timestamp History ordering.</td></tr>
+  <tr><td><code>test_folder_comparison.py</code></td><td>6</td><td>Either/both subset sides, unique linked assets, immutable review snapshots, changed-source guards and Undo.</td></tr>
+  <tr><td><code>test_recovery_accounting.py</code></td><td>20</td><td>Older plus latest logical sizes, per-root/per-change attribution, untracked/changed/missing entries, offline/unreadable paths, no-follow links, scan safety and guarded inspection UI.</td></tr>
+  <tr><td><code>test_recovery_restore.py</code></td><td>48</td><td>Logged and imported restoration, reviewed/manual paths, filtered Undo, rename/skip/cancel conflicts, linked groups, race/interruption handling, retained originals and path safety.</td></tr>
+  <tr><td><code>test_recovery_restore_ui.py</code></td><td>7</td><td>Inferred-path acknowledgement, manual mapping, real History restoration, exact-folder/all-remaining conflict scopes, GUI cancellation/errors and 100k-preview bounds.</td></tr>
   <tr><td><code>test_insights.py</code></td><td>9</td><td>Folder/type totals, literal search, combined filters, leap dates,
     saved-album links, India/world switching, bounded 10,000-row paging, visible offline labels, mouse/touchpad/keyboard
     zoom, drag geometry, stale-result rejection and map responsiveness during a blocked background query.</td></tr>

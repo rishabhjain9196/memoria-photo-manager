@@ -46,6 +46,38 @@ def _index(lib: Library, folders: set[str]) -> dict[tuple[str, str], list[dict]]
     return {key: members for key, rows in grouped.items() if (members := _components(rows))}
 
 
+def linked_groups(lib: Library, rows: list[dict]) -> list[list[dict]]:
+    index = _index(lib, {row["folder"] for row in rows})
+    seen, groups = set(), []
+    for row in rows:
+        key = (row["folder"].lower(), _stem(row["name"]).lower())
+        if key in index and key not in seen:
+            groups.append(index[key])
+            seen.add(key)
+    return groups
+
+
+def footprint(lib: Library, planned: list) -> tuple[int, int, int]:
+    """Catalogue-sized move footprint for review, including linked parts; no media is read."""
+    sizes = {action.file_id: action.size for action in planned if action.file_id is not None and action.op != "rmdir"}
+    identifiers = list(sizes)
+    rows = []
+    for offset in range(0, len(identifiers), 400):
+        part = identifiers[offset:offset + 400]
+        rows.extend(dict(row) for row in lib.db.execute(
+            f"SELECT {_COLUMNS} FROM files WHERE id IN ({','.join('?' for _ in part)})", part))
+    if len(rows) != len(identifiers):
+        raise ValueError("Some selected files are no longer in the catalogue. Find duplicates again.")
+    locked = {action.file_id for action in planned if action.companions_locked}
+    original = len(sizes)
+    for group in linked_groups(lib, rows):
+        ids = {row["id"] for row in group}
+        if ids & locked and not ids <= sizes.keys():
+            raise ValueError("Linked contents changed since review. Find duplicates again.")
+        sizes.update((row["id"], row["size"]) for row in group)
+    return len(sizes), sum(sizes.values()), len(sizes) - original
+
+
 @dataclass
 class Prepared:
     actions: list

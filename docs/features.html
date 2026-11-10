@@ -94,8 +94,8 @@ copy; clearing albums, people or health baselines is not undoable. Keep a separa
   <li><b>Looking is harmless.</b> Finding duplicates, similar photos, tidy-up items, organise plans, health checks and
       comparisons only read files.</li>
   <li><b>You see the list first, then confirm.</b> A dialog states exactly how many files will move and where.
-      Duplicate Quick remove can skip group confirmations after explicit session consent; bulk Apply and
-      Empty Recovery always keep their confirmations.</li>
+      Duplicate Quick remove can skip ordinary exact-copy confirmations after session consent; subset comparisons,
+      linked components and Empty Recovery still require confirmation.</li>
   <li><b>Changed files are skipped.</b> If a file changed after you reviewed it, Memoria leaves it alone and tells you.</li>
   <li><b>Nothing is overwritten.</b> If a name is already taken, the moved or copied file gets a number, e.g. <i>IMG_1234 (2).jpg</i>.</li>
   <li><b>Where Memoria writes:</b> a hidden <code>.memoria</code> folder inside your library (catalogue, thumbnails,
@@ -296,51 +296,39 @@ reorganising.</p>
 <ol>
   <li>Click <b>Find duplicates</b>. Equal-size candidates pass through sampled hashes, then full-content hashes.
       Leftovers in matched folders are also fingerprinted to make explicit all-folder removal safe.</li>
-  <li>The tiles show duplicate folders, extra file copies and the size of the bulk plan.
-      Moving to Recovery does not itself free disk space.</li>
-  <li><b>Duplicate folders</b> are listed first. A folder is listed when another folder holds <i>exactly the same files</i>,
-      or <i>all of its files and more</i>. Sub-folders are included and names or layout don't matter (leftovers like
-      Thumbs.db and empty files are ignored). Only the <b>highest</b> folder is shown: if all of "Old Laptop" is a copy of
-      "Albums", you see "Old Laptop" once — not every album inside it. Each entry shows its duplicate size.</li>
-  <li>Select a folder entry to see a table of the folders involved — <b>total size, number and size of photos, number and
-      size of videos, other files and sub-folders</b> — and the files inside. For identical folders, select one and click
-      <b>Use as bulk keeper</b> to keep it in the bulk plan. When an original-looking folder sits inside a backup folder, the entry is
-      shown but not ticked.</li>
-  <li><b>Duplicate files</b> follow: copies not already handled by a folder group. <b>KEEP</b> marks files left in place
-      and <b>MOVE</b> marks planned removals. The default still prefers an original-looking copy;
-      hover a thumbnail for its reason.</li>
-  <li>To change the copy kept by bulk Apply, select it and click <b>Use as bulk keeper</b>. This changes the plan only.</li>
-  <li><b>Remove 1:</b> select the exact copy or folder, then click Remove 1. Confirm to move just that item to Recovery;
-      other marked groups are not included. No second Apply click is needed.</li>
-  <li><b>Remove both / Remove all (N):</b> confirm to move every shown member of the current group to Recovery.
-      For folders, this is available only for identical groups, never a containing folder that may hold unique files.</li>
-  <li><b>Keep both / Keep all (N):</b> leave every shown member untouched and remember the choice.
-      Unchanged kept groups are hidden by default. <b>Show previous choices</b> reveals them unchecked.
-      Tick a revealed group or choose a removal to replace that keep decision.</li>
-  <li>Unticking is temporary exclusion for this review. <b>Include all</b> uses suggested removals, not previous
-      Remove-all choices, and does not override remembered keeps. <b>Include none</b> excludes everything for this review.</li>
-  <li>For a bulk cleanup instead, click <b>Apply marked groups…</b>, review the combined plan, then confirm.
-      This always asks, even with Quick remove enabled.</li>
+  <li>Choose a group in the simple left-hand list. Two copies use two panes, three use three panes, and larger groups
+      use a paged comparison table with a preview. No thumbnails are loaded for every group upfront.</li>
+  <li><b>Checked = move to Recovery; unchecked = keep.</b> The recommended keeper is clearly marked and can be
+      overridden. Checking every copy selects every copy in this group, not other groups.</li>
+  <li><b>Exact files:</b> full-content hashes match. <b>Matching folders:</b> meaningful contents overlap completely,
+      though names/layout and system/empty leftovers may differ.</li>
+  <li><b>Subset:</b> the smaller folder is selected by default. Selecting the larger means <b>Move shared files only</b>:
+      its unique/unmatched contents and containing folder stay. Selecting both removes shared copies on both sides.
+      Shared files tied to unique or unreviewed linked parts are retained, and the planned total explains this.</li>
+  <li>Read <b>Planned move</b>: it includes linked components, not just displayed photo sizes. Click
+      <b>Move selected to Recovery</b>. There is no separate bulk plan or bulk-keeper action.</li>
+  <li><b>Keep these copies</b> remembers this unchanged group without moving anything. <b>Show kept groups</b> reveals
+      remembered groups with nothing checked. A cancelled removal does not replace that decision.</li>
 </ol>
-<div class="callout warn">Remove both/all can remove the last copy from the library. It requires a separate checkbox
+<div class="callout warn">Checking every copy can remove the last copy from the library. It requires a separate checkbox
 acknowledgement, either for that action or when enabling Quick remove. Files go to Recovery, not permanent deletion;
 Undo remains available only while Recovery is intact.
 Review the result and your separate backup before ever emptying Recovery.</div>
 <h3>Optional Quick remove</h3>
-<p>Enable <b>Quick remove: skip confirmation popups</b> and acknowledge the warning once. Remove 1 and
-Remove both/all then act immediately on the current group, without more confirmation popups. A visible warning stays
-on while enabled. File checks, changed-file/error feedback, Recovery and Undo remain active; bulk Apply, Empty Recovery
-and other tools keep their confirmations. Quick remove is not saved and starts off in every new library window.
+<p>Enable <b>Quick remove</b> and acknowledge the warning once. Ordinary exact-copy selections then act without another
+confirmation popup. Subset comparisons and linked components still require review. File checks, changed-file/error
+feedback, Recovery and Undo remain active; Empty Recovery and other tools keep their confirmations.
+Quick remove is not saved and starts off in every new library window.
 Untick it at any time to restore group confirmations.</p>
 <p>After removal, duplicate results refresh. Removing one of two copies makes that group disappear; removing one
-of three leaves a two-copy group. Kept groups remain visible only when Show previous choices is enabled.</p>
+of three leaves a two-copy group. Kept groups remain visible only when Show kept groups is enabled.</p>
 <p>Keep decisions are tied to the reviewed group members, locations and file signatures, not just filenames.
 New members or detected changes require review again. Folder choices take precedence over individual review of the
 files inside those folders. Completed removals are listed in History; removal choices are not replayed after rescanning.
 Storage &amp; reset can clear saved keep choices explicitly.</p>
 <h3>What changes</h3>
 <p>Selected copies move into Recovery, keeping their folder structure there. Normal removal checks a surviving copy.
-Explicit Remove both/all has no survivor requirement, but each reviewed file is still checked against its recorded
+Explicit selection of all copies has no survivor requirement, but each reviewed file is still checked against its recorded
 content hash and file information. Changed files are skipped.</p>
 <p>When a copy is retained, useful catalogue organisation is merged into it: tags, static album membership and
 favourites are combined, unset rating/review states are filled, and the keeper wins conflicts. Smart albums stay
@@ -355,7 +343,9 @@ leftovers. New files are not added to that plan. Unreadable/unverified contents 
 files as "Albums" — shown once, at the top folder, with sizes and counts of photos and videos for each folder.</figcaption></figure>
 <figure><img src="images/duplicates.png" alt="Duplicates"><figcaption>Large 6 MB duplicates are handled correctly (the
 old command-line tool skipped every file over 1.28 MB).</figcaption></figure>
-<figure><img src="images/duplicates-choices.png" alt="Direct remove one, remove all and keep all choices"><figcaption>Remove buttons act on this group only. Bulk keeper and Apply marked groups are separate plan controls.</figcaption></figure>
+<figure><img src="images/duplicates-choices.png" alt="Three-pane duplicate comparison"><figcaption>Checkboxes are the removal choice; recommendations can be overridden. One action applies to this group only.</figcaption></figure>
+<figure><img src="images/duplicates-subset.png" alt="Subset comparison retaining unique larger-folder content"><figcaption>Checking the larger side selects shared content only, never its unique files.</figcaption></figure>
+<figure><img src="images/duplicates-many.png" alt="Checkable table for four or more copies"><figcaption>Larger groups use a bounded comparison table, rather than tiny preview panes.</figcaption></figure>
 <figure><img src="images/duplicates-remove-all-confirm.png" alt="Acknowledgement before removing every shown copy"><figcaption>With Quick remove off, removing every shown copy requires acknowledgement for that action.</figcaption></figure>
 <figure><img src="images/duplicates-quick-mode.png" alt="Quick removal with a visible all-copy warning"><figcaption>Quick remove requires initial consent and is never remembered for a new library window.</figcaption></figure>
 </section>
@@ -647,10 +637,30 @@ results are not presented as a complete backup inventory.</p>
       emptied). Select one to see each step — what moved, from where, to where.</li>
   <li><b>Undo this change</b> puts files back where they were. If a file with that name has appeared in the meantime, the
       restored file gets a new name. Copies are removed only if unchanged.</li>
-  <li><b>Recovery folder</b> shows how many files and how much space it holds. <b>Open Recovery folder</b> opens it in Explorer.</li>
+  <li><b>Cumulative Recovery</b> is the total measured across available folders, not the last cleanup. The latest
+      cleanup's recorded movement and bytes still retained are separate from older cleanups and untracked contents.</li>
+  <li>Select a history change to see its own remaining Recovery files/bytes. <b>Refresh accounting</b> rechecks
+      storage; <b>Inspect accounting</b> explains the selected location and exceptional entries locally.
+      The location picker changes Open/Inspect only, not the all-roots totals or permanent-emptying scope.</li>
+  <li>Sizes are logical bytes, not allocated disk space or space freed. Links/junctions are not followed.
+      Offline/unreadable paths make totals incomplete rather than falsely empty. Untracked, changed, missing or
+      interrupted entries require inspection and disable the UI's Empty Recovery action.</li>
+  <li><b>Open Recovery folder</b> opens an existing, verified location in Explorer; inspection never creates one.</li>
+  <li><b>Restore all available...</b> previews destinations before moving files back. It supports both original
+      logged paths and explicitly reviewed inferred destinations for unlogged files. Ambiguous groups need a manually
+      chosen destination; unresolved/offline/unreadable items remain in Recovery.</li>
+  <li><b>Restore conflicts:</b> choose Keep both (numbered restored names), Leave in Recovery, or Cancel restoration.
+      The popup can reuse a choice for this destination folder's remaining conflicts or all remaining conflicts in
+      this restoration. Existing files are never overwritten; these choices are not persisted to later runs.</li>
   <li><b>Empty Recovery…</b> permanently deletes the originals held there after acknowledgement. Those deletions cannot be
       undone. Undo can separately remove unchanged generated copies. Deletion failures are reported, not silently counted as success.</li>
 </ul>
+<p>Restoration is not permanent cleanup: it does not empty Recovery or delete unrelated exports. Preview and
+acknowledge inferred paths when original logs are unavailable; absent historical metadata cannot be reconstructed
+just from filenames. Cancelled or partial work is reported, and remaining files are left intact. After restoring,
+run duplicate finding again to review the library afresh.</p>
+<figure><img src="images/recovery-restore-preview.png" alt="Review inferred Recovery restore destinations"><figcaption>Unlogged destinations are labelled and acknowledged before any files move. Unknown layouts need an explicitly chosen folder.</figcaption></figure>
+<figure><img src="images/recovery-restore-conflict.png" alt="Choose a restore conflict policy for one file, this folder or all remaining conflicts"><figcaption>Keep both, leave in Recovery or cancel. Reuse a safe choice per destination folder or for the remaining restoration.</figcaption></figure>
 <figure><img src="images/history.png" alt="History and recovery"><figcaption>Every step of a change is listed with its
 current location.</figcaption></figure>
 <div class="callout warn">If Memoria is closed unexpectedly (crash or power cut) during a change, the next time you open the

@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Simpler duplicate comparison and explained Recovery totals
+- Added Restore all available Recovery with a destination preview, explicit review of inferred unlogged paths
+  and manual mapping for ambiguous groups. Conflicts offer Keep both, Leave in Recovery or Cancel, with exact-folder
+  or all-remaining scope for the current restoration. Existing originals are never overwritten; no automatic
+  emptying or unrelated export deletion is involved.
+- Replaced the duplicate bulk-plan/keeper controls with a plain group list, two or three comparison panes, and a
+  paged checkable table for four or more copies. Checked means move, unchecked means keep; recommendations are
+  overridable. One Move selected to Recovery action affects only the current group.
+- Subset comparisons select the smaller folder by default. Selecting the larger removes only verified shared
+  content, never its unique files or containing folder; selecting both removes shared copies on both sides.
+  Shared files attached to unique/unreviewed linked components are retained. Plans use reviewed file/directory
+  snapshots and preserve source checks, metadata merging and Undo.
+- Planned size includes linked components, and post-operation feedback states the bytes moved by that change.
+  Kept groups remain remembered; cancellation preserves decisions. Quick remove still needs initial consent;
+  subsets and linked components always confirm.
+- Added read-only cumulative Recovery accounting: latest cleanup versus older retained content, per-root/per-change
+  attribution, and untracked/ambiguous, missing, changed, interrupted or incomplete entries. Links/junctions are
+  not followed. Inspect accounting and refresh do not create Recovery, read original media or delete anything.
+- Uncertain accounting disables permanent emptying in the UI. Totals are logical measured bytes, not allocated
+  disk space or space freed. This does not claim a diagnosis of a particular reported 56 GB without its local
+  breakdown. No schema migration or cache reset is required.
+- Full integrated suite: 445 passed, plus a seven-test production-style restoration-dialog check. Generated
+  screenshots cover two/three/many-copy review, subset protection, accounting, restore preview and scoped conflict
+  choices. Validation used generated files and 100k-entry metadata, never the user's real Recovery.
+
 ### Multi-folder organisation and responsive large-library views
 - Added Library folders: keep the current catalogue home, register non-overlapping media roots, retain offline
   metadata/thumbnails and reconnect by source identity. Recovery stays on each source root; journal keys follow

@@ -153,7 +153,7 @@ then simply tells the truth about those rules.</p>
   <tr><td>I2</td><td>Review file clean-up before applying</td><td>Clean-up pages route file plans through one shared
     <code>apply_actions</code> flow that opens a confirmation dialog first, except group-scoped duplicate Quick remove
     after explicit session consent.</td><td>Dialog with counts, size and what is kept; a persistent warning while quick
-    mode is enabled. Bulk Apply and Empty Recovery always confirm.</td></tr>
+    mode is enabled. Subset/linked selections and Empty Recovery always confirm.</td></tr>
   <tr><td>I3</td><td>Removed originals go to Recovery</td><td>"recycle" moves into
     <code>.memoria\recovery\&lt;batch&gt;\&lt;original relative path&gt;</code>. Empty Recovery deletes those originals;
     Undo can remove unchanged generated copies, and failed exports can clean up their own output.</td>
@@ -318,8 +318,9 @@ space is low. It is not a repair for unreadable SQLite databases or physical dri
       kept"). Users can change the keeper/best pick, tick/untick items and include/exclude whole groups.</li>
   <li><b>Confirm</b> — one dialog per change: a sentence summary, <b>thumbnails of the affected files</b> (+N more), bullet details (what is kept, what is re-checked),
       a green note that nothing is deleted, and a button labelled with the exact action ("Move 14 copies"). Cancel has
-      initial focus. Duplicate group buttons confirm and act on that group only; bulk keeper controls affect the
-      separate Apply marked groups plan. Optional Quick remove skips group confirmations after one explicit
+      initial focus. Duplicates uses a simple group list and two/three panes or a bounded table: checked means move,
+      unchecked means keep. One action affects the current group; subset containers contribute shared content only.
+      Optional Quick remove skips ordinary exact-copy confirmations after one explicit
       acknowledgement, starts off in each new library window, and never bypasses file checks or Empty Recovery.</li>
   <li><b>Apply</b> — runs in the background; the page refreshes itself afterwards.</li>
   <li><b>Undo</b> — a toast offers Undo for ten seconds; History offers it indefinitely (until Recovery for that change is
@@ -528,7 +529,8 @@ guarantee on arbitrary drives or files.</p>
   <tr><td>Similar-video margin</td><td>Unrelated videos with very similar visuals (e.g. the same static scene) may score
     close to the threshold; groups are suggestions and nothing is pre-applied.</td></tr>
   <tr><td>Haar face detection is basic</td><td>Faces only nudge the best-shot score (12% weight).</td></tr>
-  <tr><td>Recovery uses disk space</td><td>Size is shown on Overview and History; emptying is explicit.</td></tr>
+  <tr><td>Recovery uses disk space</td><td>Cumulative/latest/older/untracked logical bytes are separated.
+    Incomplete or questionable accounting requires inspection rather than enabling permanent emptying.</td></tr>
   <tr><td>Very large libraries (&gt;100k)</td><td>Rendering and worker queues are bounded; group selections explicitly
     span pages, while file selections are page-scoped. Similarity is still quadratic and face-centre merging can
     allocate a large dense matrix.</td></tr>

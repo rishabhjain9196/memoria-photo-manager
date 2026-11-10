@@ -62,17 +62,26 @@ the rendered page).
   existing filters. Reject is a review mark, not a deletion command. **Smart albums** save filters and sort order
   as automatically updating views.
 - **Exact duplicates are proven**, not guessed: files are compared by full-content hash (xxh3-128). Normal removal
-  verifies a surviving copy. Explicit **Remove both/all** instead requires acknowledgement and still rechecks each
+  verifies a surviving copy. Explicitly selecting **every copy** instead requires acknowledgement and still rechecks each
   reviewed file before moving it to Recovery.
-- **Duplicate choices**: remove one selected copy/folder, remove both/all shown copies, or keep both/all.
-  Remove buttons confirm and execute **only the current group**, then refresh the list. Optional **Quick remove**
-  skips those popups after one acknowledgement; it starts off in every new library window. **Apply marked groups**
-  remains a separate, always-confirmed bulk action.
-  Linked-component changes always require explicit review, even in Quick remove. Removing duplicates merges tags,
+- **Simple duplicate comparison**: a group list on the left; two or three comparison panes, or a paged checkable
+  table for larger groups. Checked means move, unchecked means keep. Recommendations can be overridden.
+  **Move selected to Recovery** acts on this group only; there is no separate bulk plan.
+  In a **subset** comparison the smaller folder is selected by default. Checking the larger folder removes only
+  verified common files; its unique contents and folder stay. Checking both removes common copies on both sides.
+  Shared files linked to unique/unreviewed parts are retained rather than splitting those assets.
+  Optional **Quick remove** starts off each window; subset and linked-component changes always require review.
+  Removing duplicates merges tags,
   static album membership and favourites into surviving copies; unset ratings/review states are filled and the
   keeper wins conflicts. Organisation Undo does not overwrite later manual edits.
-  Keep choices persist for unchanged groups; **Show previous choices** reveals them. Remove-all choices are never
-  replayed automatically, and containing folders with unique files cannot both be removed.
+  **Keep these copies** remembers unchanged groups; **Show kept groups** reveals them unchecked.
+  Removal choices are never replayed automatically.
+- **Recovery accounting**: cumulative measured storage is separated from the latest cleanup, older retained
+  cleanups and untracked contents. Per-root/per-change details, unreadable/offline warnings and **Inspect accounting**
+  explain unexpected totals without deleting anything. Links/junctions are not followed.
+  **Restore all available...** previews logged or inferred destinations before moving files back; unresolved
+  locations require an explicit destination. Conflict popups offer Keep both, Leave in Recovery or Cancel, with
+  choices reusable for that destination folder or all remaining conflicts in the current restoration.
 - **People**: finds faces with two small open models (YuNet + SFace, run by OpenCV), groups the same person
   together, and lets you name, join and correct groups, find look-alikes, and search Photos & videos by name. All
   offline; face data stays in the library's catalogue and can be forgotten with one click.
@@ -145,7 +154,7 @@ No library handy? On the welcome screen choose **Try it on a sample library**. I
 | **Photos & videos** | Paged files, metadata filters/sorts, asynchronous preview/viewer, tags/ratings/favourites/review marks, saved smart searches and selection-scoped batch actions. | Catalogue edits; file actions only when explicitly requested |
 | **Library insights** | Storage charts, timeline, offline map, and **All files**: a flat, largest-first browser with metadata sorts and existing cleanup/compressor controls. | Charts are read-only; All files can run explicitly requested actions |
 | **People** | Faces found offline and grouped by person. Name groups, join them, correct mistakes (*Not this person*), find look-alikes, hide strangers, make an album. Names are searchable in Photos & videos. | Nothing (catalogue only) |
-| **Duplicates** | Whole duplicate folders first (same files, or all inside a bigger folder), shown at the highest level with size, photo and video counts and sizes; then byte-identical single copies. Memoria explains which copy or folder it keeps; you can choose another or exclude any. | Moves copies or whole folders to Recovery |
+| **Duplicates** | Adaptive 2/3-pane or multi-copy comparison, exact/subset labels, shared/unique sizes and overridable keep recommendations. One action for checked content in the current group. | Moves selected copies/shared content to Recovery; unique larger-folder content stays |
 | **Similar & best shots** | Bursts, retakes and resized copies, with an explained best pick. The *Similar videos* tab finds re-encoded and trimmed copies. A *Blurry photos* tab has three sensitivities, and nothing is pre-ticked. | Moves ticked items to Recovery |
 | **Tidy up** | Thumbs.db, desktop.ini, .DS_Store, `._` files, partial downloads, empty files and folders. Unreadable media and stray documents start unticked. | Moves files to Recovery; removes empty folders (undo recreates them) |
 | **Organise by date** | Moves files into `2024\2024-07`-style folders using the camera date, then a date in the file name. Files dated only by modified time are skipped unless you opt in. | Moves files inside the library |
@@ -155,7 +164,7 @@ No library handy? On the welcome screen choose **Try it on a sample library**. I
 | **Video compressor** | Smaller copies of videos for sharing, using presets or a target size, with verification and a quality score. | Writes new files to an output folder |
 | **Health check** | Records a fingerprint of every file, then flags *possibly damaged*, *can't be opened* and *missing* files on later checks. | Nothing (catalogue only) |
 | **Compare & sync** | Compares the library with a backup by content, so renamed copies still match. Copies what's missing in either direction. | Writes verified copies |
-| **History & recovery** | File-operation batches and steps; Undo; open or empty Recovery. | Undo may remove unchanged generated copies; Empty Recovery permanently deletes originals stored there |
+| **History & recovery** | Paged operations, Undo, Recovery accounting/inspection, restore-all with reviewed unlogged destinations and scoped conflict choices, guarded emptying. | Restore never overwrites originals; Empty Recovery permanently deletes stored originals |
 
 The [Features guide](docs/features.html) explains every option, including the sidebar's **Storage & reset** controls.
 These documents describe unreleased source updates after 1.4; an existing packaged executable must be rebuilt to include them.
@@ -165,10 +174,10 @@ These documents describe unreleased source updates after 1.4; an existing packag
 | Promise | How it is enforced |
 |---|---|
 | Looking preserves originals | Scanning, analysis, comparison and health checks read media and update `.memoria`. Opt-in diagnostics additionally writes aggregate reports in the source checkout. |
-| Review clean-up first | File-plan confirmations state counts and sizes. Duplicate Quick remove skips group confirmations only after explicit session consent; bulk Apply and Empty Recovery still ask. Creative tools have explicit Save/Export controls. |
+| Review clean-up first | File-plan confirmations state counts and sizes. Duplicate Quick remove skips ordinary exact-copy confirmations after session consent; subset/linked changes and Empty Recovery still ask. Creative tools have explicit Save/Export controls. |
 | Originals are protected | "Remove" moves files to `.memoria\recovery\<batch>\<original path>`. **Empty Recovery** permanently deletes them and requires acknowledgement. Undo can delete unchanged generated copies. |
 | File operations are recoverable | Moves, copies and published outputs are journaled for Undo. Empty Recovery and acknowledged deletion of personal catalogue data cannot be undone. |
-| No stale decisions | File information and duplicate content hashes are re-checked. Normal cleanup also verifies a surviving copy; acknowledged Remove both/all intentionally has no survivor requirement. Changed files are skipped and reported. |
+| No stale decisions | File information and duplicate content hashes are re-checked. Normal cleanup also verifies a surviving copy; acknowledged all-copy selection intentionally has no survivor requirement. Changed files are skipped and reported. |
 | Nothing is overwritten | Name clashes get a new name, such as `IMG_1234 (2).jpg`. |
 | Copies are proven | Each copy is written to a temporary name, compared byte for byte, then renamed. |
 | One window per library | A lock file prevents two Memoria windows (or processes) from changing the same library. |
@@ -270,7 +279,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 361 tests; see docs/technical.html
+.\.venv\Scripts\python -m pytest -q                       # 445 tests; see docs/technical.html
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 .\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + documentation screenshots
@@ -291,7 +300,11 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_story.py` | 30 | Exact output sizes, every template, panorama seams, EXIF rotation, story-video duration. |
 | `tests/test_ui_smoke.py` | 5 | Drives every page in both themes; clicks primary task buttons and checks work starts/finishes; verifies Undo, thumbnails, opt-in cleanup, protected Apple sidecars, visible analysis-error details, reset confirmations and the resumable reset UI. |
 | `tests/test_storage.py` | 14 | Safe/custom/hard reset, retained media/Undo and duplicate choices, rollback, interruption, cancellation/retry and low-space compaction. |
-| `tests/test_duplicate_choices.py` | 14 | Group-scoped one/all removal, actual list refresh and Undo; quick-mode consent, changed-file protection and confirmed bulk Apply; same-timestamp History order; cancellation, folder overlap protection, remembered choices and v6 upgrade. |
+| `tests/test_duplicate_choices.py` | 16 | Adaptive pane/table selections, current-group-only removal, subset shared-only behavior, actual refresh/Undo, quick consent, changed-file protection, remembered choices and migration. |
+| `tests/test_folder_comparison.py` | 6 | Either/both subset sides, preserved unique content and linked parts, snapshot-only selection, changed-file guards and Undo. |
+| `tests/test_recovery_accounting.py` | 20 | Prior plus latest logical sizes, tracked/untracked/changed/missing entries, roots and remapping, unreadable/offline storage, no-follow links, scan safety and UI emptying gates. |
+| `tests/test_recovery_restore.py` | 48 | Logged/unlogged restoration, manual destination mapping, inferred provenance, filtered Undo, no overwrites, conflict policies, linked names, interruption/cancellation, changed sources and unsafe-path rejection. |
+| `tests/test_recovery_restore_ui.py` | 7 | Preview acknowledgement/manual mapping, real History restore flow, scoped conflict popups, cancellation/error routing and a bounded 100k-entry preview. |
 | `tests/test_notifications.py` | 10 | Private event routing, preferences, focus/background handling, partial failures, cancellation, Undo preservation and shutdown. |
 | `tests/test_insights.py` | 9 | Folder/type totals, filters, leap dates, album links, bounded 10,000-file browsing, offline place labels, wheel/touchpad/keyboard zoom, drag panning and stale-query handling. |
 | `tests/test_metadata.py` | 21 | Real EXIF/video extraction, schema-5 backfill, retained-row migration, cancellation/resume, numeric sorting with unknowns last, combined metadata filters and preview UI. |
@@ -301,7 +314,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_assets.py` + `tests/test_companion_actions.py` | 25 | Linked-file discovery/review, locked folder snapshots, common collision names, all-component preflight, rollback, cancellation, Undo and interrupted operations. |
 | `tests/test_organisation.py` + `tests/test_metadata_history.py` | 40 | Validated tags/ratings/favourites/review states, keeper-wins merges, undoable metadata snapshots, later-edit conflict protection and explicit-reset safety. |
 | `tests/test_smart_albums.py` | 20 | Validated persistent rules, dynamic contents, bounded queries, static-album compatibility and asynchronous browsing. |
-| `tests/test_responsive_views.py` + `tests/test_duplicate_paging.py` + `tests/test_library_views.py` + `tests/test_media_source_ui.py` | 24 | Synthetic 100,000-entry catalogues, bounded widgets/work queues, delayed-I/O responsiveness, stale/shutdown guards, paging selection semantics and root-aware source reads. |
+| `tests/test_responsive_views.py` + `tests/test_duplicate_paging.py` + `tests/test_library_views.py` + `tests/test_media_source_ui.py` | 25 | Synthetic 100,000-entry catalogues, bounded widgets/work queues, delayed-I/O responsiveness, stale/shutdown guards, paging selection semantics and root-aware source reads. |
 
 The **test library** (`tools\make_test_library.py [DEST] [--small]`) is a deterministic library of generated photos. It
 includes camera, phone and backup folders; exact duplicates (including 6 MB files); a nested album copied whole to an old
@@ -366,6 +379,31 @@ requires reconnection. Filters can select a root and online/offline availability
 Recovery is local to each source root. History provides a Recovery-location selector and labels totals from
 available roots; offline Recovery is not reported as empty. Reconnect all roots before emptying Recovery.
 Moving files to Recovery does not free space on that drive.
+
+**A Recovery total is not the size of your last cleanup.** History separates cumulative measured bytes, the latest
+cleanup's recorded movement and retained bytes, older cleanups, and untracked/ambiguous contents. For example,
+50 GB retained earlier plus a new 5 GB cleanup can show about 55 GB. These are logical file sizes, not allocated
+disk space or space freed. Select a change for its own remaining Recovery size. The location picker affects
+**Open / Inspect**, not the all-roots total or Empty Recovery scope.
+
+Use **Refresh accounting** and **Inspect accounting** when a number looks unexpected. This reads directory metadata
+and the journal only; it does not read original media, create Recovery or remove anything. Offline/unreadable
+locations and skipped links are explicit; incomplete totals are lower bounds. Untracked, changed, missing or
+interrupted entries require inspection and block the UI's Empty Recovery action. No particular unexpected total
+should be assumed safe to delete just because it is labelled Recovery.
+
+To restart cleanup, use **Restore all available...** instead of Empty Recovery. Review the destination table first.
+Original logged paths are preferred. Files missing from History can use a supported preserved Recovery hierarchy,
+but those destinations are labelled inferred and require acknowledgement. For an ambiguous group, explicitly
+choose its destination folder; anything unresolved, offline, changed or unreadable stays in Recovery with a report.
+Missing historical metadata cannot be invented.
+
+When a destination already exists, a popup offers **Keep both** (a numbered restored name), **Leave in Recovery**,
+or **Cancel restoration**. Reuse a choice for the exact destination folder or all remaining conflicts; these rules
+are not saved for later restorations. Linked parts keep coherent names. Existing originals are never overwritten.
+Restoration does not empty Recovery automatically or undo unrelated exports; completed work remains recorded if
+cancelled. Restoring to the same drive normally moves rather than duplicating the whole library, though verification
+can read the Recovery files. Re-run duplicate finding after the restoration completes.
 
 Linked assets are inferred from matching names in the same folder: image/video pairs, RAW+JPEG, and AAE/XMP edit
 sidecars (including names such as `IMG_1.DNG.xmp`). They remain ordinary files on disk. A reviewed operation includes
@@ -452,8 +490,8 @@ restart. Do not reset/delete the catalogue to install this change.
 - Opening an older catalogue upgrades it to schema v10. The upgraded catalogue requires this version
   or newer; keep a backup of the catalogue before upgrading if you need to return to an older release.
 - Schema v7 stores duplicate Keep both/all decisions; it does not force another media-analysis pass on a current
-  v6 catalogue. New/changed review groups are not silently hidden. Tick **Show previous choices** to revisit kept
-  groups; checking one or choosing a removal forgets its previous keep decision. Completed removals remain in History.
+  v6 catalogue. New/changed review groups are not silently hidden. Tick **Show kept groups** to revisit kept
+  groups; a confirmed removal replaces its previous keep decision. Completed removals remain in History.
 - Multi-folder registration preserves existing file IDs, analysis, hashes, albums and history. No forced media
   re-analysis is required for these schema additions; only new or changed files need normal indexing.
 

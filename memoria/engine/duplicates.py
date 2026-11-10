@@ -265,6 +265,7 @@ class DuplicateReport:
     folders: list[FolderMatch]        # whole duplicate folders, highest level only
     folder_files: dict[str, list[dict]] = field(default_factory=dict)
     folder_signatures: dict[str, str] = field(default_factory=dict)
+    folder_dirs: dict[str, list[str]] = field(default_factory=dict)
 
     def folder_review_key(self, match: FolderMatch) -> str:
         return "folder:" + _signature((match.id, [self.folder_signatures[f.path] for f in match.folders]))
@@ -351,8 +352,12 @@ def find_all(lib: Library, progress: Optional[Progress] = None) -> DuplicateRepo
             snapshot["chash"] = full_hash(lib.abspath(row["rel_path"]))
         for path in matched:
             snapshots[path].append(snapshot)
+    from .scanner import walk_dirs
+    directory_snapshots = {
+        path: [lib.rel(directory) for directory in walk_dirs(lib.abspath(path))]
+        for path in snapshots}
     return DuplicateReport(groups, folders, snapshots,
-                           {path: _row_signature(items) for path, items in snapshots.items()})
+                           {path: _row_signature(items) for path, items in snapshots.items()}, directory_snapshots)
 
 
 def find_duplicate_folders(rows: list[dict], identical: dict[str, list]) -> list[FolderMatch]:
@@ -577,3 +582,91 @@ def plan_cleanup(lib: Library, report: DuplicateReport, folders: Iterable[str] =
         for d in sorted(walk_dirs(top_dir) + [top_dir], key=lambda d: -d.count(os.sep)):
             actions.append(Action(op="rmdir", src=d, reason=f"Duplicate folder “{p}”, now empty"))
     return actions + file_actions
+
+
+@dataclass
+class FolderSelection:
+    actions: list[Action]
+    retained_linked: int = 0
+    unique_kept: int = 0
+
+
+def folder_comparison(report: DuplicateReport, match: FolderMatch) -> list[dict]:
+    """Verified common content, not filename overlap. Empty/system leftovers are counted separately."""
+    from .tidy import is_junk
+    meaningful = {
+        folder.path: [row for row in report.folder_files[folder.path] if row["size"] > 0 and not is_junk(row["name"])]
+        for folder in match.folders}
+    hashes = [{row["chash"] for row in meaningful[folder.path] if row["chash"]} for folder in match.folders]
+    common = set.intersection(*hashes) if hashes else set()
+    result = []
+    for folder in match.folders:
+        shared = [row for row in meaningful[folder.path] if row["chash"] in common]
+        unique = [row for row in meaningful[folder.path] if row["chash"] not in common]
+        result.append({"folder": folder, "shared": shared, "unique": unique,
+                       "shared_bytes": sum(row["size"] for row in shared),
+                       "unique_bytes": sum(row["size"] for row in unique),
+                       "leftovers": len(report.folder_files[folder.path]) - len(meaningful[folder.path])})
+    return result
+
+
+def plan_folder_selection(lib: Library, report: DuplicateReport, match: FolderMatch,
+                          selected: set[str]) -> FolderSelection:
+    """Review one folder group. A selected superset contributes only its verified shared files."""
+    from .assets import linked_groups
+    from .tidy import is_junk
+    members = {folder.path for folder in match.folders}
+    if not selected <= members:
+        raise ValueError("The selected folders no longer match this comparison. Find duplicates again.")
+    comparisons = {item["folder"].path: item for item in folder_comparison(report, match)}
+    larger = match.folders[1].path if match.kind == "inside" else None
+    candidates = {}
+    full_folders = set()
+    for path in selected:
+        if path == larger:
+            rows = comparisons[path]["shared"]
+        else:
+            rows = report.folder_files[path]
+            full_folders.add(path)
+        candidates.update((row["id"], row) for row in rows)
+    protected = set()
+    for group in linked_groups(lib, list(candidates.values())):
+        ids = {row["id"] for row in group}
+        if not ids <= candidates.keys():
+            protected.update(ids & candidates.keys())
+    for file_id in protected:
+        candidates.pop(file_id)
+    survivors = defaultdict(list)
+    for path in members:
+        for row in report.folder_files[path]:
+            if row["id"] not in candidates and row["chash"] and row["size"] > 0 and not is_junk(row["name"]):
+                survivors[row["chash"]].append(row)
+    planned = []
+    for row in sorted(candidates.values(), key=lambda item: item["rel_path"].lower()):
+        if not row["chash"]:
+            raise ValueError("Some selected contents were not fingerprinted. Find duplicates again before removal.")
+        meaningful = row["size"] > 0 and not is_junk(row["name"])
+        keep = min(survivors[row["chash"]], key=keeper_score) if meaningful and survivors[row["chash"]] else None
+        if meaningful and keep is None and selected != members:
+            raise ValueError("A surviving copy could not be verified in the unselected folders. Find duplicates again.")
+        planned.append(Action(
+            "recycle", str(lib.abspath(row["rel_path"])), size=row["size"], mtime=row["mtime"],
+            hash=row["chash"], file_id=row["id"], companions_locked=True,
+            guards=[(str(lib.abspath(keep["rel_path"])), row["chash"])] if keep else [],
+            merge_into=keep["id"] if keep else None,
+            reason="Shared folder content explicitly selected" if row["folder"] == larger or
+                   larger and _within(row["folder"], larger) else "Reviewed duplicate folder selected"))
+    directories, retained_ancestors = set(), set()
+    for path in full_folders:
+        directories.add(path)
+        directories.update(report.folder_dirs.get(path, ()))
+        for row in report.folder_files[path]:
+            directories.update(parent for parent in _parents(row["folder"]) if _within(parent, path))
+            if row["id"] not in candidates:
+                retained_ancestors.update(parent.lower() for parent in _parents(row["folder"]))
+    for path in sorted(directories, key=lambda value: (-value.count(os.sep), value)):
+        if path.lower() in retained_ancestors:
+            continue
+        planned.append(Action("rmdir", str(lib.abspath(path)), reason="Reviewed duplicate folder, only if empty"))
+    return FolderSelection(planned, len(protected),
+                           len(comparisons[larger]["unique"]) if larger and larger in selected else 0)

@@ -151,10 +151,12 @@ class Page(QWidget):
                 shown_confirm = ("Copy " if all(action.op in ("copy", "rmdir") for action in plan) else "Move ") + \
                     fmt_n(count, "file")
                 shown_details[:0] = [
-                    "<b>Linked parts are included, even if they are not duplicates.</b>",
+                    (f"<b>{prepared.extra_files} additional linked component(s) are included.</b>"
+                     if prepared.extra_files else "<b>The reviewed linked components are handled together.</b>"),
                     "Matching names in the same folder link Live Photo image/video parts, RAW+JPEG and AAE/XMP "
                     "sidecars. Review these inferred links; Apple edit instructions are not applied.",
-                    "Removing an image can also move its unique video and edit sidecars to Recovery.",
+                    ("Additional components can include unique videos and edit sidecars."
+                     if prepared.extra_files else "No additional linked files were added to this selection."),
                     *[" + ".join(escape(row["name"]) for row in group[:4])
                       + (f" (+{len(group) - 4} parts)" if len(group) > 4 else "")
                       for group in prepared.groups[:3]],

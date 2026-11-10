@@ -551,6 +551,10 @@ def _rollback_undo(lib, records):
             intent = _undo_intent(op)
             if intent is None:
                 raise OSError("The linked Undo intent is unavailable")
+            if intent.get("recovery_restore"):
+                from .recovery_restore import _rollback
+                _rollback(lib, op, intent)
+                continue
             dst = _operation_path(lib, op, "dst")
             source = _intent_path(lib, intent, "target" if op["op"] in ("move", "recycle") else "holding")
             lib.check_path(dst)
@@ -589,32 +593,44 @@ def _cleanup_undo(lib, op):
     lib.db.execute("UPDATE operations SET error=NULL WHERE id=?", (op["id"],))
 
 
-def _undo_linked(lib, records, progress, messages):
+def _undo_linked(lib, records, progress, messages, *, targets=None, validate=None,
+                 move=None, fingerprint=None):
     from . import assets
+    restoring = targets is not None
+    move = move or safe_move
+    fingerprint = fingerprint or full_hash
     moving = records[0]["op"] in ("move", "recycle")
     if any((op["op"] in ("move", "recycle")) != moving for op in records):
         raise ValueError("The linked journal mixes incompatible operations")
     paths, hashes = [], []
-    for op in records:
+    for i, op in enumerate(records):
         src, dst = _operation_path(lib, op, "src"), _operation_path(lib, op, "dst")
+        if validate is not None:
+            validate(op, dst, targets[i])
         lib.check_path(src)
         lib.check_path(dst)
         if moving and not _ex(dst):
             raise FileNotFoundError(f"{dst} is no longer in its moved location")
-        digest = full_hash(dst) if _ex(dst) else None
+        digest = fingerprint(dst) if _ex(dst) else None
         if _ex(dst) and not digest:
             raise OSError(f"Could not verify {dst}")
         if not moving and _ex(dst):
             _verified_output(op, dst)
+        if restoring and op["hash"] and digest != op["hash"]:
+            raise ValueError(f"{dst.name} changed since it entered Recovery; left untouched")
         paths.append(src)
         hashes.append(digest)
-    targets = assets.destinations([Action("move", str(path)) for path in paths], paths, set()) if moving else []
+    if targets is None:
+        targets = assets.destinations([Action("move", str(path)) for path in paths], paths, set()) if moving else []
     intents = []
     for i, op in enumerate(records):
         dst = _operation_path(lib, op, "dst")
         target = targets[i] if moving else None
         holding = None if moving or not _ex(dst) else dst.with_name(dst.name + ".memoria-undo-" + uuid.uuid4().hex)
         intent = {"phase": "linked_undo", "hash": hashes[i], "absent": not _ex(dst)}
+        if restoring:
+            info = os.lstat(L(dst))
+            intent.update(recovery_restore=True, identity=[info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns])
         for key, path in (("target", target), ("holding", holding)):
             intent[key] = str(path) if path is not None else None
             intent[key + "_key"] = lib.rel(path) if path is not None and lib.contains(path) else None
@@ -631,8 +647,11 @@ def _undo_linked(lib, records, progress, messages):
             if moving:
                 target = _intent_path(lib, intent, "target")
                 lib.check_path(target)
-                _verified_output({"hash": intent["hash"]}, dst)
-                safe_move(dst, target)
+                if validate is not None:
+                    validate(op, dst, target)
+                else:
+                    _verified_output({"hash": intent["hash"]}, dst)
+                move(dst, target)
                 _undo_catalogue(lib, op, dst, target)
                 if target != _operation_path(lib, op, "src"):
                     messages.append(f"{dst.name} restored as {target.name} to keep the linked names together")
@@ -649,14 +668,85 @@ def _undo_linked(lib, records, progress, messages):
         if isinstance(error, (Exception, Cancelled)):
             errors = _rollback_undo(lib, pending)
             messages.extend(errors)
+            if errors and restoring:
+                raise OSError("Restoration rollback incomplete; retained journal intents need recovery: "
+                              + "; ".join(errors)) from error
             if errors and isinstance(error, Cancelled):
                 raise OSError("Cancelled Undo could not fully roll back; retained journal intents need recovery") from error
         raise
-    for op in pending:
+    for op in ([] if restoring else pending):
         try:
             _cleanup_undo(lib, op)
         except Exception as error:
             messages.append(f"Undo completed; verified holding-copy cleanup remains pending: {error}")
+
+
+def _recovery_dependencies(lib, records, messages):
+    """Reverse only organisation merges belonging to successfully restored sources."""
+    from . import metadata_history
+    for op in sorted(records, key=lambda row: row["seq"], reverse=True):
+        for row in lib.db.execute(
+                "SELECT o.id FROM metadata_journal m JOIN operations o ON o.id=m.op_id "
+                "WHERE m.source_op=? AND o.status='done'", (op["id"],)).fetchall():
+            try:
+                metadata_history.undo_merge(lib, row["id"])
+            except Exception as error:
+                messages.append(f"Restored file; organisation merge left unchanged: {error}")
+        saved = lib.db.execute("SELECT * FROM operations WHERE id=?", (op["id"],)).fetchone()
+        intent = _undo_intent(saved)
+        if intent is None:
+            continue
+        target = _intent_path(lib, intent, "target")
+        for directory in lib.db.execute(
+                "SELECT * FROM operations WHERE batch_id=? AND op='rmdir' AND status='done'",
+                (op["batch_id"],)).fetchall():
+            try:
+                path = _operation_path(lib, directory, "src")
+                if target is not None and path in target.parents and os.path.isdir(L(path)):
+                    from .recovery_restore import _validate_path
+                    _validate_path(lib, path, directory=True)
+                    lib.db.execute("UPDATE operations SET status='undone',error=NULL WHERE id=?", (directory["id"],))
+            except (ValueError, OSError) as error:
+                messages.append(f"Restored file; directory journal needs review: {error}")
+
+
+def undo_recovery(lib: Library, operation_ids: list[int], targets: list[Path],
+                  progress: Progress, *, validate, move, fingerprint) -> BatchResult:
+    """Filtered Undo for one complete Recovery unit; never reverses copies or ordinary moves.
+
+    The restore coordinator owns conflict decisions and no-follow validation. Directory
+    creation is limited to the parents needed by these targets, not unrelated rmdir rows.
+    """
+    records = [lib.db.execute("SELECT * FROM operations WHERE id=?", (key,)).fetchone()
+               for key in operation_ids]
+    if (not records or len(records) != len(targets) or len(set(operation_ids)) != len(records)
+            or any(row is None or row["op"] != "recycle" or row["status"] != "done" for row in records)
+            or len({row["batch_id"] for row in records}) != 1):
+        raise ValueError("Select only completed Recovery operations from one batch.")
+    for row in records:
+        if row["asset_group"]:
+            siblings = {op[0] for op in lib.db.execute(
+                "SELECT id FROM operations WHERE batch_id=? AND asset_group=? AND status!='undone'",
+                (row["batch_id"], row["asset_group"]))}
+            if not siblings <= set(operation_ids):
+                raise ValueError("The linked Recovery group is incomplete; no components were restored.")
+    result = BatchResult(records[0]["batch_id"])
+    _undo_linked(lib, records, progress, result.messages, targets=targets, validate=validate,
+                 move=move, fingerprint=fingerprint)
+    result.done = len(records)
+    result.bytes = sum(row["size"] or 0 for row in records)
+    try:
+        _recovery_dependencies(lib, records, result.messages)
+        for row in records:
+            _cleanup_undo(lib, lib.db.execute("SELECT * FROM operations WHERE id=?", (row["id"],)).fetchone())
+        remaining = lib.db.execute(
+            "SELECT 1 FROM operations WHERE batch_id=? AND status IN ('done','undo_pending') LIMIT 1",
+            (result.batch_id,)).fetchone()
+        lib.db.execute("UPDATE batches SET status=? WHERE id=?",
+                       ("partial" if remaining else "undone", result.batch_id))
+    except Exception as error:
+        result.messages.append(f"Files restored; journal finalization remains pending: {error}")
+    return result
 
 
 def undo(lib: Library, batch_id: str, progress: Optional[Progress] = None) -> BatchResult:
@@ -764,23 +854,10 @@ def _prune_empty(folder: Path) -> None:
 
 
 def recovery_size(lib: Library) -> tuple[int, int]:
-    """Known Recovery on available roots. Offline-root status is shown separately by the UI."""
-    files = size = 0
-    for source, folder in lib.recovery_folders():
-        try:
-            roots.check(lib, source)
-        except LibraryUnavailable:
-            continue
-        if not _ex(folder):
-            continue
-        for dirpath, _, filenames in os.walk(folder):
-            for f in filenames:
-                files += 1
-                try:
-                    size += os.path.getsize(os.path.join(dirpath, f))
-                except OSError:
-                    pass
-    return files, size
+    """Measured regular-file logical bytes; use recovery.inspect for completeness/warnings."""
+    from .recovery import inspect
+    report = inspect(lib)
+    return report.files, report.bytes
 
 
 def empty_recovery(lib: Library, batch_ids: Optional[list[str]] = None,
@@ -826,6 +903,11 @@ def reconcile(lib: Library) -> int:
     """Repair the journal after a crash: resolve operations left in ``pending`` state."""
     from . import metadata_history
     fixed = 0
+    for op in lib.db.execute(
+            "SELECT * FROM operations WHERE status='undo_pending' AND asset_group=''").fetchall():
+        intent = _undo_intent(op)
+        if intent and intent.get("recovery_restore") and not _rollback_undo(lib, [op]):
+            fixed += 1
     for group in lib.db.execute(
             "SELECT DISTINCT batch_id,asset_group FROM operations WHERE asset_group!='' "
             "AND status IN ('pending','publishing','published','undo_pending')").fetchall():
@@ -883,9 +965,15 @@ def reconcile(lib: Library) -> int:
         except Exception as error:
             lib.db.execute("UPDATE operations SET error=? WHERE id=?",
                            (f"Organisation merge pending: {error}", op["id"]))
-    for op in lib.db.execute("SELECT * FROM operations WHERE status='undone' AND error IS NOT NULL").fetchall():
-        if _undo_intent(op) is not None:
+    for op in lib.db.execute(
+            "SELECT o.* FROM operations o JOIN batches b ON b.id=o.batch_id "
+            "WHERE o.status='undone' AND o.error IS NOT NULL "
+            "ORDER BY b.created_at DESC,b.rowid DESC,o.seq DESC").fetchall():
+        intent = _undo_intent(op)
+        if intent is not None:
             try:
+                if intent.get("recovery_restore"):
+                    _recovery_dependencies(lib, [op], [])
                 _cleanup_undo(lib, op)
             except (OSError, LibraryUnavailable):
                 pass  # Keep the durable cleanup intent; never delete a changed holding copy.
