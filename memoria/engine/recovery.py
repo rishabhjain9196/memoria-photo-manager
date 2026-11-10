@@ -111,6 +111,42 @@ class RecoveryAccounting:
         # This is only a UI gate, not authority to delete. Existing engine guards still apply.
         return bool(self.files and not self.needs_inspection)
 
+    def empty_blockers(self) -> list[str]:
+        """Explain the existing deletion guards. Counts can overlap for the same file."""
+        reasons = []
+        offline = sum(not root.online for root in self.roots)
+        incomplete = sum(root.online and not root.complete for root in self.roots)
+        if offline:
+            reasons.append(f"{offline} media folder(s) are offline. Reconnect them and refresh accounting.")
+        if incomplete:
+            reasons.append(f"{incomplete} location(s) could not be fully inspected. Check permissions and skipped links "
+                           "using Inspect accounting.")
+        if not self.journal_complete:
+            reasons.append("Some recorded Recovery destinations could not be resolved. Inspect their History records.")
+        if self.untracked_files:
+            reasons.append(f"{self.untracked_files} file(s) have no unambiguous History match. Use Inspect accounting "
+                           "or Restore all available to review their origin; do not assume they are disposable.")
+        if self.interrupted_ops:
+            reasons.append(f"{self.interrupted_ops} interrupted operation(s) remain. Reopen Memoria to reconcile "
+                           "completed work, then inspect any remaining errors.")
+        if self.pending_merges:
+            reasons.append(f"{self.pending_merges} organisation merge(s) are unfinished. Resolve them before deleting "
+                           "the Recovery copies.")
+        for field, description, advice in (
+            ("missing_files", "recorded file(s) are missing from Recovery",
+             "Check previous restoration or manual file moves against History."),
+            ("changed_files", "file(s) differ in size or type from their recorded copies",
+             "Inspect them before considering permanent deletion."),
+            ("uncertain_files", "file record(s) could not be matched or checked confidently",
+             "Inspect the affected locations and History entries."),
+            ("unexpected_files", "entry warning(s) concern an unexpected History state or storage layout",
+             "Inspect these entries; restoration/import records may still need review."),
+        ):
+            count = sum(getattr(batch, field) for batch in self.batches.values())
+            if count:
+                reasons.append(f"{count} {description}. {advice}")
+        return reasons
+
 
 def _key(path: Path) -> str:
     return os.path.normcase(os.path.abspath(path))

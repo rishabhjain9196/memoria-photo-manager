@@ -179,6 +179,7 @@ def refresh_images(tmp: Path) -> None:
                          ("recovery-restore-preview", "recovery-restore-preview"),
                          ("recovery-restore-conflict", "recovery-restore-conflict"),
                          ("application-updates", "application-updates"),
+                         ("empty-recovery-blocked", "empty-recovery-blocked"),
                          ("tidy-sidecars", "tidy-sidecars")):
         sources[dest] = next(tmp.rglob(f"{source}.png"))
     for path in sources.values():

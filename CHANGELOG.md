@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Explain unavailable Recovery deletion
+- Empty Recovery is now a clickable review action while library work is idle. It performs a fresh accounting check,
+  then either shows the permanent-deletion confirmation or a clear list of blockers with counts and next steps.
+  Stale cached readiness no longer makes the control silently unresponsive.
+- Untracked, changed, missing, unresolved or interrupted entries and pending merges still block permanent deletion.
+  Done/Restored History labels alone do not authorize emptying. No safety check was bypassed.
+- Added explicit active-work guidance and neutral disabled styling; safe deletion requires acknowledgement and
+  revalidation after the confirmation. Cancellation and newly changed contents leave Recovery untouched.
+- Verified with 61 targeted accounting, root, history, notification, restoration and end-to-end UI tests, including
+  dark-theme blocker feedback and real deletion of generated fixtures only. No schema or cache reset required.
+
 ### Combined review for blocked linked-duplicate cleanup
 - Group/all-group cleanup now explains exclusions in a visible review instead of finishing with only a small
   status note. This covers exact photos whose linked videos or edit sidecars differ.

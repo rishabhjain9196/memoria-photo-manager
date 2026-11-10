@@ -324,12 +324,12 @@ def _wait(app, predicate):
     assert predicate()
 
 
-def test_history_and_overview_agree_and_never_enable_incomplete_emptying(small_library, tmp_path, monkeypatch):
+def test_history_and_overview_agree_and_explain_incomplete_emptying(small_library, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QApplication
     from memoria.ui.pages.history import HistoryPage
     from memoria.ui.pages.overview import OverviewPage, _insights
     from memoria.ui.tasks import TaskRunner
-    from memoria.ui.widgets import AppContext, fmt_size
+    from memoria.ui.widgets import AppContext, ConfirmDialog, MessageDialog, fmt_size
     app = QApplication.instance() or QApplication([])
     lib = small_library
     second = tmp_path / "second"
@@ -363,11 +363,16 @@ def test_history_and_overview_agree_and_never_enable_incomplete_emptying(small_l
             return original(path)
         monkeypatch.setattr(recovery, "_lstat", measure)
         page.refresh()
-        assert not page.empty_btn.isEnabled()
+        assert page.empty_btn.isEnabled()  # A click reviews the block; it does not authorize deletion.
         _wait(app, lambda: page._accounting_ready and "INCOMPLETE" in page.rec_label.text())
-        assert page._recovery_bytes == 0 and not page.empty_btn.isEnabled()
+        assert page._recovery_bytes == 0 and page.empty_btn.isEnabled()
         monkeypatch.setattr(actions, "empty_recovery", lambda *args, **kwargs: pytest.fail("Must not empty"))
-        page.empty_recovery()
+        monkeypatch.setattr(ConfirmDialog, "exec", lambda *_: pytest.fail("Unsafe accounting cannot offer deletion"))
+        notices = []
+        monkeypatch.setattr(MessageDialog, "exec", lambda self: notices.append(self.windowTitle()) or 0)
+        page.empty_btn.click()
+        _wait(app, lambda: not ctx.runner.busy and bool(notices))
+        assert notices == ["Recovery needs attention before emptying"]
         data = _insights(lib, {"duplicates": [], "similar": [], "organize": SimpleNamespace(items=[])})
         overview._insights(data)
         assert not data["recovery_accounting"].complete
@@ -379,3 +384,140 @@ def test_history_and_overview_agree_and_never_enable_incomplete_emptying(small_l
         page.deleteLater()
         overview.deleteLater()
         app.processEvents()
+
+
+@pytest.fixture
+def history_ui(small_library):
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QApplication
+    from memoria.ui import theme
+    from memoria.ui.pages.history import HistoryPage
+    from memoria.ui.tasks import TaskRunner
+    from memoria.ui.widgets import AppContext
+    app = QApplication.instance() or QApplication([])
+    app.setFont(QFont("Segoe UI", 10))
+    app.setStyle("Fusion")
+    theme.use("dark")
+    app.setPalette(theme.qpalette())
+    app.setStyleSheet(theme.QSS)
+    ctx = AppContext(TaskRunner())
+    ctx.set_library(small_library)
+    page = HistoryPage(ctx)
+    page.resize(1400, 900)
+    errors = []
+    ctx.runner.error.connect(lambda *args: errors.append(args))
+    yield app, ctx, page, errors
+    ctx.runner.cancel()
+    ctx.runner.wait()
+    page.shutdown()
+    page.close()
+    page.deleteLater()
+    app.processEvents()
+
+
+@pytest.mark.parametrize("decision", ["accept", "cancel", "no_ack"])
+def test_empty_click_refreshes_stale_accounting_and_requires_acknowledgement(
+        small_library, history_ui, monkeypatch, decision):
+    from memoria.ui.widgets import ConfirmDialog
+    lib = small_library
+    app, ctx, page, errors = history_ui
+    _batch(lib, "cleanup")
+    destination = _record(lib, "cleanup", "photo.jpg", size=3, actual=3)
+    _record(lib, "cleanup", "already-restored.jpg", size=2, actual=None, status="undone")
+    original = lib.root / "untouched.jpg"
+    original.write_bytes(b"original must remain")
+    page.show()
+    _wait(app, lambda: page._accounting_ready)
+    page._accounting_ready = False  # Cached readiness must not turn a review click into a silent no-op.
+    page._empty_control(False)
+    confirmations = []
+    def confirm(dialog):
+        confirmations.append(dialog.windowTitle())
+        assert not dialog.ok.isEnabled()
+        if decision == "accept":
+            dialog.ack.setChecked(True)
+        return dialog.DialogCode.Rejected if decision == "cancel" else dialog.DialogCode.Accepted
+    monkeypatch.setattr(ConfirmDialog, "exec", confirm)
+    page.empty_btn.click()
+    _wait(app, lambda: bool(confirmations) and not ctx.runner.busy)
+    assert not errors, errors
+    assert confirmations == ["Permanently delete files in Recovery?"]
+    assert destination.exists() == (decision != "accept")
+    assert original.read_bytes() == b"original must remain"
+    status = lib.db.execute("SELECT status FROM operations WHERE src LIKE '%photo.jpg'").fetchone()[0]
+    assert status == ("purged" if decision == "accept" else "done")
+
+
+@pytest.mark.parametrize("blocker", ["untracked", "changed", "missing", "interrupted"])
+def test_click_explains_actual_recovery_blocker_without_offering_deletion(
+        small_library, history_ui, monkeypatch, blocker):
+    from memoria.ui.widgets import ConfirmDialog, MessageDialog
+    lib = small_library
+    app, ctx, page, errors = history_ui
+    _batch(lib, "cleanup")
+    destination = _record(lib, "cleanup", "photo.jpg", size=3, actual=4 if blocker == "changed" else 3,
+                          status="published" if blocker == "interrupted" else "done")
+    if blocker == "untracked":
+        (lib.recovery / "unknown.bin").write_bytes(b"not attributable")
+    elif blocker == "missing":
+        _record(lib, "cleanup", "missing.jpg", size=2, actual=None)
+    expected = {"untracked": "no unambiguous History match", "changed": "differ in size or type",
+                "missing": "missing from Recovery", "interrupted": "interrupted operation"}
+    report = recovery.inspect(lib)
+    assert any(expected[blocker] in message for message in report.empty_blockers())
+    monkeypatch.setattr(ConfirmDialog, "exec", lambda *_: pytest.fail("Cannot confirm unsafe permanent deletion"))
+    monkeypatch.setattr(actions, "empty_recovery", lambda *args, **kwargs: pytest.fail("Cannot delete blocked contents"))
+    messages = []
+    class Explain(MessageDialog):
+        def __init__(self, parent, title, summary, details):
+            super().__init__(parent, title, summary, details)
+            messages.append((title, summary, details))
+        def exec(self):
+            if blocker == "untracked":
+                self.show()
+                app.processEvents()
+                assert self.grab().save(str(lib.root.parent / "empty-recovery-blocked.png"))
+            return self.DialogCode.Accepted
+    monkeypatch.setattr("memoria.ui.pages.history.MessageDialog", Explain)
+    page.show()
+    _wait(app, lambda: page._accounting_ready)
+    assert page.empty_btn.isEnabled()
+    assert "blocked" in page.empty_status.text()
+    page.empty_btn.click()
+    _wait(app, lambda: bool(messages) and not ctx.runner.busy)
+    assert not errors and destination.exists(), errors
+    assert expected[blocker] in messages[0][2]
+    assert "Nothing was deleted" in messages[0][1]
+
+
+def test_recovery_change_during_confirmation_blocks_deletion(small_library, history_ui, monkeypatch):
+    from memoria.ui.widgets import ConfirmDialog
+    lib = small_library
+    app, ctx, page, errors = history_ui
+    _batch(lib, "cleanup")
+    destination = _record(lib, "cleanup", "photo.jpg", size=3, actual=3)
+    extra = lib.recovery / "new-untracked.bin"
+    def confirm(dialog):
+        dialog.ack.setChecked(True)
+        extra.write_bytes(b"new contents")
+        return dialog.DialogCode.Accepted
+    monkeypatch.setattr(ConfirmDialog, "exec", confirm)
+    monkeypatch.setattr(actions, "empty_recovery", lambda *args, **kwargs: pytest.fail("Changed Recovery cannot be emptied"))
+    page.show()
+    _wait(app, lambda: page._accounting_ready)
+    page.empty_btn.click()
+    _wait(app, lambda: bool(errors) and not ctx.runner.busy)
+    assert "Recovery changed" in errors[0][1]
+    assert destination.read_bytes() == b"xxx" and extra.read_bytes() == b"new contents"
+
+
+def test_empty_review_button_explains_active_work(small_library, history_ui):
+    app, ctx, page, _ = history_ui
+    ctx.set_indexing(True)
+    page.on_busy_changed(True)
+    assert not page.empty_btn.isEnabled()
+    assert "library work is active" in page.empty_status.text()
+    assert "Finish or cancel" in page.empty_btn.toolTip()
+    ctx.set_indexing(False)
+    page.on_busy_changed(False)
+    assert page.empty_btn.isEnabled()

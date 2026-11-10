@@ -690,7 +690,11 @@ results are not presented as a complete backup inventory.</p>
       The location picker changes Open/Inspect only, not the all-roots totals or permanent-emptying scope.</li>
   <li>Sizes are logical bytes, not allocated disk space or space freed. Links/junctions are not followed.
       Offline/unreadable paths make totals incomplete rather than falsely empty. Untracked, changed, missing or
-      interrupted entries require inspection and disable the UI's Empty Recovery action.</li>
+      interrupted entries require inspection and prevent permanent deletion.</li>
+  <li><b>Empty Recovery...</b> first performs a fresh check. If blocked, it shows the actual reasons and counts:
+      untracked files, missing/changed entries, unavailable locations, interrupted work or pending metadata merges.
+      Done/Restored labels describe past operations, not a guarantee of matching current contents. Clicking this
+      review action does not itself delete anything. During active library work it is greyed out with an explanation.</li>
   <li><b>Open Recovery folder</b> opens an existing, verified location in Explorer; inspection never creates one.</li>
   <li><b>Restore all available...</b> previews destinations before moving files back. It supports both original
       logged paths and explicitly reviewed inferred destinations for unlogged files. Ambiguous groups need a manually
@@ -699,8 +703,10 @@ results are not presented as a complete backup inventory.</p>
       The popup can reuse a choice for this destination folder's remaining conflicts or all remaining conflicts in
       this restoration. Existing files are never overwritten; these choices are not persisted to later runs.</li>
   <li><b>Empty Recovery…</b> permanently deletes the originals held there after acknowledgement. Those deletions cannot be
-      undone. Undo can separately remove unchanged generated copies. Deletion failures are reported, not silently counted as success.</li>
+      undone. Recovery is checked again after acknowledgement; changed or unsafe contents stop deletion.
+      Undo can separately remove unchanged generated copies. Deletion failures are reported, not silently counted as success.</li>
 </ul>
+<figure><img src="images/empty-recovery-blocked.png" alt="Exact reason and count preventing permanent Recovery deletion"><figcaption>A blocked review explains what needs attention without deleting anything.</figcaption></figure>
 <p>Restoration is not permanent cleanup: it does not empty Recovery or delete unrelated exports. Preview and
 acknowledge inferred paths when original logs are unavailable; absent historical metadata cannot be reconstructed
 just from filenames. Cancelled or partial work is reported, and remaining files are left intact. After restoring,

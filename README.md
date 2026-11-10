@@ -316,7 +316,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 579 tests; see docs/technical.html
+.\.venv\Scripts\python -m pytest -q                       # 588 tests; see docs/technical.html
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 .\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + documentation screenshots
@@ -343,7 +343,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_app_updates.py` | 52 | Disposable local Git repositories: upstream checks, fast-forward and race guards, dirty/ahead/diverged refusals, dependency setup/failures, exact-parent exit waiting and restart readiness. |
 | `tests/test_updates_ui.py` | 8 | Opt-in startup/manual checking, active-work gates, explicit restart consent, helper-ready-before-close and visible failure/cancellation handling. |
 | `tests/test_folder_comparison.py` | 6 | Either/both subset sides, preserved unique content and linked parts, snapshot-only selection, changed-file guards and Undo. |
-| `tests/test_recovery_accounting.py` | 20 | Prior plus latest logical sizes, tracked/untracked/changed/missing entries, roots and remapping, unreadable/offline storage, no-follow links, scan safety and UI emptying gates. |
+| `tests/test_recovery_accounting.py` | 29 | Logical sizes and tracked/untracked/changed/missing entries; no-follow/offline safety; fresh emptying review, exact blocker explanations, mandatory acknowledgement, cancellation and post-confirmation race protection. |
 | `tests/test_recovery_restore.py` | 54 | Current and legacy session layouts, logged/unlogged restoration, manual mapping, inferred provenance, filtered Undo, no overwrites, linked names, interruption/cancellation and unsafe-path rejection. |
 | `tests/test_recovery_restore_ui.py` | 8 | Current/legacy inferred-preview acknowledgement, manual mapping, real History restore flow, scoped conflict popups, cancellation/error routing and a bounded 100k-entry preview. |
 | `tests/test_notifications.py` | 10 | Private event routing, preferences, focus/background handling, partial failures, cancellation, Undo preservation and shutdown. |
@@ -430,7 +430,11 @@ disk space or space freed. Select a change for its own remaining Recovery size. 
 Use **Refresh accounting** and **Inspect accounting** when a number looks unexpected. This reads directory metadata
 and the journal only; it does not read original media, create Recovery or remove anything. Offline/unreadable
 locations and skipped links are explicit; incomplete totals are lower bounds. Untracked, changed, missing or
-interrupted entries require inspection and block the UI's Empty Recovery action. No particular unexpected total
+interrupted entries require inspection and block permanent deletion. **Empty Recovery...** remains a review action
+while the library is idle: it checks current contents and either offers an acknowledged deletion confirmation or
+shows the exact blocker counts and suggested next steps. It is greyed out during active library work, with an
+explanation. Historical **Done/Restored** labels do not prove current Recovery contents match their records.
+No particular unexpected total
 should be assumed safe to delete just because it is labelled Recovery.
 
 To restart cleanup, use **Restore all available...** instead of Empty Recovery. Review the destination table first.

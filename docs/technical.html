@@ -625,8 +625,12 @@ arbitrary disk or SQLite corruption.</p>
 retains its tuple API through the shared accounting implementation. Cumulative logical bytes are separate from the
 latest cleanup, older retained cleanup bytes, other journalled contents and untracked/ambiguous files.
 Per-root/per-batch results report missing, size/type-changed, interrupted and uncertain entries.
-Unreadable/offline storage and skipped links are explicit; incomplete totals are lower bounds. The UI disables
-emptying when inspection is required. <code>inspection_path</code> verifies an existing location without creating it.
+Unreadable/offline storage and skipped links are explicit; incomplete totals are lower bounds.
+<code>RecoveryAccounting.empty_blockers</code> explains the existing safety guards with counts and next steps.
+The idle UI button starts a fresh read-only check, not deletion; unsafe results show the blockers without offering
+a permanent-deletion confirmation. Safe results require acknowledgement and another fresh check against the
+confirmed count/size before execution. Cached UI readiness alone cannot silently disable this review action.
+<code>inspection_path</code> verifies an existing location without creating it.
 No original media is read or hashed to account sizes. <code>empty_recovery(lib, batch_ids=None)</code> deletes batch folders, marks
 their recycle operations <code>purged</code> and batches <code>emptied</code> after successful removal. Errors propagate
 and preserve remaining recovery records. Undo and exporter rollback can separately delete generated copies.</p>
@@ -856,8 +860,10 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>579 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
+<p><b>588 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
 <a href="report.html">quality report</a> records the test inventory and last full regression run.
+That snapshot has 579 passing tests; the subsequent Recovery review fix passed 61 targeted
+accounting/root/history/notification/restoration/end-to-end UI regressions.
 Focused suites now include synthetic 100,000-entry catalogues, root reconnection, compound operations, metadata
 Undo and smart albums. Fake-tray/offscreen tests do not verify
 actual Windows popup appearance or OS delivery policy.</p>
@@ -896,7 +902,7 @@ actual Windows popup appearance or OS delivery policy.</p>
   <tr><td><code>test_duplicate_bulk_ui.py</code></td><td>9</td><td>Group versus set-only scope, combined linked-part consent/cancellation, visible no-op results, saved keeps, hidden-copy exclusion, layout and actual moves with Undo.</td></tr>
   <tr><td><code>test_app_updates.py</code></td><td>52</td><td>Local disposable Git fixtures, clean fast-forward and target/race guards, managed dependencies/failures, parent-process identity/exit and restarted-app readiness.</td></tr>
   <tr><td><code>test_updates_ui.py</code></td><td>8</td><td>Opt-in startup/manual checks, busy/rebuild installation guards, confirmed helper handoff, failure/cancellation and no premature app close.</td></tr>
-  <tr><td><code>test_recovery_accounting.py</code></td><td>20</td><td>Older plus latest logical sizes, per-root/per-change attribution, untracked/changed/missing entries, offline/unreadable paths, no-follow links, scan safety and guarded inspection UI.</td></tr>
+  <tr><td><code>test_recovery_accounting.py</code></td><td>29</td><td>Logical sizes and per-root/per-change attribution; untracked/changed/missing/offline/no-follow safety; fresh UI emptying checks, exact blocker feedback, mandatory acknowledgement and post-confirmation changes.</td></tr>
   <tr><td><code>test_recovery_restore.py</code></td><td>54</td><td>Current/legacy session layouts, invalid timestamps, nested paths and root identities; logged/imported restoration, filtered Undo, linked conflicts, interruption handling, retained originals and path safety.</td></tr>
   <tr><td><code>test_recovery_restore_ui.py</code></td><td>8</td><td>Current/legacy inferred-path acknowledgement, manual mapping, real History restoration, exact-folder/all-remaining conflict scopes, GUI cancellation/errors and 100k-preview bounds.</td></tr>
   <tr><td><code>test_insights.py</code></td><td>9</td><td>Folder/type totals, literal search, combined filters, leap dates,
