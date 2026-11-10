@@ -66,16 +66,22 @@ the rendered page).
   reviewed file before moving it to Recovery.
 - **Simple duplicate comparison**: a group list on the left; two or three comparison panes, or a paged checkable
   table for larger groups. Checked means move, unchecked means keep. Recommendations can be overridden.
-  **Move selected to Recovery** acts on this group only; there is no separate bulk plan.
+  Exact file sets are grouped by their containing folders by default, including repeats within one folder and
+  shared files between folders that also contain unique files. **Individual duplicate sets** remains available.
+  **Move selected to Recovery** acts on the displayed comparison only. **Clean this folder group...** or
+  **Clean all exact groups...** prepares a separate, always-confirmed keep-one cleanup across the selected scope.
   In a **subset** comparison the smaller folder is selected by default. Checking the larger folder removes only
   verified common files; its unique contents and folder stay. Checking both removes common copies on both sides.
   Shared files linked to unique/unreviewed parts are retained rather than splitting those assets.
-  Optional **Quick remove** starts off each window; subset and linked-component changes always require review.
+  Optional **Quick remove** starts off each window; subset, linked-component and multi-group cleanup always require review.
   Removing duplicates merges tags,
   static album membership and favourites into surviving copies; unset ratings/review states are filled and the
   keeper wins conflicts. Organisation Undo does not overwrite later manual edits.
   **Keep these copies** remembers unchanged groups; **Show kept groups** reveals them unchecked.
   Removal choices are never replayed automatically.
+  Multi-group cleanup protects saved Keep choices and unchecked copies you reviewed. It retains a verified copy
+  per content set even if every copy was checked individually. Unique linked components are not bulk-removed;
+  only complete equivalent linked assets can be removed together. System leftovers and folders are left alone.
 - **Recovery accounting**: cumulative measured storage is separated from the latest cleanup, older retained
   cleanups and untracked contents. Per-root/per-change details, unreadable/offline warnings and **Inspect accounting**
   explain unexpected totals without deleting anything. Links/junctions are not followed.
@@ -154,7 +160,7 @@ No library handy? On the welcome screen choose **Try it on a sample library**. I
 | **Photos & videos** | Paged files, metadata filters/sorts, asynchronous preview/viewer, tags/ratings/favourites/review marks, saved smart searches and selection-scoped batch actions. | Catalogue edits; file actions only when explicitly requested |
 | **Library insights** | Storage charts, timeline, offline map, and **All files**: a flat, largest-first browser with metadata sorts and existing cleanup/compressor controls. | Charts are read-only; All files can run explicitly requested actions |
 | **People** | Faces found offline and grouped by person. Name groups, join them, correct mistakes (*Not this person*), find look-alikes, hide strangers, make an album. Names are searchable in Photos & videos. | Nothing (catalogue only) |
-| **Duplicates** | Adaptive 2/3-pane or multi-copy comparison, exact/subset labels, shared/unique sizes and overridable keep recommendations. One action for checked content in the current group. | Moves selected copies/shared content to Recovery; unique larger-folder content stays |
+| **Duplicates** | Folder-grouped exact sets, adaptive comparisons, exact/subset labels and overridable keep recommendations. Current-comparison removal plus confirmed folder/all-group keep-one cleanup. | Moves reviewed redundant content to Recovery; multi-group cleanup retains verified copies and unique linked content |
 | **Similar & best shots** | Bursts, retakes and resized copies, with an explained best pick. The *Similar videos* tab finds re-encoded and trimmed copies. A *Blurry photos* tab has three sensitivities, and nothing is pre-ticked. | Moves ticked items to Recovery |
 | **Tidy up** | Thumbs.db, desktop.ini, .DS_Store, `._` files, partial downloads, empty files and folders. Unreadable media and stray documents start unticked. | Moves files to Recovery; removes empty folders (undo recreates them) |
 | **Organise by date** | Moves files into `2024\2024-07`-style folders using the camera date, then a date in the file name. Files dated only by modified time are skipped unless you opt in. | Moves files inside the library |
@@ -174,7 +180,7 @@ These documents describe unreleased source updates after 1.4; an existing packag
 | Promise | How it is enforced |
 |---|---|
 | Looking preserves originals | Scanning, analysis, comparison and health checks read media and update `.memoria`. Opt-in diagnostics additionally writes aggregate reports in the source checkout. |
-| Review clean-up first | File-plan confirmations state counts and sizes. Duplicate Quick remove skips ordinary exact-copy confirmations after session consent; subset/linked changes and Empty Recovery still ask. Creative tools have explicit Save/Export controls. |
+| Review clean-up first | File-plan confirmations state counts and sizes. Duplicate Quick remove skips ordinary single-set exact-copy confirmations after session consent; subset/linked/multi-group changes and Empty Recovery still ask. Creative tools have explicit Save/Export controls. |
 | Originals are protected | "Remove" moves files to `.memoria\recovery\<batch>\<original path>`. **Empty Recovery** permanently deletes them and requires acknowledgement. Undo can delete unchanged generated copies. |
 | File operations are recoverable | Moves, copies and published outputs are journaled for Undo. Empty Recovery and acknowledged deletion of personal catalogue data cannot be undone. |
 | No stale decisions | File information and duplicate content hashes are re-checked. Normal cleanup also verifies a surviving copy; acknowledged all-copy selection intentionally has no survivor requirement. Changed files are skipped and reported. |
@@ -279,7 +285,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 452 tests; see docs/technical.html
+.\.venv\Scripts\python -m pytest -q                       # 489 tests; see docs/technical.html
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 .\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + documentation screenshots
@@ -301,6 +307,8 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_ui_smoke.py` | 5 | Drives every page in both themes; clicks primary task buttons and checks work starts/finishes; verifies Undo, thumbnails, opt-in cleanup, protected Apple sidecars, visible analysis-error details, reset confirmations and the resumable reset UI. |
 | `tests/test_storage.py` | 14 | Safe/custom/hard reset, retained media/Undo and duplicate choices, rollback, interruption, cancellation/retry and low-space compaction. |
 | `tests/test_duplicate_choices.py` | 16 | Adaptive pane/table selections, current-group-only removal, subset shared-only behavior, actual refresh/Undo, quick consent, changed-file protection, remembered choices and migration. |
+| `tests/test_duplicate_cleanup.py` | 33 | Same-folder/partial-overlap collections, 100k grouping, keep-one plans, saved/user protections, linked-equivalence/unique-part safety, scoped roots, source/keeper checks and exact Undo. |
+| `tests/test_duplicate_bulk_ui.py` | 3 | Folder-only and all-group confirmation, protected choices/keeper overrides, hidden-copy scope, preview layout and actual filesystem/Undo results. |
 | `tests/test_folder_comparison.py` | 6 | Either/both subset sides, preserved unique content and linked parts, snapshot-only selection, changed-file guards and Undo. |
 | `tests/test_recovery_accounting.py` | 20 | Prior plus latest logical sizes, tracked/untracked/changed/missing entries, roots and remapping, unreadable/offline storage, no-follow links, scan safety and UI emptying gates. |
 | `tests/test_recovery_restore.py` | 54 | Current and legacy session layouts, logged/unlogged restoration, manual mapping, inferred provenance, filtered Undo, no overwrites, linked names, interruption/cancellation and unsafe-path rejection. |
@@ -314,7 +322,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_assets.py` + `tests/test_companion_actions.py` | 25 | Linked-file discovery/review, locked folder snapshots, common collision names, all-component preflight, rollback, cancellation, Undo and interrupted operations. |
 | `tests/test_organisation.py` + `tests/test_metadata_history.py` | 40 | Validated tags/ratings/favourites/review states, keeper-wins merges, undoable metadata snapshots, later-edit conflict protection and explicit-reset safety. |
 | `tests/test_smart_albums.py` | 20 | Validated persistent rules, dynamic contents, bounded queries, static-album compatibility and asynchronous browsing. |
-| `tests/test_responsive_views.py` + `tests/test_duplicate_paging.py` + `tests/test_library_views.py` + `tests/test_media_source_ui.py` | 25 | Synthetic 100,000-entry catalogues, bounded widgets/work queues, delayed-I/O responsiveness, stale/shutdown guards, paging selection semantics and root-aware source reads. |
+| `tests/test_responsive_views.py` + `tests/test_duplicate_paging.py` + `tests/test_library_views.py` + `tests/test_media_source_ui.py` | 26 | Synthetic 100,000-entry catalogues, bounded widgets/work queues, delayed-I/O responsiveness, stale/shutdown guards, paged folder collections and selection semantics, root-aware source reads. |
 
 The **test library** (`tools\make_test_library.py [DEST] [--small]`) is a deterministic library of generated photos. It
 includes camera, phone and backup folders; exact duplicates (including 6 MB files); a nested album copied whole to an old

@@ -140,7 +140,7 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
             elif key == "duplicates":
                 click_task(page.find_btn)
                 shot(name=f"{i:02d}-duplicates-folders")
-                row = next(r for r, (k, _) in enumerate(page.entries) if k == "file")
+                row = next(r for r, (k, _) in enumerate(page.entries) if k in ("file", "collection"))
                 page.list.setCurrentRow(row)
                 idle()
             elif key == "similar":

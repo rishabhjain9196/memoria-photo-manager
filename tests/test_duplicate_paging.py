@@ -47,6 +47,7 @@ def make_page(lib):
     ctx = AppContext(TaskRunner())
     ctx.set_library(lib)
     page = DuplicatesPage(ctx)
+    page.grouping.setCurrentIndex(page.grouping.findData("individual"))
     page.resize(1400, 900)
     page.show()
     return page
@@ -203,3 +204,47 @@ def test_unchecking_every_copy_discards_a_pending_plan_failure(catalogue, app, m
         page.shutdown()
         page.deleteLater()
         app.processEvents()
+
+
+def test_folder_collection_bounds_many_exact_sets_and_keeps_navigation_choices(catalogue, app, monkeypatch):
+    lib, rows = catalogue
+    groups = [duplicates.DuplicateGroup(f"pair-{index}", 10, rows[index:index + 2], rows[index]["id"])
+              for index in range(0, 100_000, 2)]
+    page = make_page(lib)
+    page.grouping.setCurrentIndex(page.grouping.findData("folders"))
+    reads = []
+    monkeypatch.setattr(page.ctx.thumbs, "get", lambda fid: reads.append(fid))
+    try:
+        page._show(duplicates.DuplicateReport(groups, []))
+        settle(app, page)
+        assert page.list.count() == 1 and page.entries[0][0] == "collection"
+        assert len(page._current_collection.groups) == 50_000
+        assert page.sets.topLevelItemCount() == GROUP_PAGE
+        assert page.clean_folder_btn.isEnabled() and page.clean_all_btn.isEnabled()
+        assert "50,000" in page.collection_scope.text()
+        assert len(reads) < 12
+        page.panes[0].remove_check.setChecked(True)
+        page.panes[1].remove_check.setChecked(False)
+        settle(app, page)
+        assert page.selected == {1}
+        page.set_next.click()
+        settle(app, page)
+        expected = page._current_collection.groups[GROUP_PAGE]
+        assert page.set_offset == GROUP_PAGE and page._current_group[1].hash == expected.hash
+        assert page.selected == {row["id"] for row in expected.files if row["id"] != expected.keeper_id}
+        page.set_previous.click()
+        settle(app, page)
+        assert page.selected == {1} and page._selection_plan["files"] == 1
+        page.keep_all.click()
+        settle(app, page)
+        assert len(page._current_collection.groups) == 49_999
+        assert page._current_group[1].hash != "pair-0"
+        page.show_previous.setChecked(True)
+        settle(app, page)
+        assert len(page._current_collection.groups) == 50_000
+        assert page._current_group[1].hash == "pair-0" and not page.selected
+    finally:
+        page.shutdown()
+        page.deleteLater()
+        app.processEvents()
+        duplicates.remember_keep(lib, duplicates.file_review_key(groups[0]), False)

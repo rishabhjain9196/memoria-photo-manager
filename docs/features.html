@@ -296,6 +296,10 @@ reorganising.</p>
 <ol>
   <li>Click <b>Find duplicates</b>. Equal-size candidates pass through sampled hashes, then full-content hashes.
       Leftovers in matched folders are also fingerprinted to make explicit all-folder removal safe.</li>
+  <li><b>Group exact files by folders</b> combines many individual matches into a folder collection, including repeats
+      within one folder. Shared exact files are grouped even when both folders also contain unique files; this is
+      not a claim that the whole folders are identical. Choose a set inside the collection to compare its copies.
+      <b>Individual duplicate sets</b> switches back to the ungrouped list.</li>
   <li>Choose a group in the simple left-hand list. Two copies use two panes, three use three panes, and larger groups
       use a paged comparison table with a preview. No thumbnails are loaded for every group upfront.</li>
   <li><b>Checked = move to Recovery; unchecked = keep.</b> The recommended keeper is clearly marked and can be
@@ -306,17 +310,31 @@ reorganising.</p>
       its unique/unmatched contents and containing folder stay. Selecting both removes shared copies on both sides.
       Shared files tied to unique or unreviewed linked parts are retained, and the planned total explains this.</li>
   <li>Read <b>Planned move</b>: it includes linked components, not just displayed photo sizes. Click
-      <b>Move selected to Recovery</b>. There is no separate bulk plan or bulk-keeper action.</li>
+      <b>Move selected to Recovery</b> to act only on the comparison shown. Multi-group cleanup is a separate
+      explicitly named action, not silently included in this button.</li>
   <li><b>Keep these copies</b> remembers this unchanged group without moving anything. <b>Show kept groups</b> reveals
       remembered groups with nothing checked. A cancelled removal does not replace that decision.</li>
 </ol>
+<h3>Clean a folder group or every exact group</h3>
+<p><b>Clean this folder group...</b> reviews redundant copies across every set/page of the selected folder collection.
+<b>Clean all exact groups...</b> covers all exact media groups in the current scan, including those represented by
+whole-folder comparisons. Both show a combined count/size confirmation, even when Quick remove is enabled.</p>
+<p>These actions <b>keep at least one freshly verified copy per content set</b>. Saved Keep groups and unchecked
+copies you reviewed are protected. Keep-one safety wins if every copy was checked in an individual comparison.
+Only complete, equivalent linked assets can be removed together; assets with unique/unmatched parts are retained
+and reported for individual review. System leftovers, unique files and empty folders are not removed by these
+multi-group actions. Visual similarity remains a separate tool.</p>
+<p>Changes are journaled for Undo and moved to Recovery, not permanently deleted. Moving them alone does not
+reclaim disk space. Folder grouping and review choices do not weaken source-change or surviving-copy checks.</p>
+<figure><img src="images/duplicates-folder-grouping.png" alt="Exact duplicate sets grouped within a folder"><figcaption>A folder collection reduces repeated single-file comparisons; each set remains inspectable.</figcaption></figure>
+<figure><img src="images/duplicates-clean-all-confirm.png" alt="Confirmed cleanup retaining verified copies across exact groups"><figcaption>All-groups cleanup always keeps verified copies and asks before moving anything.</figcaption></figure>
 <div class="callout warn">Checking every copy can remove the last copy from the library. It requires a separate checkbox
 acknowledgement, either for that action or when enabling Quick remove. Files go to Recovery, not permanent deletion;
 Undo remains available only while Recovery is intact.
 Review the result and your separate backup before ever emptying Recovery.</div>
 <h3>Optional Quick remove</h3>
 <p>Enable <b>Quick remove</b> and acknowledge the warning once. Ordinary exact-copy selections then act without another
-confirmation popup. Subset comparisons and linked components still require review. File checks, changed-file/error
+confirmation popup. Subset comparisons, linked components and multi-group cleanup still require review. File checks, changed-file/error
 feedback, Recovery and Undo remain active; Empty Recovery and other tools keep their confirmations.
 Quick remove is not saved and starts off in every new library window.
 Untick it at any time to restore group confirmations.</p>

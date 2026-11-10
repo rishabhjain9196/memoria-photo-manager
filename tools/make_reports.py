@@ -57,6 +57,8 @@ AREAS = {
     "test_smart_albums": "Dynamic saved rules and bounded album browsing",
     "test_responsive_views": "100k-entry responsiveness, asynchronous previews and lifecycle guards",
     "test_duplicate_paging": "Bounded duplicate-group and member review",
+    "test_duplicate_cleanup": "Exact folder collections and verified keep-one cleanup",
+    "test_duplicate_bulk_ui": "Scoped folder/all-group cleanup confirmation and Undo",
     "test_media_source_ui": "Guarded asynchronous editor, story and video sources",
     "test_folder_comparison": "Shared-only subset review, unique content and Undo",
     "test_recovery_accounting": "Read-only cumulative Recovery accounting and inspection",
@@ -169,6 +171,8 @@ def refresh_images(tmp: Path) -> None:
                          ("duplicates-quick-mode", "duplicates-quick-mode"),
                          ("duplicates-subset", "duplicates-subset"),
                          ("duplicates-many", "duplicates-many"),
+                         ("duplicates-folder-grouping", "duplicates-folder-grouping"),
+                         ("duplicates-clean-all-confirm", "duplicates-clean-all-confirm"),
                          ("recovery-restore-preview", "recovery-restore-preview"),
                          ("recovery-restore-conflict", "recovery-restore-conflict"),
                          ("tidy-sidecars", "tidy-sidecars")):

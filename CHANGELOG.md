@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Exact folder collections and keep-one cleanup
+- Grouped remaining exact duplicate sets by their containing folders, including repeated copies within one folder
+  and shared files between otherwise different folders. Bounded nested set lists preserve individual comparison;
+  the old individual-set view remains available.
+- Added Clean this folder group and Clean all exact groups with an explicit combined confirmation. Each retains
+  a verified survivor per exact content set, respects saved Keep decisions and unchecked review choices, and never
+  inherits an individual remove-all intention. Quick remove does not skip these confirmations.
+- Bulk removal preserves unique/unmatched linked components, allowing only complete equivalent linked assets.
+  Guards and organisation-merge targets cannot be removed elsewhere in the plan. Unrelated files, system leftovers
+  and empty folders stay. Recovery/Undo and changed-file protections remain in force.
+- Visual similarity is unchanged and remains separate. No schema change or catalogue reset is required.
+- Full suite: 489 passed, including 33 new planner tests, three real bulk-cleanup UI/Undo cases and a 100k-file
+  collection/paging regression. Updated guides, screenshots and quality report; validation used generated media,
+  not the user's originals or Recovery.
+
 ### Legacy Recovery session destinations
 - Restore preview now recognises older `session_YYYYMMDD_HHMMSS` folders as well as current
   `YYYYMMDD-HHMMSS-xxxxxx` batch folders. The full path after that folder is preserved beneath the owning media

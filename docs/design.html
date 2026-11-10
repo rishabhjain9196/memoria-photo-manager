@@ -320,6 +320,8 @@ space is low. It is not a repair for unreadable SQLite databases or physical dri
       a green note that nothing is deleted, and a button labelled with the exact action ("Move 14 copies"). Cancel has
       initial focus. Duplicates uses a simple group list and two/three panes or a bounded table: checked means move,
       unchecked means keep. One action affects the current group; subset containers contribute shared content only.
+      Exact file sets can be grouped by their containing folders. Separate folder/all-group cleanup always retains
+      verified copies and confirms its full scope; it is never silently included in single-comparison removal.
       Optional Quick remove skips ordinary exact-copy confirmations after one explicit
       acknowledgement, starts off in each new library window, and never bypasses file checks or Empty Recovery.</li>
   <li><b>Apply</b> — runs in the background; the page refreshes itself afterwards.</li>
