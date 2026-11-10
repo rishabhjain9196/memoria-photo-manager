@@ -1,11 +1,13 @@
 """Tidy up: system junk, empty files and folders, unreadable media, stray documents."""
 from __future__ import annotations
 
+from html import escape
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHeaderView, QSplitter, QTreeWidget, QTreeWidgetItem
 
 from ...engine import tidy
-from ..widgets import Banner, Preview, button, fmt_date, fmt_n, fmt_size, hbox, label, show_in_explorer
+from ..widgets import Banner, MessageDialog, Preview, button, fmt_date, fmt_n, fmt_size, hbox, label, show_in_explorer
 from .base import Page, recovery_note
 
 
@@ -34,6 +36,9 @@ class TidyPage(Page):
         self.summary = label("")
         self.apply_btn = button("Tidy selected", "primary", self.apply)
         self.body.addWidget(Banner(recovery_note() + " Categories that need a closer look start unticked.", "trust"))
+        self.sidecar_note = label("", "muted", wrap=True)
+        self.sidecar_note.hide()
+        self.body.addWidget(self.sidecar_note)
         self.body.addWidget(split, 1)
         self.body.addLayout(hbox(self.summary, None, self.apply_btn))
         self.report: tidy.TidyReport | None = None
@@ -53,6 +58,10 @@ class TidyPage(Page):
 
     def _show(self, report: tidy.TidyReport) -> None:
         self.report = report
+        self.sidecar_note.setText(
+            f"Protected: {fmt_n(report.protected_sidecars, 'Apple .AAE edit sidecar')} left untouched. "
+            "These can preserve Apple photo edits; Memoria does not apply those edits.")
+        self.sidecar_note.setVisible(report.protected_sidecars > 0)
         self.ctx.set_badge("tidy", report.count("junk") + report.count("empty") + report.count("folders"))
         self.tree.blockSignals(True)
         self.tree.clear()
@@ -112,7 +121,11 @@ class TidyPage(Page):
     def _current(self, cur, _prev) -> None:
         data = cur.data(0, Qt.ItemDataRole.UserRole) if cur else None
         if data and data[0] == "item" and data[1] != "folders":
-            self.preview.show_row(data[2])
+            error = data[2].get("error")
+            extra = (f"<b>Recorded analysis error</b><br>{escape(error)}<br>"
+                     "This is not proof of damage. Check the codec, file access and original before removing it."
+                     if error else "")
+            self.preview.show_row(data[2], extra)
         else:
             self.preview.clear()
 
@@ -123,7 +136,11 @@ class TidyPage(Page):
 
     def apply(self) -> None:
         sel = self._selected()
-        acts = tidy.plan_actions(self.lib, self.report, sel)
+        try:
+            acts = tidy.plan_actions(self.lib, self.report, sel)
+        except ValueError as error:
+            MessageDialog(self, "Tidy selection needs review", str(error)).exec()
+            return
         files = [a for a in acts if a.op == "recycle"]
         folders = [a for a in acts if a.op == "rmdir"]
         details = []

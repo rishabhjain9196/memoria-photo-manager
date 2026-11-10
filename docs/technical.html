@@ -365,9 +365,14 @@ folder's ancestors and returns those whose remaining file count (existing non-mo
 zero, deepest first, to append as <code>rmdir</code> actions.</p>
 
 <h3 id="p-tidy">Tidy (<code>tidy.find_tidy</code>)</h3>
-<p>Classifies catalogue rows: junk (names/extensions/<code>._</code> prefix) → empty (0 bytes) → unreadable (media with
+<p>First excludes case-insensitive <code>.aae</code> Apple edit sidecars, including empty ones, and counts them in
+<code>TidyReport.protected_sidecars</code>. These rows still count as contents during empty-folder detection.
+The planner also rejects sidecars in stale/explicit selections before any action runs; the UI surfaces that error.
+Remaining catalogue rows are classified as junk (names/extensions/<code>._</code> prefix) → empty (0 bytes) → unreadable (media with
 error) → other (non-media). Empty folders are computed from a recursive per-folder count that excludes files about to be
-removed, so folders containing only junk qualify. Plans recycle files first, then <code>rmdir</code> deepest-first.</p>
+removed, so folders containing only junk qualify. Plans recycle files first, then <code>rmdir</code> deepest-first.
+The UI describes analysis errors without assuming corruption and shows escaped technical details for the selected
+file. HEIC/HEIF classification and decoding are unchanged; no schema migration or automatic media retry is involved.</p>
 
 <h3 id="p-health">Health (<code>health.run_health</code>)</h3>
 <p>Runs an incremental scan, then re-reads every file (thread pool, half the workers to be gentle on HDDs) computing the
@@ -780,13 +785,14 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>243 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
+<p><b>245 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
 <a href="report.html">quality report</a> records the last full regression run (240 passed, before the Suggest albums
-button fix). That fix separately passed 14 album and end-to-end UI tests. Fake-tray/offscreen tests do not verify
+button and Apple-sidecar fixes). The album fix separately passed 14 album/UI tests; sidecar protection and error
+wording passed 11 HEIC/HEIF, Tidy and UI tests. Fake-tray/offscreen tests do not verify
 actual Windows popup appearance or OS delivery policy.</p>
 <table>
   <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
-  <tr><td><code>test_engine.py</code></td><td>29</td><td>Hash pre-filter semantics; incremental scan; counts, errors, dates and date sources; EXIF rotation; HEIC and video analysis; duplicate groups vs ground truth incl. the &gt;1.28 MB regression; removal + undo restores an identical tree; changed keeper/copy are skipped; user keeper override/exclusion; bursts and best frame; near-duplicates prefer original; exact copies and screenshots excluded from Similar; blur detection; organise plan/apply/undo and uncertain dates; tidy categories and apply/undo (folders recreated); health baseline, bit-flip damage, edit detection; compare read-only + two-way sync + undo; overlapping folder rejection; verified copy failure leaves nothing; never overwrites; crash reconciliation; cancellation; Empty Recovery.</td></tr>
+  <tr><td><code>test_engine.py</code></td><td>30</td><td>Hash pre-filter semantics; incremental scan; counts, errors, dates and date sources; EXIF rotation; HEIC/HEIF and video analysis; duplicate groups vs ground truth incl. the &gt;1.28 MB regression; removal + undo restores an identical tree; changed keeper/copy are skipped; user keeper override/exclusion; bursts and best frame; near-duplicates prefer original; exact copies and screenshots excluded from Similar; blur detection; organise plan/apply/undo and uncertain dates; tidy categories, protected Apple .AAE sidecars, apply/undo (folders recreated); health baseline, bit-flip damage, edit detection; compare read-only + two-way sync + undo; overlapping folder rejection; verified copy failure leaves nothing; never overwrites; crash reconciliation; cancellation; Empty Recovery.</td></tr>
   <tr><td><code>test_video.py</code> + <code>test_story.py</code></td><td>40</td><td>Compression verification, source preservation,
     no overwrite, target size and cancellation; 10,000-row lazy UI loading, bounded/incremental probes and selection
     handoff; story sizes, templates, panorama seams, EXIF orientation, story-video duration and resolution.</td></tr>
@@ -798,9 +804,10 @@ actual Windows popup appearance or OS delivery policy.</p>
   <tr><td><code>test_photoedit.py</code></td><td>20</td><td>Identity recipe, exact rotate/flip pixel mapping, pixel-exact crops and aspect boxes, straighten leaves no empty corners, adjustments move the right way, filters, resize never upscales, EXIF date kept + Orientation reset + GPS stripped, formats/quality, PNG alpha, HEIC → JPEG, split tiles reassemble exactly, join sizes and cap, size estimate, partial failures, cancellation leaves nothing.</td></tr>
   <tr><td><code>test_videoedit.py</code></td><td>12</td><td>Rotated sources baked upright, recipe planning, trim without overwrite, default output folder, speed changes duration and keeps audio, rotate/crop/mute/max height, fast filtered preview frames, split points, join landscape + portrait, frame extraction, cancelled export/split leave nothing.</td></tr>
   <tr><td><code>test_batch.py</code></td><td>5</td><td>Copy to folder (verified, no overwrite, undo), move within library (rows follow, undo), refusals, batch recycle/undo, Check everything is read-only and matches ground truth with step progress.</td></tr>
-  <tr><td><code>test_ui_smoke.py</code></td><td>4</td><td>Drives the real window offscreen: Check everything, every page (find, preview, viewer, plan, health, compare, story preview, video compress, similar videos), a batch move to Recovery undone with Ctrl+Z, a duplicate removal undone from History, an edited photo
+  <tr><td><code>test_ui_smoke.py</code></td><td>5</td><td>Drives the real window offscreen: Check everything, every page (find, preview, viewer, plan, health, compare, story preview, video compress, similar videos), a batch move to Recovery undone with Ctrl+Z, a duplicate removal undone from History, an edited photo
     (crop + adjustments) and an edited video (trim + contrast) saved and undone; light/dark screenshots, reset UI,
-    thumbnail budgets/invalidation, single selection and opt-in cleanup.</td></tr>
+    thumbnail budgets/invalidation, single selection, opt-in cleanup, protected-sidecar feedback and escaped,
+    selectable analysis-error details.</td></tr>
   <tr><td><code>test_storage.py</code></td><td>14</td><td>Selective clearing, media/history and duplicate-choice preservation,
     transaction rollback, process termination, cancellation/resume, changed media, low-space and compaction recovery.</td></tr>
   <tr><td><code>test_duplicate_choices.py</code></td><td>14</td><td>Explicit one/all selections, cancellation and Undo,

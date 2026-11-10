@@ -374,17 +374,26 @@ soft photos can appear here. Tick the ones you don't want and click <b>Move tick
 <h2>Tidy up</h2>
 <p>Clears out leftovers that operating systems and apps scatter through photo folders. Items are grouped by category with
 counts and sizes; expand a category to see each file.</p>
+<p><b>Apple .AAE files are protected.</b> These sidecars can preserve Apple photo-editing instructions.
+They are excluded from Tidy up, even if empty; a protected-file count is shown instead. Keep them with the photos.
+Memoria does not apply their Apple-specific edits, and this protection does not add sidecar or Live Photo pairing
+to other tools.</p>
 <table>
   <tr><th>Category</th><th>Examples</th><th>Ticked by default</th></tr>
   <tr><td>System and app leftovers</td><td>Thumbs.db, desktop.ini, .DS_Store, Picasa.ini, <code>._</code> files from Macs, unfinished downloads (.crdownload, .part, .tmp)</td><td>Yes</td></tr>
   <tr><td>Empty files</td><td>Files with 0 bytes</td><td>Yes</td></tr>
   <tr><td>Empty folders</td><td>Folders with nothing in them (or nothing once the above is gone)</td><td>Yes</td></tr>
-  <tr><td>Photos and videos that can't be opened</td><td>Damaged or incomplete files</td><td>No — review first</td></tr>
+  <tr><td>Photos and videos with analysis errors</td><td>Codec, access or file problems; not proof of damage</td><td>No — review first</td></tr>
   <tr><td>Non-photo files</td><td>Documents and other files mixed into the library</td><td>No — review first</td></tr>
 </table>
+<p><b>HEIC/HEIF photos are supported.</b> Healthy photos are not cleanup candidates. If one appears under analysis
+errors, select it to read the recorded technical error in the preview. A missing codec, unsupported variant or
+access problem can resemble a damaged file. Check the original in a compatible viewer and your backup before removing
+anything. These are stored scan results, not an automatic retry or repair.</p>
 <p>Click <b>Tidy selected</b>. Files go to Recovery; empty folders are removed only if they are still empty at that moment, and
 Undo recreates them.</p>
 <figure><img src="images/tidy.png" alt="Tidy up"><figcaption>Risky categories start unticked.</figcaption></figure>
+<figure><img src="images/tidy-sidecars.png" alt="Protected Apple sidecar count and recorded HEIF analysis error"><figcaption>Generated test example: .AAE files stay protected, while an analysis error remains unticked and can be inspected.</figcaption></figure>
 </section>
 
 <section id="organize">
@@ -569,7 +578,7 @@ not proof that an already-damaged original was healthy.</p>
   <tr><td>Newly fingerprinted</td><td>First check for this file.</td><td>Nothing.</td></tr>
   <tr><td>Edited since last check</td><td>Size or modified time changed; the fingerprint is refreshed. This does not prove the change was intentional.</td><td>Check whether the change was expected.</td></tr>
   <tr><td><b>Possibly damaged</b></td><td>Content changed without a size/time change. This can indicate damage or an edit that preserved timestamps.</td><td>Compare with a known-good backup and check the drive.</td></tr>
-  <tr><td>Can't be opened</td><td>The photo no longer decodes (e.g. it was cut off during a copy).</td><td>Restore from backup or tidy it away.</td></tr>
+  <tr><td>Can't be opened</td><td>Reading or decoding failed; this alone does not prove damage.</td><td>Check codec support, file access and a known-good backup before considering removal.</td></tr>
   <tr><td>Missing</td><td>Not found at its last known path; retained across rescans with its metadata.</td><td>Check for an external move/deletion. Returning to the same path restores the catalogue identity.</td></tr>
 </table>
 <p>A damaged file stays flagged on later checks until it is fixed. Double-click a row to show the file in Explorer.</p>

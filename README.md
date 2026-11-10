@@ -49,6 +49,8 @@ the rendered page).
   pass that runs every finder and puts count badges in the sidebar.
 - **Find → Review → Confirm → Apply → Undo** for file clean-up, with plain-language reasons for suggestions.
   Irreversible personal catalogue clearing has a separate acknowledgement.
+- **iPhone imports**: HEIC/HEIF photos and MOV videos are supported. Apple `.AAE` edit sidecars are protected from
+  Tidy up, not treated as junk. Their Apple-specific edits are not applied, and Live Photo parts remain separate files.
 - **Exact duplicates are proven**, not guessed: files are compared by full-content hash (xxh3-128). Normal removal
   verifies a surviving copy. Explicit **Remove both/all** instead requires acknowledgement and still rechecks each
   reviewed file before moving it to Recovery.
@@ -255,7 +257,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 243 tests; runtime depends on the machine
+.\.venv\Scripts\python -m pytest -q                       # 245 tests; runtime depends on the machine
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 .\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + documentation screenshots
@@ -263,7 +265,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 
 | Suite | Tests | Proves |
 |---|---|---|
-| `tests/test_engine.py` | 29 | Results match ground truth: duplicates (including files over 1.28 MB), bursts and best frame, near-duplicates, blur, dates and their sources, rotation, HEIC, video, tidy, organise. Safety: changed files are skipped, nothing is overwritten, copies are verified, undo restores an identical tree, crash reconciliation, cancellation, Empty Recovery. |
+| `tests/test_engine.py` | 30 | Results match ground truth: duplicates (including files over 1.28 MB), bursts and best frame, near-duplicates, blur, dates and their sources, rotation, HEIC/HEIF, video, tidy, organise. Safety: Apple .AAE sidecars protected from Tidy, changed files skipped, no overwrites, verified copies, identical-tree Undo, crash reconciliation, cancellation, Empty Recovery. |
 | `tests/test_faces.py` | 8 | Expected people are grouped, changed photos re-scanned, missing-photo metadata retained, names/corrections survive regrouping, look-alike search, Undo keeps faces, forget all. |
 | `tests/test_albums.py` | 10 | Offline place names, event/trip/place/people albums, real Suggest button clicks in every mode, visible results/empty states, unchanged originals, export + undo. |
 | `tests/test_dupfolders.py` | 6 | Duplicate folders: nested copies shown once at the top, contained and renamed folders, folder sizes and counts, clean-up and undo restore the exact tree, changed or new files keep their folder. |
@@ -274,7 +276,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_batch.py` | 5 | Batch copy, move and recycle with undo; Check everything is read-only and correct. |
 | `tests/test_video.py` | 10 | Verified compression and cancellation; 10,000-row lazy loading, bounded incremental probes, selection and external-file handoff. |
 | `tests/test_story.py` | 30 | Exact output sizes, every template, panorama seams, EXIF rotation, story-video duration. |
-| `tests/test_ui_smoke.py` | 4 | Drives every page in both themes; clicks primary task buttons and checks work starts/finishes; verifies Undo, thumbnails, opt-in cleanup, reset confirmations and the resumable reset UI. |
+| `tests/test_ui_smoke.py` | 5 | Drives every page in both themes; clicks primary task buttons and checks work starts/finishes; verifies Undo, thumbnails, opt-in cleanup, protected Apple sidecars, visible analysis-error details, reset confirmations and the resumable reset UI. |
 | `tests/test_storage.py` | 14 | Safe/custom/hard reset, retained media/Undo and duplicate choices, rollback, interruption, cancellation/retry and low-space compaction. |
 | `tests/test_duplicate_choices.py` | 14 | Group-scoped one/all removal, actual list refresh and Undo; quick-mode consent, changed-file protection and confirmed bulk Apply; same-timestamp History order; cancellation, folder overlap protection, remembered choices and v6 upgrade. |
 | `tests/test_notifications.py` | 10 | Private event routing, preferences, focus/background handling, partial failures, cancellation, Undo preservation and shutdown. |

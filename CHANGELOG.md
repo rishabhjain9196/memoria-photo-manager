@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Apple sidecars and clearer analysis errors
+- Apple .AAE edit sidecars are excluded from every Tidy up removal category, including empty files, and their
+  folders remain protected from empty-folder cleanup. A protected-file count explains why they are not listed.
+  Stale or manually supplied selections containing .AAE files are rejected with a visible message.
+- Analysis errors no longer imply that a photo is damaged. Missing/unsupported codecs and access problems are
+  explained, and Tidy's selected-file preview shows the escaped, selectable recorded error.
+- HEIC/HEIF support already existed. Verified healthy HEIC and HEIF indexing/thumbnails, editing and rendering,
+  unchanged originals, case-insensitive .AAE protection, cleanup/Undo and UI behavior with 11 targeted tests.
+- No schema change or catalogue reset. This does not apply Apple's edit instructions, pair Live Photo components,
+  or automatically retry/repair previously failing media.
+
 ### Suggest albums button
 - Fixed the button passing Qt's checked-state flag as the album mode, which raised an error before a background
   task could start. It now uses the selected Events & trips, Places or People mode.

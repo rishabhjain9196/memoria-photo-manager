@@ -14,7 +14,8 @@ from .scanner import walk_dirs
 CATEGORIES = {
     "junk": ("System and app leftovers", "Thumbs.db, desktop.ini, .DS_Store, ._ files, temporary downloads", True),
     "empty": ("Empty files", "Files with 0 bytes — nothing to lose", True),
-    "unreadable": ("Photos and videos that can't be opened", "Damaged or incomplete files — review before removing", False),
+    "unreadable": ("Photos and videos with analysis errors",
+                   "A codec, access or file problem; not proof of damage. Select a file to review its error.", False),
     "other": ("Non-photo files", "Documents and other files mixed into the library", False),
     "folders": ("Empty folders", "Folders left with nothing in them", True),
 }
@@ -23,6 +24,7 @@ CATEGORIES = {
 @dataclass
 class TidyReport:
     items: dict[str, list[dict]] = field(default_factory=dict)
+    protected_sidecars: int = 0
 
     def count(self, cat: str) -> int:
         return len(self.items.get(cat, []))
@@ -36,13 +38,19 @@ def is_junk(name: str) -> bool:
     return n in config.JUNK_NAMES or os.path.splitext(n)[1] in config.JUNK_EXT or n.startswith(config.JUNK_PREFIXES)
 
 
+def is_apple_edit_sidecar(path: str) -> bool:
+    return os.path.splitext(path)[1].lower() == ".aae"
+
+
 def find_tidy(lib: Library, progress: Progress | None = None) -> TidyReport:
     progress = progress or Progress()
     progress.update(0, 2, "Looking for leftovers…")
     rep = TidyReport({k: [] for k in CATEGORIES})
     for r in lib.files():
         r = dict(r)
-        if is_junk(r["name"]):
+        if is_apple_edit_sidecar(r["rel_path"]):
+            rep.protected_sidecars += 1
+        elif is_junk(r["name"]):
             rep.items["junk"].append(r)
         elif r["size"] == 0:
             rep.items["empty"].append(r)
@@ -82,6 +90,9 @@ def plan_actions(lib: Library, report: TidyReport, selected: dict[str, list[dict
     actions = []
     for cat in ("junk", "empty", "unreadable", "other"):
         for r in selected.get(cat, []):
+            if is_apple_edit_sidecar(r["rel_path"]):
+                raise ValueError("Apple .AAE edit sidecars are protected from Tidy up. "
+                                 "Keep them with your photos. Nothing was moved.")
             actions.append(Action(op="recycle", src=str(lib.abspath(r["rel_path"])), size=r["size"],
                                   mtime=r["mtime"], reason=CATEGORIES[cat][0], file_id=r["id"]))
     folders = sorted(selected.get("folders", []), key=lambda x: -x["rel_path"].count(os.sep))

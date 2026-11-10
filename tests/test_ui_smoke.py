@@ -118,6 +118,63 @@ def test_thumbnail_budget_invalidation_and_single_selection(tmp_path):
         lib.close()
 
 
+def test_tidy_protects_sidecars_and_explains_analysis_errors(tmp_path, monkeypatch):
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    from memoria.engine import scanner, tidy
+    from memoria.engine.db import Library
+    from memoria.ui.pages.tidy import TidyPage
+    from memoria.ui.tasks import TaskRunner
+    from memoria.ui.widgets import AppContext, MessageDialog
+
+    app = QApplication.instance() or QApplication([])
+    root = tmp_path / "library"
+    root.mkdir()
+    (root / "IMG_1.AAE").write_bytes(b"<plist>Apple editing instructions</plist>")
+    (root / "IMG_2.HEIF").write_bytes(b"incomplete test photo")
+    lib = Library(root)
+    runner = TaskRunner()
+    ctx = AppContext(runner)
+    ctx.set_library(lib)
+    page = TidyPage(ctx)
+    page.resize(1400, 850)
+    page.stale = False
+    try:
+        scanner.index(lib)
+        page.show()
+        for error in ("UnidentifiedImageError: codec <HEVC> not available",
+                      "RuntimeError: decoder <HEVC> not available"):
+            lib.db.execute("UPDATE files SET error=? WHERE rel_path='IMG_2.HEIF'", (error,))
+            page._show(tidy.find_tidy(lib))
+            app.processEvents()
+            assert page.sidecar_note.isVisible() and "1 Apple .AAE" in page.sidecar_note.text()
+            assert page.tree.topLevelItemCount() == 1
+            group = page.tree.topLevelItem(0)
+            assert group.data(0, Qt.ItemDataRole.UserRole) == ("cat", "unreadable")
+            child = group.child(0)
+            assert child.checkState(0) == Qt.CheckState.Unchecked
+            page.tree.setCurrentItem(child)
+            assert "not proof of damage" in page.preview.facts.text()
+            assert "&lt;HEVC&gt; not available" in page.preview.facts.text()
+            assert "codec" in page.preview.facts.text()
+            assert not page.apply_btn.isEnabled()
+        assert page.grab().save(str(tmp_path / "tidy-sidecars.png"))
+        notices = []
+        monkeypatch.setattr(MessageDialog, "exec", lambda self: notices.append(self.windowTitle()) or 0)
+        monkeypatch.setattr(page, "_selected", lambda: {"other": [dict(lib.file_by_rel("IMG_1.AAE"))]})
+        page.apply()
+        assert notices == ["Tidy selection needs review"]
+        assert not runner.busy
+        assert (root / "IMG_1.AAE").read_bytes() == b"<plist>Apple editing instructions</plist>"
+        assert (root / "IMG_2.HEIF").read_bytes() == b"incomplete test photo"
+    finally:
+        page.close()
+        page.deleteLater()
+        app.processEvents()
+        lib.close()
+
+
 def test_storage_dialog_requires_ack_for_destructive_choices(tmp_path):
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     from PySide6.QtWidgets import QApplication

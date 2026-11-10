@@ -64,14 +64,15 @@ def friendly_error(err: Optional[str]) -> str:
     if "truncated" in e or "premature end" in e:
         return "The file is incomplete — it was probably cut off during a copy or download."
     if "cannot identify image" in e or "unidentifiedimageerror" in e:
-        return "This isn't a picture Memoria can read (it may be empty, damaged or not really an image)."
+        return ("Memoria couldn't decode this image. Its format or codec may be unsupported, "
+                "or the file may be incomplete or damaged.")
     if "no video stream" in e:
         return "No playable video was found in this file."
     if "permission" in e or "access is denied" in e:
         return "Windows didn't allow Memoria to read this file."
     if "could not be read" in e:
         return "The file could not be read from the drive."
-    return "The file couldn't be opened. It may be damaged."
+    return "Memoria couldn't read this file. Check its format/codec and access before assuming it is damaged."
 
 
 # ------------------------------------------------------------------------------ icons

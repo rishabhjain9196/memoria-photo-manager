@@ -151,7 +151,8 @@ def refresh_images(tmp: Path) -> None:
     sources["live-index"] = next(tmp.rglob("live-index.png"))
     for dest, source in (("duplicates-choices", "duplicates-file-choices"),
                          ("duplicates-remove-all-confirm", "duplicates-remove-all-confirm"),
-                         ("duplicates-quick-mode", "duplicates-quick-mode")):
+                         ("duplicates-quick-mode", "duplicates-quick-mode"),
+                         ("tidy-sidecars", "tidy-sidecars")):
         sources[dest] = next(tmp.rglob(f"{source}.png"))
     for path in sources.values():
         if not path.is_file():

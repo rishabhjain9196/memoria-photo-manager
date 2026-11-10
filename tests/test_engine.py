@@ -244,6 +244,37 @@ def test_tidy_apply_and_undo(library):
     assert (library.root / "Old Stuff" / "Empty Album").is_dir()
 
 
+def test_tidy_protects_apple_sidecars_and_healthy_heif(library, expected):
+    if not expected["heic"]:
+        pytest.skip("HEIF encoder unavailable for the generated fixture")
+    protected = ("iPhone Edits\\IMG_1.AAE", "iPhone Edits\\IMG_2.aAe", "Only edits\\empty.aae")
+    for rel, data in zip(protected, (b"<plist>edit one</plist>", b"<plist>edit two</plist>", b"")):
+        path = library.abspath(rel)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    heif = "iPhone Edits\\IMG_1.HEIF"
+    shutil.copy2(library.abspath(expected["heic"][0]), library.abspath(heif))
+    scanner.index(library)
+    row = library.file_by_rel(heif)
+    assert row["kind"] == "image" and row["error"] is None and library.thumbnail(row["id"])
+    before = tree_snapshot(library.root)
+    report = tidy.find_tidy(library)
+    assert report.protected_sidecars == 3
+    candidates = {r["rel_path"] for rows in report.items.values() for r in rows}
+    assert not candidates.intersection((*protected, heif, *expected["heic"]))
+    assert "Only edits" not in {r["rel_path"] for r in report.items["folders"]}
+    for rel in protected:
+        with pytest.raises(ValueError, match="AAE.*protected"):
+            tidy.plan_actions(library, report, {"other": [dict(library.file_by_rel(rel))]})
+    result = actions.apply(library, "tidy", "Review all cleanup categories",
+                           tidy.plan_actions(library, report, report.items))
+    assert result.ok
+    for rel in (*protected, heif, *expected["heic"]):
+        assert full_hash(library.abspath(rel)) == before[rel]
+    assert actions.undo(library, result.batch_id).ok
+    assert tree_snapshot(library.root) == before
+
+
 # --------------------------------------------------------------------------- health
 def test_health_baseline_then_detect_damage(library, expected):
     first = health.run_health(library)
