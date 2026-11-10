@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import calendar
 import math
-from dataclasses import dataclass, replace
+import json
+from dataclasses import asdict, dataclass, fields, replace
 from datetime import date, timedelta
 from typing import Optional
 
@@ -35,6 +36,9 @@ for key in ("camera", "lens", "video_codec", "audio_codec"):
 SORTS["audio_codec"] = ("(f.kind!='video' OR f.audio_codec IS NULL), "
                         "f.audio_codec COLLATE NOCASE, f.rel_path, f.id")
 GPS = "f.lat BETWEEN -90 AND 90 AND f.lon BETWEEN -180 AND 180"
+RATING = "COALESCE((SELECT m.rating FROM file_metadata m WHERE m.file_id=f.id),0)"
+for direction in ("asc", "desc"):
+    SORTS[f"rating_{direction}"] = f"{RATING} {direction.upper()}, f.rel_path, f.id"
 
 
 @dataclass(frozen=True)
@@ -77,11 +81,109 @@ class Filters:
     max_exposure: Optional[float] = None
     min_focal: Optional[float] = None
     max_focal: Optional[float] = None
+    min_rating: int = 0
+    max_rating: int = 5
+    favorite: Optional[bool] = None
+    review: str = "all"
+    tags: tuple[str, ...] = ()
+    tag_mode: str = "all"
+    root_id: Optional[int] = None
+    availability: str = "all"
+    album_id: Optional[int] = None
+
+
+def _validate_types(filters: Filters) -> None:
+    if not isinstance(filters, Filters):
+        raise ValueError("Invalid catalogue filters.")
+    nullable_text = {"extension", "start", "end", "camera", "lens", "video_codec", "audio_codec"}
+    integers = {"min_bytes", "max_bytes", "min_width", "min_height", "person", "root_id", "album_id",
+                "min_rating", "max_rating"}
+    for field in fields(Filters):
+        value = getattr(filters, field.name)
+        name = field.name
+        if name in ("tags", "bbox"):
+            continue
+        if name in ("recursive", "undated", "ready_only", "favorite"):
+            valid = type(value) is bool or (name == "favorite" and value is None)
+        elif name in integers:
+            valid = type(value) is int or (name in {"max_bytes", "person", "root_id", "album_id"} and value is None)
+        elif name.startswith(("min_", "max_")):
+            valid = value is None or type(value) in (int, float)
+        else:
+            valid = isinstance(value, str) or (name in nullable_text and value is None)
+        if not valid:
+            raise ValueError(f"Invalid value for {name}.")
+    if filters.bbox is not None and (not isinstance(filters.bbox, (tuple, list)) or len(filters.bbox) != 4 or
+                                     any(type(v) not in (int, float) for v in filters.bbox)):
+        raise ValueError("Invalid GPS bounds.")
+
+
+def rule(filters: Filters, sort: str = "newest") -> dict:
+    """Canonical, versioned saved query. Unknown fields/versions are never silently ignored."""
+    where(filters)
+    if not isinstance(sort, str) or sort not in SORTS:
+        raise ValueError("Unknown sort.")
+    return {"version": 1, "filters": asdict(filters), "sort": sort}
+
+
+def read_rule(value: str | dict) -> tuple[Filters, str]:
+    try:
+        data = json.loads(value) if isinstance(value, str) else value
+        if (not isinstance(data, dict) or set(data) != {"version", "filters", "sort"} or
+                type(data["version"]) is not int or data["version"] != 1 or
+                not isinstance(data["filters"], dict)):
+            raise ValueError("Unsupported saved-search rule.")
+        filters = Filters(**data["filters"])
+        rule(filters, data["sort"])
+        filters = replace(filters, tags=tuple(filters.tags),
+                          bbox=tuple(filters.bbox) if filters.bbox is not None else None)
+        rule(filters, data["sort"])
+        return filters, data["sort"]
+    except (TypeError, KeyError, AttributeError, json.JSONDecodeError) as error:
+        raise ValueError("Invalid saved-search rule.") from error
 
 
 def where(filters: Filters) -> tuple[str, list]:
+    _validate_types(filters)
     f = filters
     clauses, params = [], []
+    for key in ("root_id", "album_id", "person"):
+        value = getattr(f, key)
+        if value is not None and value <= 0:
+            raise ValueError(f"Invalid {key}.")
+    if f.root_id is not None:
+        clauses.append("f.root_id=?")
+        params.append(f.root_id)
+    if f.availability not in ("all", "online", "offline"):
+        raise ValueError("Unknown folder availability.")
+    if f.availability != "all":
+        clauses.append("EXISTS (SELECT 1 FROM library_roots r WHERE r.id=f.root_id AND r.online=?)")
+        params.append(int(f.availability == "online"))
+    if f.album_id is not None:
+        clauses.append("EXISTS (SELECT 1 FROM album_items i WHERE i.file_id=f.id AND i.album_id=?)")
+        params.append(f.album_id)
+    if not 0 <= f.min_rating <= f.max_rating <= 5:
+        raise ValueError("Choose a rating range from 0 to 5.")
+    if f.min_rating or f.max_rating < 5:
+        clauses.append(f"{RATING} BETWEEN ? AND ?")
+        params += [f.min_rating, f.max_rating]
+    if f.favorite is not None:
+        clauses.append("COALESCE((SELECT m.favorite FROM file_metadata m WHERE m.file_id=f.id),0)=?")
+        params.append(int(f.favorite))
+    if f.review != "all":
+        if f.review not in ("unreviewed", "pick", "reject"):
+            raise ValueError("Unknown review mark.")
+        clauses.append("COALESCE((SELECT m.review FROM file_metadata m WHERE m.file_id=f.id),'unreviewed')=?")
+        params.append(f.review)
+    from .organisation import tag_names
+    names = tag_names(f.tags)
+    if f.tag_mode not in ("all", "any"):
+        raise ValueError("Choose all or any matching tags.")
+    if names:
+        terms = ["EXISTS (SELECT 1 FROM file_tags x JOIN tags t ON t.id=x.tag_id "
+                 "WHERE x.file_id=f.id AND t.name=? COLLATE NOCASE)" for _ in names]
+        clauses.append("(" + (" AND " if f.tag_mode == "all" else " OR ").join(terms) + ")")
+        params.extend(names)
     if f.ready_only:
         clauses.append("f.analyzed=1")
     if f.kind in ("media", "image", "video"):
@@ -203,11 +305,13 @@ def browse_progress(lib: Library) -> dict[str, int]:
 
 
 def page(lib: Library, filters: Filters, sort: str = "newest", offset: int = 0) -> tuple[list[dict], int, int]:
-    if sort not in SORTS or offset < 0:
+    if not isinstance(sort, str) or sort not in SORTS or type(offset) is not int or offset < 0:
         raise ValueError("Invalid sort or page offset.")
     sql, params = where(filters)
     count, size = lib.db.execute(f"SELECT COUNT(*),COALESCE(SUM(size),0) FROM files f WHERE {sql}", params).fetchone()
-    rows = lib.db.execute(f"SELECT f.* FROM files f WHERE {sql} ORDER BY {SORTS[sort]} LIMIT ? OFFSET ?",
+    rows = lib.db.execute(f"SELECT f.*,COALESCE(m.rating,0) AS rating,COALESCE(m.favorite,0) AS favorite,"
+                          f"COALESCE(m.review,'unreviewed') AS review FROM files f "
+                          f"LEFT JOIN file_metadata m ON m.file_id=f.id WHERE {sql} ORDER BY {SORTS[sort]} LIMIT ? OFFSET ?",
                           [*params, PAGE_SIZE, offset]).fetchall()
     return [dict(row) for row in rows], count, size
 
@@ -220,8 +324,27 @@ def folders(lib: Library) -> list[str]:
     return sorted(out, key=str.casefold)
 
 
-def distribution(lib: Library, filters: Filters) -> dict:
+def distribution(lib: Library, filters: Filters, limit: Optional[int] = None) -> dict:
     sql, params = where(filters)
+    if limit is not None:
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("Invalid distribution limit.")
+        start = len(filters.folder) + 2 if filters.folder else 1
+        prefix = filters.folder + "\\" if filters.folder else ""
+        children = [dict(row) for row in lib.db.execute(
+            "WITH matching AS (SELECT substr(f.folder,?) AS relative,f.size FROM files f "
+            f"WHERE {sql}), grouped AS (SELECT CASE WHEN instr(relative,'\\')>0 "
+            "THEN substr(relative,1,instr(relative,'\\')-1) ELSE relative END AS child,size FROM matching) "
+            "SELECT CASE WHEN child='' THEN ? ELSE ?||child END AS key,child='' AS direct,"
+            "CASE WHEN child='' THEN '(Files directly here)' ELSE child END AS label,"
+            "COUNT(*) AS count,SUM(size) AS bytes FROM grouped GROUP BY child ORDER BY bytes DESC,key LIMIT ?",
+            [start, *params, filters.folder, prefix, limit])]
+        types = [dict(row) for row in lib.db.execute(
+            f"SELECT f.ext AS key,f.ext AS label,COUNT(*) AS count,SUM(f.size) AS bytes FROM files f "
+            f"WHERE {sql} GROUP BY f.ext ORDER BY bytes DESC,f.ext LIMIT ?", [*params, limit])]
+        total, size = lib.db.execute(
+            f"SELECT COUNT(*),COALESCE(SUM(f.size),0) FROM files f WHERE {sql}", params).fetchone()
+        return {"folders": children, "types": types, "count": total, "bytes": size}
     children = {}
     for row in lib.db.execute(f"SELECT f.folder,COUNT(*) AS count,SUM(f.size) AS bytes FROM files f "
                               f"WHERE {sql} GROUP BY f.folder", params):
@@ -272,11 +395,17 @@ def timeline(lib: Library, filters: Filters, prefix: str = "") -> list[dict]:
         "GROUP BY key ORDER BY key", [length, *params])]
 
 
-def matching_albums(lib: Library, filters: Filters) -> list[dict]:
+def matching_albums(lib: Library, filters: Filters, limit: Optional[int] = None) -> list[dict]:
     sql, params = where(filters)
+    tail = ""
+    if limit is not None:
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("Invalid album limit.")
+        tail = " LIMIT ?"
+        params.append(limit)
     return [dict(row) for row in lib.db.execute(
         f"SELECT a.id,a.name,COUNT(*) AS count FROM albums a JOIN album_items i ON i.album_id=a.id "
-        f"JOIN files f ON f.id=i.file_id WHERE {sql} GROUP BY a.id ORDER BY count DESC,a.name", params)]
+        f"JOIN files f ON f.id=i.file_id WHERE {sql} GROUP BY a.id ORDER BY count DESC,a.name{tail}", params)]
 
 
 def map_data(lib: Library, filters: Filters, bounds=None) -> dict:

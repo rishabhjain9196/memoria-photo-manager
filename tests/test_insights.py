@@ -327,6 +327,15 @@ def test_interactive_insights_and_filter_navigation(tmp_path, monkeypatch):
     def click_item(widget, item):
         QTest.mouseClick(widget.viewport(), Qt.MouseButton.LeftButton, pos=widget.visualItemRect(item).center())
 
+    def idle_reads(page):
+        from memoria.ui.tasks import LatestCall
+        deadline = time.monotonic() + 15
+        while any(call.running for call in page.findChildren(LatestCall)) and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(.01)
+        app.processEvents()
+        assert not any(call.running for call in page.findChildren(LatestCall))
+
     try:
         window.go("insights")
         page = window.page("insights")
@@ -346,19 +355,23 @@ def test_interactive_insights_and_filter_navigation(tmp_path, monkeypatch):
         click_item(page.time, page.time.topLevelItem(0))
         app.processEvents()
         photos = window.page("photos")
+        idle_reads(photos)
         assert window.current_key == "photos" and len(photos.grid.items()) == 3
         assert photos.filters.start == "2024-02-29"
         photos.sort.setCurrentIndex(photos.sort.findData("largest"))
+        idle_reads(photos)
         assert photos.rows[0]["size"] >= photos.rows[-1]["size"]
         app.processEvents()
         assert window.grab().save(str(tmp_path / "largest-files.png"))
         photos.tree.setCurrentItem(photos.tree.topLevelItem(1))
         photos.kind.setCurrentIndex(photos.kind.findData("video"))
+        idle_reads(photos)
         assert not photos.grid.items()
         assert photos.tree.currentItem().data(0, Qt.ItemDataRole.UserRole) == "2024"
         photos.kind.setCurrentIndex(photos.kind.findData("all"))
         window.go("insights")
         click_item(page.album_list, page.album_list.item(0))
+        idle_reads(window.page("albums"))
         assert window.current_key == "albums" and window.page("albums")._album()["id"] == aid
         window.go("insights")
         page.tabs.setCurrentIndex(2)
@@ -383,6 +396,7 @@ def test_interactive_insights_and_filter_navigation(tmp_path, monkeypatch):
         QTest.mouseClick(page.map, Qt.MouseButton.LeftButton,
                          pos=page.map.project(cell["lat"], cell["lon"]).toPoint())
         assert window.current_key == "photos" and photos.filters.bbox is not None
+        idle_reads(photos)
         assert len(photos.grid.items()) == cell["count"]
         dlg = FilterDialog(window, lib, photos.filters)
         dlg.show()

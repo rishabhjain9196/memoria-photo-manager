@@ -2,18 +2,18 @@
 from __future__ import annotations
 
 import os
-import sqlite3
 from dataclasses import replace
-from pathlib import Path, PurePath
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QHeaderView, QInputDialog, QLineEdit, QMenu, QSlider,
+from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QHeaderView, QInputDialog, QLineEdit, QMenu, QSlider,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QWidget)
 
-from ...engine import albums, batch, catalogue
+from ...engine import albums, batch, catalogue, organisation
+from ..tasks import LatestCall
 from ..library_filters import FilterDialog, KINDS, SORTS, metadata_filter_notes, sort_caption
-from ..widgets import (MessageDialog, PhotoGrid, Preview, Viewer, button, fmt_date, fmt_n, fmt_size, hbox, label,
+from ..widgets import (MessageDialog, PhotoGrid, Preview, Viewer, button, fmt_n, fmt_size, hbox, label,
                        open_path, show_in_explorer, vbox)
 from .base import Page, recovery_note, recycle_summary
 
@@ -26,8 +26,24 @@ class PhotosPage(Page):
     subtitle = ("Browse by date. Double-click to view. Select several (Ctrl/Shift-click, Ctrl+A) to act on them "
                 "together. Selection applies to the current page (up to 500 items).")
 
-    def __init__(self, ctx):
+    def __init__(self, ctx, embedded=False):
         super().__init__(ctx)
+        self._closed = False
+        self.embedded = embedded
+        if embedded:
+            def hide_layout(layout):
+                for i in range(layout.count()):
+                    item = layout.itemAt(i)
+                    if item.widget():
+                        item.widget().hide()
+                    elif item.layout():
+                        hide_layout(item.layout())
+            hide_layout(self.layout().itemAt(0).layout())
+            self.layout().setContentsMargins(0, 0, 0, 0)
+        self._query = LatestCall(self)
+        self._query.result.connect(self._loaded)
+        self._query.failed.connect(self._load_failed)
+        self._request = None
         self.filters = catalogue.Filters()
         self.offset = 0
         self._live_deferred = False
@@ -38,8 +54,11 @@ class PhotosPage(Page):
         self.zoom.setFixedWidth(140)
         self.zoom.setToolTip("Thumbnail size (Ctrl + mouse wheel)")
         self.zoom.valueChanged.connect(self._set_zoom)
-        self.header_actions.addWidget(label("Thumbnails", "small"))
-        self.header_actions.addWidget(self.zoom)
+        if not embedded:
+            self.header_actions.addWidget(label("Thumbnails", "small"))
+            self.header_actions.addWidget(self.zoom)
+        else:
+            self.zoom.hide()
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search name, folder, camera or person")
@@ -68,6 +87,7 @@ class PhotosPage(Page):
         left.setLayout(vbox(self.search, self.kind, self.sort,
                             hbox(button("Filters…", on_click=self._filters),
                                  button("Clear", "link", self._clear_filters)),
+                            button("Save smart album…", on_click=lambda: self.save_search()),
                             self.filter_note, self.tree, spacing=8))
         left.setFixedWidth(230)
 
@@ -85,6 +105,8 @@ class PhotosPage(Page):
         self.sel_bar.setObjectName("selectionBar")
         self.sel_label = label("", "h2")
         self.b_recycle = button("Move to Recovery", on_click=self.recycle_selected, tip="Delete key")
+        self.b_organise = button("Tags / rating…", on_click=self.edit_organisation,
+                                 tip="Edit only selected files on this page. Reject never deletes files.")
         self.b_more = button("More actions ▾", tip="Story maker, compress, copy, move, show in folder")
         self.more_menu = QMenu(self)
         self.a_edit = self.more_menu.addAction("Edit…", self._to_editor)
@@ -98,7 +120,7 @@ class PhotosPage(Page):
         self.more_menu.addAction("Show in folder", self._show_selected)
         self.b_more.setMenu(self.more_menu)
         self.b_clear = button("Clear", "link", lambda: self.grid.clearSelection())
-        self.sel_bar.setLayout(hbox(self.sel_label, None, self.b_more, self.b_recycle, self.b_clear,
+        self.sel_bar.setLayout(hbox(self.sel_label, None, self.b_organise, self.b_more, self.b_recycle, self.b_clear,
                                     spacing=6, margins=(12, 6, 8, 6)))
         self.sel_bar.hide()
 
@@ -106,8 +128,9 @@ class PhotosPage(Page):
         self.previous = button("Previous", on_click=lambda: self._turn_page(-1))
         self.next = button("Next", on_click=lambda: self._turn_page(1))
         center.setLayout(vbox(hbox(self.count, None, self.previous, self.next),
+                             label("Selection and Ctrl+A apply to this page only (up to 500 items).", "small"),
                              self.sel_bar, self.grid, spacing=6))
-        self.preview = Preview(ctx)
+        self.preview = Preview(ctx, hold_on_index_update=True)
 
         split = QSplitter()
         split.addWidget(left)
@@ -142,15 +165,18 @@ class PhotosPage(Page):
                       self.grid.currentIndex().data(Qt.ItemDataRole.UserRole)))
         self.rows: list[dict] = []
         ctx.people_changed.connect(self._mark_stale)
+        ctx.albums_changed.connect(self._mark_stale)
         ctx.index_progress.connect(self._mark_stale)
 
     # --------------------------------------------------------------------------- data
+    def _mark_stale(self):
+        if hasattr(self, "_query"):
+            self._query.invalidate()
+            self._request = None
+        super()._mark_stale()
+
     def refresh(self, force: bool = False) -> None:
-        try:
-            self._progress_counts = catalogue.browse_progress(self.lib)
-        except sqlite3.Error as error:
-            self.index_note.setText(f"Could not read the catalogue: {error}. Reconnect the drive and rescan.")
-            self.index_notice.show()
+        if self._closed:
             return
         active_view = bool(self.selected()) or self.offset > 0 or self.grid.verticalScrollBar().value() > 0
         if not force and (self.ctx.indexing or self.ctx.index_update) and active_view:
@@ -178,16 +204,13 @@ class PhotosPage(Page):
         self.update_view.setVisible(self._live_deferred)
         self.index_notice.setVisible(self.ctx.indexing or bool(counts["pending"]) or self._live_deferred)
 
-    def _build_tree(self) -> None:
+    def _build_tree(self, months) -> None:
         cur = self.tree.currentItem()
         cur_key = cur.data(0, Qt.ItemDataRole.UserRole) if cur else None
         self.tree.blockSignals(True)
         self.tree.clear()
         counts: dict[str, dict[str, int]] = {}
-        sql, params = catalogue.where(replace(self.filters, kind=self.kind.currentData(),
-                                              search=self.search.text(), ready_only=True))
-        for r in self.lib.db.execute(f"SELECT substr(taken_at,1,7) AS month,COUNT(*) AS n FROM files f "
-                                     f"WHERE {sql} GROUP BY month", params):
+        for r in months:
             t = r["month"] or ""
             y, m = (t[:4], t[5:7]) if t else ("Unknown", "")
             counts.setdefault(y, {})
@@ -207,7 +230,7 @@ class PhotosPage(Page):
             if cur_key == y:
                 select = yi
             for m in sorted(counts[y], reverse=True):
-                if not m:
+                if not m or not m.isdigit() or not 1 <= int(m) <= 12:
                     continue
                 mi = QTreeWidgetItem([MONTHS[int(m) - 1], f"{counts[y][m]:,}"])
                 key = f"{y}-{m}"
@@ -224,14 +247,6 @@ class PhotosPage(Page):
         self.offset = 0
         self._live_deferred = False
         self._update_index_notice()
-        try:
-            if self.lib is not None:
-                self._build_tree()
-        except sqlite3.Error as e:
-            self.grid.set_items([])
-            self.count.setText("Catalogue unavailable")
-            self.ctx.toast_requested.emit(str(e), "")
-            return
         self._load_page()
 
     def _load_page(self) -> None:
@@ -239,25 +254,65 @@ class PhotosPage(Page):
             self._load_page_impl()
 
     def _load_page_impl(self) -> None:
-        if self.lib is None:
+        if self.lib is None or self._closed:
             return
+        filters = self.current_filters()
+        base = replace(self.filters, kind=self.kind.currentData(), search=self.search.text().strip(),
+                       ready_only=self.kind.currentData() not in ("all", "other"))
+        lib, sort, offset = self.lib, self.sort.currentData(), self.offset
+        request = (lib, self.ctx.generation, filters, sort, offset)
+        self._request = request
+        self.count.setText("Loading matching files…")
+        self.previous.setEnabled(False)
+        self.next.setEnabled(False)
+        self.rows = []
+        self.grid.set_items([])
+        self.preview.clear()
+        def work():
+            try:
+                sql, params = catalogue.where(base)
+                months = [dict(r) for r in lib.db.execute(
+                    f"SELECT substr(taken_at,1,7) AS month,COUNT(*) AS n FROM files f "
+                    f"WHERE {sql} GROUP BY month ORDER BY month DESC LIMIT 1200", params)]
+                return request, catalogue.page(lib, filters, sort, offset), months, catalogue.browse_progress(lib)
+            finally:
+                lib.close_thread()
+        self._query.call(work)
+
+    def current_filters(self):
         cur = self.tree.currentItem()
         prefix = cur.data(0, Qt.ItemDataRole.UserRole) if cur else ""
-        filters = replace(self.filters, kind=self.kind.currentData(), search=self.search.text().strip(), ready_only=True)
+        filters = replace(self.filters, kind=self.kind.currentData(), search=self.search.text().strip(),
+                          ready_only=self.kind.currentData() not in ("all", "other"))
         if prefix == "Unknown":
             filters = replace(filters, undated=True)
         elif prefix:
             filters = catalogue.in_period(filters, prefix)
-        try:
-            self.rows, total, size = catalogue.page(self.lib, filters, self.sort.currentData(), self.offset)
-        except (ValueError, sqlite3.Error) as e:
-            self.grid.set_items([])
-            self.preview.clear()
-            self.count.setText("Could not load matching files")
-            self.ctx.toast_requested.emit(str(e), "")
+        return filters
+
+    def _load_failed(self, error):
+        if not self._request or self._request[:2] != (self.lib, self.ctx.generation):
             return
-        items = [{**r, "caption": sort_caption(r, self.sort.currentData()),
-                  "tip": f"{r['rel_path']}\n{fmt_size(r['size'])}"} for r in self.rows]
+        self.rows = []
+        self.grid.set_items([])
+        self.preview.clear()
+        self.count.setText("Could not load matching files")
+        self.ctx.toast_requested.emit(str(error), "")
+
+    def _loaded(self, result):
+        request, page, months, progress = result
+        if request != self._request or request[:2] != (self.lib, self.ctx.generation):
+            return
+        lib, _, filters, sort, offset = request
+        self.rows, total, size = page
+        self._progress_counts = progress
+        problems = progress["problems"]
+        self.kind.setItemText(3, f"Problems ({problems:,})" if problems else "Problems")
+        self._build_tree(months)
+        self._update_index_notice()
+        items = [{**r, "caption": sort_caption(r, sort),
+                  "tip": f"{lib.display_path(r['rel_path'])}\n{fmt_size(r['size'])} · "
+                         f"{r['rating']} stars · {'Favourite · ' if r['favorite'] else ''}{r['review']}"} for r in self.rows]
         if self.ctx.indexing or self.ctx.index_update:
             self.ctx.thumbs.invalidate(r["id"] for r in self.rows)
         self.grid.set_items(items)
@@ -267,7 +322,7 @@ class PhotosPage(Page):
         self.next.setEnabled(self.offset + len(items) < total)
         active = []
         if filters.folder or not filters.recursive:
-            active.append(filters.folder or "Files directly in root")
+            active.append(self.lib.display_path(filters.folder) if filters.folder else "Files directly in root")
         if filters.start or filters.end:
             active.append(f"Dates: {filters.start or 'any'} to before {filters.end or 'any'}")
         if filters.min_bytes or filters.max_bytes is not None:
@@ -298,9 +353,19 @@ class PhotosPage(Page):
             self.open_filters(dlg.selected())
 
     def _clear_filters(self):
-        self.open_filters(catalogue.Filters())
+        if self.embedded:
+            self.open_all_files()
+        else:
+            self.open_filters(catalogue.Filters())
 
-    def open_filters(self, filters: catalogue.Filters):
+    def open_filters(self, filters: catalogue.Filters, sort: str | None = None):
+        catalogue.where(filters)
+        if sort is not None:
+            if sort not in catalogue.SORTS:
+                raise ValueError("Unknown sort.")
+            self.sort.blockSignals(True)
+            self.sort.setCurrentIndex(self.sort.findData(sort))
+            self.sort.blockSignals(False)
         self.filters = filters
         self.search.blockSignals(True)
         self.kind.blockSignals(True)
@@ -312,6 +377,83 @@ class PhotosPage(Page):
         self.tree.clear()
         self.tree.blockSignals(False)
         self._apply_filter()
+
+    def open_all_files(self):
+        self.open_filters(catalogue.Filters(kind="all"), "largest")
+
+    def shutdown(self):
+        self._closed = True
+        self._debounce.stop()
+        self._query.wait()
+        self.preview.shutdown()
+
+    def save_search(self, name=None):
+        if self.lib is None or self.busy:
+            return
+        if name is None:
+            name, ok = QInputDialog.getText(self, "Save smart album", "Name for these filters and sort:")
+            if not ok:
+                return
+        try:
+            aid = albums.create_smart(self.lib, name, self.current_filters(), self.sort.currentData())
+        except ValueError as error:
+            self.ctx.toast_requested.emit(str(error), "")
+            return
+        self.ctx.albums_changed.emit()
+        self.ctx.toast_requested.emit("Saved smart album. Matches update automatically; no files were copied.", "")
+        return aid
+
+    def edit_organisation(self):
+        selected = self.selected()
+        if not selected or self.busy:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Organise {len(selected):,} selected files")
+        form = QFormLayout()
+        if len(selected) == 1:
+            current = organisation.state(self.lib, selected[0]["id"])
+            summary = label(f"Current: {current['rating']} stars · "
+                            f"{'Favourite' if current['favorite'] else 'Not favourite'} · {current['review']}\n"
+                            f"Tags: {', '.join(current['tags']) or 'none'}", wrap=True)
+            summary.setTextFormat(Qt.TextFormat.PlainText)
+            form.addRow(summary)
+        rating, favorite, review = QComboBox(), QComboBox(), QComboBox()
+        for box in (rating, favorite, review):
+            box.addItem("Leave unchanged", None)
+        for value in range(6):
+            rating.addItem("Unrated" if not value else "★" * value, value)
+        for title, value in (("Favourite", True), ("Not favourite", False)):
+            favorite.addItem(title, value)
+        for value in organisation.REVIEWS:
+            review.addItem(value.capitalize(), value)
+        add_tags, remove_tags = QLineEdit(), QLineEdit()
+        for box in (add_tags, remove_tags):
+            box.setPlaceholderText("Comma-separated tag names")
+        for title, widget in (("Rating", rating), ("Favourite", favorite), ("Review", review),
+                              ("Add tags", add_tags), ("Remove tags", remove_tags)):
+            form.addRow(title, widget)
+        dialog.setLayout(vbox(label(f"Only these {len(selected):,} selected files on this page are edited. "
+                                    "Reject is a mark, never deletion.", wrap=True), form,
+                               hbox(None, button("Cancel", on_click=dialog.reject),
+                                    button("Apply", "primary", dialog.accept)), margins=(20, 20, 20, 20)))
+        if not dialog.exec():
+            return
+        lib, ids = self.lib, [r["id"] for r in selected]
+        changes = dict(rating=rating.currentData(), favorite=favorite.currentData(), review=review.currentData(),
+                       add_tags=[t.strip() for t in add_tags.text().split(",") if t.strip()],
+                       remove_tags=[t.strip() for t in remove_tags.text().split(",") if t.strip()])
+        def work(progress):
+            try:
+                progress.check()
+                return organisation.edit(lib, ids, **changes)
+            finally:
+                lib.close_thread()
+        def done(count):
+            self.ctx.library_modified.emit()
+            self.ctx.albums_changed.emit()
+            self.ctx.toast_requested.emit(f"Updated {count:,} selected files. No originals were changed.", "")
+            self._load_page()
+        self.run("Updating organisation", work, done)
 
     # --------------------------------------------------------------------------- view / zoom
     def _set_zoom(self, v: int) -> None:
@@ -352,7 +494,7 @@ class PhotosPage(Page):
         videos = [r for r in sel if r["kind"] == "video" and not r.get("error")]
         self.sel_label.setText(f"{n:,} selected · {fmt_size(size)}")
         idle = not self.busy
-        for w in (self.b_recycle, self.a_copy, self.a_move, self.a_edit, self.a_album, self.a_video):
+        for w in (self.b_recycle, self.b_organise, self.a_copy, self.a_move, self.a_edit, self.a_album, self.a_video):
             w.setEnabled(idle)
         self.a_story.setEnabled(idle and bool(photos))
         self.a_story.setText(f"Add {len(photos)} photos to Story maker" if len(photos) > 1 else "Add to Story maker")
@@ -421,11 +563,7 @@ class PhotosPage(Page):
             done_message=lambda r: f"Moved {fmt_n(r.done, 'item')}.")
 
     def _inside_library(self, path: str) -> bool:
-        try:
-            Path(path).resolve().relative_to(self.lib.root)
-            return True
-        except ValueError:
-            return False
+        return self.lib.contains(path)
 
     def _show_selected(self) -> None:
         sel = self.selected()
@@ -454,12 +592,13 @@ class PhotosPage(Page):
         sel = [i for i in self.selected() if i["kind"] in ("image", "video")]
         if not sel:
             return
-        existing = {a["name"].lower(): a for a in albums.albums(self.lib)}
         if name is None:
             dlg = QInputDialog(self)
             dlg.setWindowTitle("Add to album")
             dlg.setLabelText(f"Add {fmt_n(len(sel), 'item')} to an album — pick one, or type a new name:")
-            dlg.setComboBoxItems([a["name"] for a in existing.values()])
+            # A bounded suggestion list; typing an existing name still finds albums beyond it.
+            dlg.setComboBoxItems([r[0] for r in self.lib.db.execute(
+                "SELECT name FROM albums WHERE rule_json IS NULL ORDER BY name COLLATE NOCASE LIMIT 100")])
             dlg.setComboBoxEditable(True)
             dlg.setTextValue("")
             if not dlg.exec():
@@ -468,7 +607,8 @@ class PhotosPage(Page):
         name = " ".join(name.split())
         if not name:
             return
-        a = existing.get(name.lower())
+        a = self.lib.db.execute("SELECT id,name FROM albums WHERE name=? COLLATE NOCASE AND rule_json IS NULL",
+                                (name,)).fetchone()
         if a:
             n = albums.add(self.lib, a["id"], [i["id"] for i in sel])
             msg = f"Added {fmt_n(n, 'item')} to “{a['name']}”." if n else f"Already in “{a['name']}”."
@@ -509,6 +649,7 @@ class PhotosPage(Page):
         if any(i["kind"] == "video" and not i.get("error") for i in sel):
             m.addAction("Compress video" + ("s" if len(sel) > 1 else ""), self._to_video)
         m.addAction("Add to album…", lambda: self.add_to_album())
+        m.addAction("Tags / rating / favourite / Pick-Reject…", self.edit_organisation)
         m.addAction("Copy to folder…", self.copy_selected)
         m.addAction("Move to folder…", self.move_selected)
         m.addSeparator()

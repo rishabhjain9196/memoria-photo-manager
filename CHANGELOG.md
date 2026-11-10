@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Multi-folder organisation and responsive large-library views
+- Added Library folders: keep the current catalogue home, register non-overlapping media roots, retain offline
+  metadata/thumbnails and reconnect by source identity. Recovery stays on each source root; journal keys follow
+  verified remapping. Existing standalone catalogues are not silently merged.
+- Added reviewed same-folder/name companion groups for image/video parts, RAW+JPEG and AAE/XMP. Unique parts
+  require explicit acknowledgement even in Quick remove. Compound preflight, shared collision names, rollback,
+  cancellation and journaled Undo preserve linked parts; interruptions retain recoverable intents.
+- Exact-duplicate removal merges useful catalogue organisation into keepers with undoable before/after snapshots.
+  Tags/static albums/favourites combine; unset ratings/review states are filled and keepers win conflicts.
+  Later manual edits and explicit resets cannot be overwritten by metadata Undo. Faces/health are not transferred.
+- Added catalogue-only tags, 0-5 ratings, favourites and Unreviewed/Pick/Reject; combined organisation/root filters;
+  persistent smart albums with editable rules and dynamic contents. Reject does not delete anything.
+- Added Insights All files, immediately discoverable and largest-first: flat files across roots, metadata sorts,
+  filters, organisation and existing Recovery/compressor actions. Recovery does not itself free space and compression
+  still retains originals.
+- Bounded/paged large album, group, plan, history, health and comparison views; asynchronous/coalesced media previews,
+  editor/story work and compressor inputs. Stale results are rejected, shutdown is guarded, and selected live-index
+  previews stay held until Update view. Full-plan group selections are labelled separately from page-scoped files.
+- Schema v10 preserves existing IDs, analysis, keep decisions and history without a forced media re-analysis.
+  The catalogue home remains required; companion links are filename-based, not Apple content-ID matching or edit
+  rendering. Resource-adaptive processing and indexed similarity algorithms remain separate future work.
+- Full integrated suite: 361 passed. Refreshed the quality report and generated-media UI screenshots, including
+  Insights All files. Tests include 100,000-entry synthetic catalogues, delayed I/O, offline/reconnect scenarios,
+  linked rollback/cancellation and metadata-conflict Undo; no real 300 GB media copy or drive benchmark was used.
+
 ### Apple sidecars and clearer analysis errors
 - Apple .AAE edit sidecars are excluded from every Tidy up removal category, including empty files, and their
   folders remain protected from empty-folder cleanup. A protected-file count explains why they are not listed.

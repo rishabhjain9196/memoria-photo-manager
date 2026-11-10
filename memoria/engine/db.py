@@ -133,6 +133,34 @@ MIGRATIONS: dict[int, list[str]] = {
     7: [
         "CREATE TABLE duplicate_kept (signature TEXT PRIMARY KEY)",
     ],
+    8: [
+        "CREATE TABLE library_roots (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE COLLATE NOCASE, "
+        "label TEXT NOT NULL, token TEXT NOT NULL UNIQUE, online INTEGER NOT NULL DEFAULT 0, error TEXT, "
+        "keys_migrated INTEGER NOT NULL DEFAULT 0)",
+        "ALTER TABLE files ADD COLUMN root_id INTEGER NOT NULL DEFAULT 1",
+        "CREATE INDEX ix_files_root ON files(root_id)",
+        "ALTER TABLE operations ADD COLUMN src_key TEXT",
+        "ALTER TABLE operations ADD COLUMN dst_key TEXT",
+    ],
+    9: [
+        "CREATE TABLE file_metadata (file_id INTEGER PRIMARY KEY, rating INTEGER NOT NULL DEFAULT 0 "
+        "CHECK(rating BETWEEN 0 AND 5), favorite INTEGER NOT NULL DEFAULT 0 CHECK(favorite IN (0,1)), "
+        "review TEXT NOT NULL DEFAULT 'unreviewed' CHECK(review IN ('unreviewed','pick','reject')))",
+        "CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE COLLATE NOCASE)",
+        "CREATE TABLE file_tags (file_id INTEGER NOT NULL, tag_id INTEGER NOT NULL REFERENCES tags(id), "
+        "PRIMARY KEY(file_id,tag_id))",
+        "CREATE INDEX ix_file_tags_tag ON file_tags(tag_id,file_id)",
+        "ALTER TABLE albums ADD COLUMN rule_json TEXT",
+        "CREATE TABLE metadata_journal (op_id INTEGER PRIMARY KEY REFERENCES operations(id), file_id INTEGER NOT NULL, "
+        "before_json TEXT NOT NULL, after_json TEXT NOT NULL)",
+    ],
+    10: [
+        "ALTER TABLE operations ADD COLUMN merge_target INTEGER",
+        "ALTER TABLE operations ADD COLUMN merge_complete INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE operations ADD COLUMN asset_group TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE metadata_journal ADD COLUMN source_op INTEGER",
+        "CREATE UNIQUE INDEX ix_metadata_source_op ON metadata_journal(source_op)",
+    ],
 }
 SCHEMA_VERSION = max(MIGRATIONS)
 METADATA_VERSION = 1
@@ -222,13 +250,19 @@ class Library:
         self.root = Path(root).resolve()
         if not self.root.is_dir():
             raise NotADirectoryError(str(self.root))
+        from . import roots
+        roots.check_home(self.root)
         config.ensure_app_dir(self.root)
         self.db_path = config.app_dir(self.root) / config.DB_NAME
         self.thumbs_path = config.app_dir(self.root) / config.THUMBS_DB_NAME
         self._local = threading.local()
+        self._source_locks: dict[int, str] = {}
+        self._root_paths: dict[int, Path] = {}
+        self._root_labels: dict[int, str] = {}
         self._lock_key: Optional[str] = _acquire_lock(config.app_dir(self.root) / "lock")
         try:
             self._migrate()
+            roots.initialize(self)
             self.thumbs_db.executescript(THUMB_SCHEMA)
         except BaseException:
             self.close()
@@ -279,16 +313,77 @@ class Library:
     def close(self) -> None:
         """Close this thread's connections and release the library lock."""
         self.close_thread()
+        for lock in self._source_locks.values():
+            _release_lock(lock)
+        self._source_locks.clear()
         if self._lock_key is not None:
             _release_lock(self._lock_key)
             self._lock_key = None
 
     # paths -----------------------------------------------------------------------------
     def abspath(self, rel_path: str) -> Path:
-        return self.root / rel_path
+        from .roots import split_key
+        source, relative = split_key(rel_path)
+        if source not in self._root_paths:
+            raise ValueError("The file refers to an unknown library folder.")
+        return self._root_paths[source] / relative
 
-    def rel(self, path: str | Path) -> str:
-        return str(Path(path).resolve().relative_to(self.root))
+    def rel(self, path: str | Path, *, resolve: bool = True) -> str:
+        from .roots import key_for
+        path = Path(path).resolve() if resolve else Path(os.path.abspath(path))
+        for source, root in self._root_paths.items():
+            if path == root or root in path.parents:
+                return key_for(source, str(path.relative_to(root)) if path != root else "")
+        raise ValueError("The path is outside this library's registered folders.")
+
+    def contains(self, path: str | Path) -> bool:
+        try:
+            self.rel(path)
+            return True
+        except ValueError:
+            return False
+
+    def roots(self) -> list[dict]:
+        return [dict(row) for row in self.db.execute("SELECT * FROM library_roots ORDER BY id")]
+
+    def _reload_roots(self) -> None:
+        sources = self.roots()
+        self._root_paths = {row["id"]: Path(row["path"]) for row in sources}
+        self._root_labels = {row["id"]: row["label"] for row in sources}
+
+    def display_path(self, key: str) -> str:
+        from .roots import split_key
+        source, relative = split_key(key)
+        if source == 1:
+            return relative
+        if source not in self._root_labels:
+            raise ValueError("Unknown library folder.")
+        return self._root_labels[source] + (f"\\{relative}" if relative else "")
+
+    def export_rel(self, key: str) -> str:
+        from .roots import split_key
+        source, relative = split_key(key)
+        return relative if source == 1 else str(Path(f"Source {source}") / relative)
+
+    def in_app_storage(self, path: str | Path) -> bool:
+        return any(part.casefold() == config.APP_DIR_NAME for part in Path(path).parts)
+
+    def check_path(self, path: str | Path) -> None:
+        from .roots import check, split_key
+        try:
+            key = self.rel(path, resolve=False)
+        except ValueError:
+            if not self.contains(path):
+                return
+            key = self.rel(path)
+        source = split_key(key)[0]
+        row = self.db.execute("SELECT label,online FROM library_roots WHERE id=?", (source,)).fetchone()
+        if source != 1 and not row["online"]:
+            raise LibraryUnavailable(f"'{row['label']}' is offline. Reconnect it and rescan before reading its originals.")
+        check(self, source)
+
+    def recovery_folders(self) -> list[tuple[int, Path]]:
+        return [(source, config.recovery_dir(path)) for source, path in self._root_paths.items()]
 
     @property
     def recovery(self) -> Path:
@@ -297,6 +392,21 @@ class Library:
     # queries ---------------------------------------------------------------------------
     def files(self, where: str = "1", params: Iterable = (), order: str = "rel_path") -> list[sqlite3.Row]:
         return self.db.execute(f"SELECT * FROM files WHERE {where} ORDER BY {order}", tuple(params)).fetchall()
+
+    def readable_files(self, where: str = "1", params: Iterable = (), order: str = "rel_path") -> list[sqlite3.Row]:
+        from .roots import check
+        available = []
+        for source in self.roots():
+            if source["id"] != 1 and not source["online"]:
+                continue
+            try:
+                check(self, source["id"])
+                available.append(source["id"])
+            except LibraryUnavailable:
+                if source["id"] == 1:
+                    raise
+        return self.files(f"({where}) AND root_id IN ({','.join('?' for _ in available)})",
+                          (*params, *available), order)
 
     def file(self, file_id: int) -> Optional[sqlite3.Row]:
         return self.db.execute("SELECT * FROM files WHERE id=?", (file_id,)).fetchone()
@@ -374,7 +484,8 @@ class Library:
             return False
         data = json.loads(rec["data"])
         folder, name = os.path.split(rel_path)
-        data.update(rel_path=rel_path, folder=folder, name=name)
+        from .roots import split_key
+        data.update(rel_path=rel_path, folder=folder, name=name, root_id=split_key(rel_path)[0])
         with self.transaction() as tx:
             if tx.execute("SELECT 1 FROM files WHERE rel_path=?", (rel_path,)).fetchone():
                 tx.execute("DELETE FROM parked_files WHERE op_id=?", (op_id,))

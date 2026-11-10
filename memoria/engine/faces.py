@@ -215,13 +215,14 @@ def scan(lib: Library, progress: Optional[Progress] = None, chunk: int = 48) -> 
     import cv2
     progress = progress or Progress()
     _cleanup(lib)
-    rows = [dict(r) for r in lib.files("kind='image' AND error IS NULL AND size>0")]
+    rows = [dict(r) for r in lib.readable_files("kind='image' AND error IS NULL AND size>0")]
     seen = {r[0]: (r[1], r[2]) for r in lib.db.execute("SELECT file_id, size, mtime FROM face_scans")}
     todo = [r for r in rows if seen.get(r["id"]) != (r["size"], r["mtime"])]
     res = ScanResult(photos=len(rows))
 
     def work(r):
         progress.check()
+        lib.check_path(lib.abspath(r["rel_path"]))
         try:
             return r, detect(lib.abspath(r["rel_path"]))
         except Exception:

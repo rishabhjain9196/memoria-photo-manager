@@ -16,7 +16,7 @@ def plan_recycle(lib: Library, rows: list[dict]) -> list[Action]:
 def plan_copy_to(lib: Library, rows: list[dict], dest: str | Path) -> list[Action]:
     """Verified copies into ``dest`` (flat). Existing names get a number; nothing is overwritten."""
     dest = Path(dest).resolve()
-    if config.APP_DIR_NAME in dest.parts:
+    if lib.in_app_storage(dest):
         raise ValueError("Choose a folder outside Memoria's own .memoria folder.")
     return [Action(op="copy", src=str(lib.abspath(r["rel_path"])), dst=str(dest / r["name"]), size=r["size"],
                    mtime=r["mtime"], hash=r.get("chash"), reason=f"Copied to {dest}") for r in rows]
@@ -26,10 +26,10 @@ def plan_move_within(lib: Library, rows: list[dict], dest: str | Path) -> list[A
     """Move files to another folder inside the same library (catalogue rows follow them)."""
     dest = Path(dest).resolve()
     try:
-        rel = dest.relative_to(lib.root)
+        rel = Path(lib.rel(dest))
     except ValueError:
         raise ValueError("Choose a folder inside this library. To put files somewhere else, use Copy to folder.")
-    if config.APP_DIR_NAME in rel.parts:
+    if lib.in_app_storage(dest):
         raise ValueError("Choose a folder outside Memoria's own .memoria folder.")
     out = []
     for r in rows:

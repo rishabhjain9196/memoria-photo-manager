@@ -216,7 +216,8 @@ plain-text JSON preview). See <a href="#diagnostics">Aggregate diagnostics</a> f
 <table>
   <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
   <tr><td><code>id</code></td><td>INTEGER PK AUTOINCREMENT</td><td>Stable across moves/Recovery; never reused for a new import. Migration reserves parked/referenced IDs.</td></tr>
-  <tr><td><code>rel_path</code></td><td>TEXT UNIQUE NOCASE</td><td>Relative to one library root. Journal paths are absolute; changing drive letters can still affect old Undo paths.</td></tr>
+  <tr><td><code>rel_path</code></td><td>TEXT UNIQUE NOCASE</td><td>Stable catalogue key: primary-root relative paths stay unchanged; added roots use <code>@root:&lt;id&gt;\relative</code>. This is not a physical path; resolve through <code>Library.abspath</code>.</td></tr>
+  <tr><td><code>root_id</code></td><td>INTEGER</td><td>Registered media root; existing rows default to root 1. Availability is tracked separately from file presence.</td></tr>
   <tr><td><code>folder, name, ext, kind</code></td><td>TEXT</td><td><code>kind</code> ∈ image | video | other.</td></tr>
   <tr><td><code>size, mtime</code></td><td>INTEGER, REAL</td><td>Change detection key.</td></tr>
   <tr><td><code>qhash, chash</code></td><td>TEXT</td><td>Cached quick / full content hashes; cleared when size or mtime changes.</td></tr>
@@ -234,7 +235,7 @@ plain-text JSON preview). See <a href="#diagnostics">Aggregate diagnostics</a> f
 <h3>Schema versioning</h3>
 <p><code>PRAGMA user_version</code> records the schema version. The v1 schema is frozen; later changes are numbered
 steps in <code>db.MIGRATIONS</code>, applied in transactions on open. A catalogue with a higher version than the app
-raises <code>LibraryTooNew</code> rather than being misread. Current version: <b>7</b>. Back up the catalogue before upgrading
+raises <code>LibraryTooNew</code> rather than being misread. Current version: <b>10</b>. Back up the catalogue before upgrading
 if you need to return to an older application build.</p>
 <p>Version 6 adds the metadata fields and defaults <code>metadata_version</code> to 0. Scanner analysis includes media
 with an older/missing marker even when <code>analyzed=1</code>; each completed batch stores the new fields and current
@@ -243,6 +244,10 @@ IDs, relationships and health baselines are not reset. Invalid optional EXIF num
 <p>Version 7 adds <code>duplicate_kept</code>, containing signatures of unchanged Keep both/all review groups.
 It does not change the media-analysis version. Signatures cover group identity and reviewed file IDs, paths, sizes,
 modified times and hashes. Saved decisions stay local to the catalogue and are not exported in diagnostics.</p>
+<p>Versions 8-10 add registered roots and reconnect-safe journal keys, catalogue organisation and smart-album
+rules, and companion/metadata-operation journal fields. The media-analysis version remains 1. Source identities
+are recorded in <code>.memoria/source.json</code>; offline added roots retain rows and caches. The catalogue home
+must remain available. Recovery stays under each source root. These versions do not merge standalone catalogues.</p>
 <table>
   <tr><th>Table</th><th>Since</th><th>Purpose</th></tr>
   <tr><td><code>parked_files</code> (<code>op_id</code>, <code>file_id</code>, <code>data</code> JSON)</td><td>v2</td><td>Catalogue rows of files in Recovery, restored on undo; dropped when Recovery is emptied.</td></tr>
@@ -255,7 +260,15 @@ modified times and hashes. Saved decisions stay local to the catalogue and are n
   <tr><td><code>missing_files</code> (<code>file_id</code>, <code>rel_path</code>, <code>data</code> JSON)</td><td>v4</td><td>Absent-file snapshots retained across rescans and restored with the same identity when the path returns.</td></tr>
   <tr><td><code>storage_reset</code> (<code>id=1</code>, <code>options</code>, <code>phase</code>, <code>forgotten</code>)</td><td>v5</td><td>Pending selective reset; removed only after rebuilding finishes.</td></tr>
   <tr><td><code>duplicate_kept</code> (<code>signature</code>)</td><td>v7</td><td>Remembered unchanged Keep both/all groups; preserved by safe reset, optionally cleared by custom/hard reset.</td></tr>
+  <tr><td><code>library_roots</code></td><td>v8</td><td>Stable source IDs/tokens, registered locations, labels, availability and connection errors.</td></tr>
+  <tr><td><code>file_metadata</code>, <code>tags</code>, <code>file_tags</code></td><td>v9</td><td>Validated rating, favourite, review state and tag membership. Catalogue-only; preserved by safe reset.</td></tr>
+  <tr><td><code>albums.rule_json</code></td><td>v9</td><td>Versioned, validated smart-album filters/sort. Static albums retain album_items membership.</td></tr>
+  <tr><td><code>metadata_journal</code></td><td>v9-10</td><td>Before/after keeper organisation snapshots linked to the source file operation. Compare-and-restore Undo refuses later edits; explicit reset sanitizes snapshots.</td></tr>
 </table>
+<p>Journal operations additionally store <code>src_key</code>/<code>dst_key</code>, <code>asset_group</code>,
+<code>merge_target</code>/<code>merge_complete</code>, and may have <code>op='metadata'</code>.
+Publishing/holding-copy/undo-interruption states let reconciliation distinguish owned verified outputs from
+external files. Metadata operations do not inflate successful file or byte counts.</p>
 <h3><code>batches</code> and <code>operations</code> (journal)</h3>
 <table>
   <tr><th>Table</th><th>Columns</th></tr>
@@ -268,6 +281,9 @@ modified times and hashes. Saved decisions stay local to the catalogue and are n
 <h2>Pipelines</h2>
 
 <h3 id="p-index">Indexing (<code>scanner.scan</code> + <code>scanner.analyze</code>)</h3>
+<p>Each registered root is checked independently. Added roots that are unavailable retain their records; they do
+not contribute false deletions or fresh media analysis. Mutations validate source identities, and recorded logical
+operation keys resolve through a verified reconnect. Root boundaries cannot overlap.</p>
 <ol>
   <li><b>Walk</b> with an explicit stack over <code>os.scandir</code>, skipping <code>.memoria</code>, <code>$RECYCLE.BIN</code>,
       <code>System Volume Information</code>; never follows links.</li>
@@ -652,12 +668,16 @@ selections are discarded. Reset does not delete <code>.memoria</code> or recover
       callbacks; close/library-change guards reject obsolete completion callbacks. Maintenance resets remain gated.</li>
   <li><b>Shared change flow:</b> <code>Page.apply_actions</code> → <code>ConfirmDialog</code> → <code>runner.run(apply [+ index])</code>
       → <code>library_modified</code> → toast with Undo (batch id) → failure dialog if needed. Confirmation defaults on;
-      only acknowledged duplicate Quick remove opts out. An optional worker-side pre-apply hook clears the current
+      a preceding background preparation step expands reviewed companion groups and previews organisation merges.
+      Only acknowledged standalone duplicate Quick remove opts out; linked groups always require review.
+      An optional worker-side pre-apply hook clears the current
       group's remembered keep choice after confirmation.</li>
   <li><b>PhotoGrid:</b> <code>QListView</code> (icon mode, uniform sizes, batched layout) + <code>PhotoModel</code> holding plain
       dicts + <code>PhotoDelegate</code> custom painting (rounded thumbnail, badge, tick box, video tag, captions). Thumbnails
       load on demand through a byte-budgeted <code>ThumbCache</code>, invalidated on library changes. Photos loads at most 500 rows.</li>
-  <li><b>Preview:</b> full image decoded at 900 px via <code>media.load_for_display</code> (draft decode keeps it fast).</li>
+  <li><b>Preview/Viewer:</b> original-media access and decoding use bounded/coalesced workers, with source checks,
+      request/generation/lifetime guards and explicit loading/errors. Held live-index previews stay stable until
+      the user updates their view. <code>LatestCall</code> keeps one running and one newest pending request.</li>
   <li><b>Styling:</b> one Qt stylesheet (<code>theme.QSS</code>) using object names (<code>primary</code>, <code>danger</code>,
       <code>card</code>, <code>tile</code>, <code>trust</code>…); Fusion style for consistent rendering.</li>
   <li><b>Lazy pages:</b> only Overview is built at start; other pages are created on first visit.</li>
@@ -757,7 +777,9 @@ Windows machine with an SSD. Expect lower absolute numbers on laptops.</p>
       32 MiB page cache per connection, separate thumbnail DB.</li>
   <li>Size-first duplicate funnel and cached hashes; compare hashes only cross-side size collisions.</li>
   <li>Tiled similarity remains O(n²); dense block results can be large. The burst window can also be quadratic when many timestamps coincide.</li>
-  <li>Photos uses 500-row pages; thumbnail pixels have a 64 MiB cache budget plus Qt overhead. Other pages can still load whole groups.</li>
+  <li>Photos/member pages are capped at 500 rows, album lists at 100, group/plan pages at bounded sizes, and History
+      at 200 batches/500 operations. Thumbnail pixels have a 64 MiB cache budget plus Qt overhead.
+      Full-plan group selections are separate from current-page file selections.</li>
 </ul>
 <p>The current <a href="report.html">report</a> uses small generated media and synthetic 10,000-entry catalogues
 representing 300 GB. It does not establish real-drive throughput at that size. Face-centre merging remains a dense-matrix scaling limit.</p>
@@ -785,15 +807,20 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>245 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
-<a href="report.html">quality report</a> records the last full regression run (240 passed, before the Suggest albums
-button and Apple-sidecar fixes). The album fix separately passed 14 album/UI tests; sidecar protection and error
-wording passed 11 HEIC/HEIF, Tidy and UI tests. Fake-tray/offscreen tests do not verify
+<p><b>361 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
+<a href="report.html">quality report</a> records the test inventory and last full regression run.
+Focused suites now include synthetic 100,000-entry catalogues, root reconnection, compound operations, metadata
+Undo and smart albums. Fake-tray/offscreen tests do not verify
 actual Windows popup appearance or OS delivery policy.</p>
 <table>
   <tr><th>File</th><th>Tests</th><th>Covers</th></tr>
+  <tr><td><code>test_library_roots.py</code></td><td>6</td><td>Identity-verified registration/reconnect, offline metadata retention, root-local Recovery, cross-root moves, Undo and v7 migration.</td></tr>
+  <tr><td><code>test_assets.py</code> + <code>test_companion_actions.py</code></td><td>25</td><td>Inferred companion membership and explicit review, preflight, shared collision names, rollback/cancel, interrupted publication and Undo.</td></tr>
+  <tr><td><code>test_organisation.py</code> + <code>test_metadata_history.py</code></td><td>40</td><td>Tags/ratings/favourites/review states, keeper-wins metadata merges, idempotency, later-edit protection and reset-aware Undo.</td></tr>
+  <tr><td><code>test_smart_albums.py</code></td><td>20</td><td>Validated dynamic rules, persistence, filter semantics, bounded queries and asynchronous album/file browsing.</td></tr>
+  <tr><td><code>test_responsive_views.py</code>, <code>test_duplicate_paging.py</code>, <code>test_library_views.py</code>, <code>test_media_source_ui.py</code></td><td>24</td><td>100k-entry bounds, held live-index previews, delayed I/O, stale/lifetime guards, root-aware media readers and full-plan selection across pages.</td></tr>
   <tr><td><code>test_engine.py</code></td><td>30</td><td>Hash pre-filter semantics; incremental scan; counts, errors, dates and date sources; EXIF rotation; HEIC/HEIF and video analysis; duplicate groups vs ground truth incl. the &gt;1.28 MB regression; removal + undo restores an identical tree; changed keeper/copy are skipped; user keeper override/exclusion; bursts and best frame; near-duplicates prefer original; exact copies and screenshots excluded from Similar; blur detection; organise plan/apply/undo and uncertain dates; tidy categories, protected Apple .AAE sidecars, apply/undo (folders recreated); health baseline, bit-flip damage, edit detection; compare read-only + two-way sync + undo; overlapping folder rejection; verified copy failure leaves nothing; never overwrites; crash reconciliation; cancellation; Empty Recovery.</td></tr>
-  <tr><td><code>test_video.py</code> + <code>test_story.py</code></td><td>40</td><td>Compression verification, source preservation,
+  <tr><td><code>test_video.py</code> + <code>test_story.py</code></td><td>41</td><td>Compression verification, source preservation,
     no overwrite, target size and cancellation; 10,000-row lazy UI loading, bounded/incremental probes and selection
     handoff; story sizes, templates, panorama seams, EXIF orientation, story-video duration and resolution.</td></tr>
   <tr><td><code>test_safety.py</code></td><td>21</td><td>Unplugged drive, unreadable folder, real deletions still removed, undo keeps ids/thumbnails/fingerprints, organise undo keeps ids, Empty Recovery drops parked rows, cross-process lock, re-entrant lock released on close, schema migration from v1, refusal of newer catalogues, paths over 260 characters.</td></tr>
@@ -939,8 +966,8 @@ LGPL (Qt, libheif) and GPL (FFmpeg/x264) binaries — include the licence texts 
 <h2>Known limitations</h2>
 <ul>
   <li>Blur thresholds and best-shot weights were calibrated on generated images; real libraries may need tuning.</li>
-  <li>Photos is paged, but several analysis/album pages can still load whole groups. Similarity and face-centre merging
-      remain quadratic/dense in their worst cases; preview decoding still runs on the UI thread.</li>
+  <li>File/group rendering is bounded and original-media previews are asynchronous. Similarity and face-centre
+      merging remain quadratic/dense in their worst cases; background computation can still be expensive.</li>
   <li>RAW previews depend on what Pillow can decode; RAW files are still catalogued and de-duplicated.</li>
   <li>Network shares are untested; cross-volume moves fall back to verified copy + delete.</li>
   <li>The packaged app is unsigned (SmartScreen will warn) and ≈340 MB.</li>
@@ -950,7 +977,10 @@ LGPL (Qt, libheif) and GPL (FFmpeg/x264) binaries — include the licence texts 
       person decades apart, or young children, may form separate groups (join them by name).</li>
   <li>Place names are the nearest town with 15,000+ people (or the region); small villages are not named.</li>
   <li>Similar-video matching relies on visual frames; videos with near-identical static content can score close to the threshold.</li>
-  <li>One root per library; multi-folder/offline-drive catalogues remain deferred. Absolute journal paths can complicate Undo after drive-letter changes.</li>
+  <li>The catalogue home must stay available; only added media roots support offline cached browsing.
+      Reconnect requires the source identity marker. Existing standalone catalogues are not automatically merged.</li>
+  <li>Companion matching is inferred from same-folder names. Arbitrarily renamed components and Apple asset-ID
+      matching are not covered; Apple sidecar edits are not rendered. Unique parts require explicit review.</li>
   <li>Natural Earth boundaries are approximate; map coverage is not authoritative country classification and has no street-level tiles.</li>
   <li>Reset resumes supported interrupted work but cannot repair physical drive damage or unreadable SQLite storage. Keep backups.</li>
 </ul>

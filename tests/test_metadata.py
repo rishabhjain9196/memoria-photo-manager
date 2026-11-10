@@ -204,6 +204,7 @@ def test_backfill_cancel_resumes_only_uncommitted_rows(tmp_path, monkeypatch):
 
 
 def test_metadata_filter_and_preview_ui(mixed, tmp_path):
+    import time
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     os.environ.setdefault("QT_QPA_FONTDIR", r"C:\Windows\Fonts")
     from PySide6.QtGui import QFont
@@ -224,6 +225,11 @@ def test_metadata_filter_and_preview_ui(mixed, tmp_path):
     page.show()
     page.refresh()
     page.sort.setCurrentIndex(page.sort.findData("duration_desc"))
+    deadline = time.monotonic() + 10
+    while page._query.running and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(.005)
+    app.processEvents()
     assert page.rows[0]["id"] == 2 and page.rows[-1]["id"] == 5
     page.preview.show_row(page.rows[0])
     assert "60 fps" in page.preview.facts.text() and "No audio stream" in page.preview.facts.text()
@@ -240,6 +246,11 @@ def test_metadata_filter_and_preview_ui(mixed, tmp_path):
     dlg.ranges["bitrate"][1].setValue(2)
     dlg.metadata_text["audio_codec"].setCurrentIndex(dlg.metadata_text["audio_codec"].findData(""))
     page.open_filters(dlg.selected())
+    deadline = time.monotonic() + 10
+    while page._query.running and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(.005)
+    app.processEvents()
     assert [row["id"] for row in page.rows] == [2]
     dlg.show()
     dlg.tabs.setCurrentIndex(1)
@@ -250,6 +261,7 @@ def test_metadata_filter_and_preview_ui(mixed, tmp_path):
     app.processEvents()
     assert dlg.grab().save(str(tmp_path / "metadata-photo-filters.png"))
     dlg.close()
+    page.shutdown()
     page.close()
     dlg.deleteLater()
     page.deleteLater()

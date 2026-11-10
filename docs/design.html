@@ -111,7 +111,7 @@ files — so the app must make proof easy to see.</p>
       <li>Replacing a full photo editor or a DAM such as digiKam/Lightroom.</li>
       <li>Cloud sync, accounts or sharing to social networks directly.</li>
       <li>Automatic, unattended deletion of anything.</li>
-      <li>Unified multi-root libraries in this update; one root and its subfolders remain the library boundary.</li>
+      <li>Automatic merging of independent catalogues or operation without access to the catalogue home.</li>
       <li>Reverse-geocoding through online services (the old CLI did this; it leaked locations to a third party).</li>
     </ul></td></tr>
 </table>
@@ -529,8 +529,9 @@ guarantee on arbitrary drives or files.</p>
     close to the threshold; groups are suggestions and nothing is pre-applied.</td></tr>
   <tr><td>Haar face detection is basic</td><td>Faces only nudge the best-shot score (12% weight).</td></tr>
   <tr><td>Recovery uses disk space</td><td>Size is shown on Overview and History; emptying is explicit.</td></tr>
-  <tr><td>Very large libraries (&gt;100k)</td><td>Photos is paged, but other tools can load whole groups.
-    Similarity is quadratic and face-centre merging can allocate a large dense matrix.</td></tr>
+  <tr><td>Very large libraries (&gt;100k)</td><td>Rendering and worker queues are bounded; group selections explicitly
+    span pages, while file selections are page-scoped. Similarity is still quadratic and face-centre merging can
+    allocate a large dense matrix.</td></tr>
   <tr><td>Network drives</td><td>Untested; moves across volumes fall back to verified copy + delete of the source.</td></tr>
   <tr><td>Packaged size</td><td>Historically around 340 MB, dominated by Qt, OpenCV and FFmpeg.
     This source update has not been validated as a newly built standalone executable.</td></tr>
@@ -542,7 +543,7 @@ guarantee on arbitrary drives or files.</p>
 <ol>
   <li>Calibrate blur and best-shot scoring on real libraries (with an opt-in local feedback log).</li>
   <li>Screen-reader names for grid items.</li>
-  <li>Unified multi-folder libraries and offline-drive catalogue support; not implemented by Insights' folder filter.</li>
+  <li>Further multi-root portability beyond the currently required catalogue home and identity-verified reconnect.</li>
   <li>Screenshot text search (local OCR) in Photos &amp; videos.</li>
   <li>Backup restore drill: restore a sample from a backup and prove it matches.</li>
   <li>Optional Rust (PyO3) extension for hashing and similarity if profiling shows a need.</li>

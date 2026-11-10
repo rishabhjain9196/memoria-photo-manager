@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from .actions import Action
+from .roots import key_for, split_key
 from .db import Library
 from .progress import Progress
 
@@ -60,7 +61,7 @@ def plan_organize(lib: Library, pattern_id: str = "year_month", include_uncertai
     """
     progress = progress or Progress()
     progress.update(0, 0, "Reading dates…")
-    rows = [dict(r) for r in lib.files("kind!='other' AND taken_at IS NOT NULL AND error IS NULL AND size>0")
+    rows = [dict(r) for r in lib.readable_files("kind!='other' AND taken_at IS NOT NULL AND error IS NULL AND size>0")
             if not r["name"].startswith("._")]
     taken: set[str] = {r["rel_path"].lower() for r in lib.files()}
     items, in_place, uncertain = [], 0, 0
@@ -72,6 +73,7 @@ def plan_organize(lib: Library, pattern_id: str = "year_month", include_uncertai
             continue
         dt = datetime.fromisoformat(r["taken_at"])
         folder = os.path.join(root_subfolder, folder_for(dt, pattern_id)) if root_subfolder else folder_for(dt, pattern_id)
+        folder = key_for(r["root_id"], folder)
         if r["folder"].lower() == folder.lower():
             in_place += 1
             continue
@@ -123,4 +125,5 @@ def empty_folders_after(lib: Library, items: list[OrganizeItem]) -> list[str]:
         while folder:
             real.setdefault(folder.lower(), folder)
             folder = os.path.dirname(folder)
-    return sorted((real[c] for c in candidates if remaining.get(c, 0) == 0), key=lambda f: (-f.count(os.sep), f))
+    return sorted((real[c] for c in candidates if remaining.get(c, 0) == 0 and split_key(real[c])[1]),
+                  key=lambda f: (-f.count(os.sep), f))

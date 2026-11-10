@@ -1,15 +1,16 @@
 """Similar photos & bursts, similar videos — each with an explained best pick — and a blurry-photo review."""
 from __future__ import annotations
 
+from html import escape
 from pathlib import PurePath
 from typing import Callable
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QComboBox, QListWidget, QListWidgetItem, QSplitter, QStackedWidget, QTabWidget, QWidget
 
 from ...engine import similar
 from .. import theme
+from ..tasks import LatestCall
 from ..widgets import (Banner, EmptyState, PhotoGrid, Preview, Tile, button, fmt_duration, fmt_n, fmt_size, hbox,
                        label, vbox)
 from .base import Page, recovery_note, recycle_summary
@@ -18,6 +19,9 @@ try:
     from ...engine import videosim
 except ImportError:  # pragma: no cover
     videosim = None
+
+GROUP_PAGE = 200
+MEMBER_PAGE = 500
 
 
 class GroupReview(QWidget):
@@ -30,6 +34,9 @@ class GroupReview(QWidget):
         self.noun, self.cache_key, self.finder = noun, cache_key, finder
         self.groups: list[similar.SimilarGroup] = []
         self.marked: dict[int, set[int]] = {}
+        self.group_offset = self.member_offset = 0
+        self._group_index = None
+        self._group_selections = {}
         self.find_btn = button(find_label, "primary", self.find)
         self.stack = QStackedWidget()
         self.empty = EmptyState("\uE734", empty_title, empty_text, button(find_label, "primary", self.find))
@@ -45,6 +52,12 @@ class GroupReview(QWidget):
         self.glist.setIconSize(QSize(56, 56))
         self.glist.setFixedWidth(300)
         self.glist.currentRowChanged.connect(self._show_group)
+        self.group_scope = label("", "small", wrap=True)
+        self.group_previous = button("Previous groups", on_click=lambda: self._group_step(-1))
+        self.group_next = button("Next groups", on_click=lambda: self._group_step(1))
+        left = QWidget()
+        left.setLayout(vbox(self.glist, self.group_scope, hbox(self.group_previous, self.group_next)))
+        left.setFixedWidth(320)
         self.grid = PhotoGrid(self.ctx.thumbs, cell=176, captions=2)
         self.grid.setSelectionMode(PhotoGrid.SelectionMode.SingleSelection)
         self.grid.current_item.connect(self._file_selected)
@@ -55,12 +68,17 @@ class GroupReview(QWidget):
         self.g_reason = label("", "", wrap=True)
         self.g_reason.setStyleSheet(f"color: {theme.OK};")
         hint = label(f"Nothing is selected automatically. Ticked {noun}s will move to Recovery. Space toggles the "
-                     "selected one.", "small", wrap=True)
+                     "selected one. Making a best pick marks the other members of this group across all pages.",
+                     "small", wrap=True)
         self.preview = Preview(self.ctx, 300)
+        self.member_scope = label("", "small", wrap=True)
+        self.member_previous = button("Previous files", on_click=lambda: self._member_step(-1))
+        self.member_next = button("Next files", on_click=lambda: self._member_step(1))
         right = QWidget()
-        right.setLayout(vbox(hbox(self.g_title, None, self.best_btn), self.g_reason, hint, self.grid, spacing=6))
+        right.setLayout(vbox(hbox(self.g_title, None, self.best_btn), self.g_reason, hint, self.grid,
+                              hbox(self.member_scope, None, self.member_previous, self.member_next), spacing=6))
         split = QSplitter()
-        split.addWidget(self.glist)
+        split.addWidget(left)
         split.addWidget(right)
         split.addWidget(self.preview)
         split.setStretchFactor(1, 1)
@@ -94,10 +112,21 @@ class GroupReview(QWidget):
 
     def find(self) -> None:
         lib = self.ctx.library
-        self.page.run(f"Finding similar {self.noun}s", lambda p: self.finder(lib, p), self._show)
+        generation, finder = self.ctx.generation, self.finder
+        def work(progress):
+            try:
+                return finder(lib, progress)
+            finally:
+                lib.close_thread()
+        self.page.run(f"Finding similar {self.noun}s", work,
+                      lambda groups: self._show(groups) if (lib, generation) ==
+                      (self.ctx.library, self.ctx.generation) else None)
 
     def _show(self, groups) -> None:
         self.groups = groups
+        self.group_offset = self.member_offset = 0
+        self._group_index = None
+        self._group_selections.clear()
         self.marked = {i: set() for i, g in enumerate(groups)}
         self.page.update_badge()
         if not groups:
@@ -109,51 +138,86 @@ class GroupReview(QWidget):
             self.t_second.set(f"{sum(g.burst for g in groups):,}")
         else:
             self.t_second.set(fmt_size(sum(g.reclaimable for g in groups)))
+        self._fill_groups()
+        self._update_summary()
+
+    def _fill_groups(self, selected=0):
+        self.glist.blockSignals(True)
         self.glist.clear()
-        for g in groups:
+        for g in self.groups[self.group_offset:self.group_offset + GROUP_PAGE]:
             best = next(f for f in g.files if f["id"] == g.best_id)
             kind = "Burst" if g.burst else "Similar"
             it = QListWidgetItem(f"{kind} · {len(g.files)} {self.noun}s\n{best['name']}")
-            pm = self.ctx.thumbs.get(best["id"])
-            if pm:
-                it.setIcon(QIcon(pm))
             self.glist.addItem(it)
-        self.glist.setCurrentRow(0)
-        self._update_summary()
+        self.glist.setCurrentRow(min(selected, self.glist.count() - 1))
+        self.glist.blockSignals(False)
+        self._show_group(self.glist.currentRow())
+        end = self.group_offset + self.glist.count()
+        self.group_scope.setText(f"Groups {self.group_offset + 1:,}–{end:,} of {len(self.groups):,}. "
+                                 "Bulk choices apply across all pages.")
+        self.group_previous.setEnabled(self.group_offset > 0)
+        self.group_next.setEnabled(end < len(self.groups))
+
+    def _group_step(self, delta):
+        if not self.groups:
+            return
+        self._group_selections[self.group_offset] = self.glist.currentRow()
+        self.group_offset = max(0, min((len(self.groups) - 1) // GROUP_PAGE * GROUP_PAGE,
+                                      self.group_offset + delta * GROUP_PAGE))
+        self._fill_groups(self._group_selections.get(self.group_offset, 0))
+
+    def _index(self):
+        return self.group_offset + self.glist.currentRow() if self.glist.currentRow() >= 0 else -1
+
+    def _member_step(self, delta):
+        index = self._index()
+        if 0 <= index < len(self.groups):
+            self.member_offset = max(0, min((len(self.groups[index].files) - 1) // MEMBER_PAGE * MEMBER_PAGE,
+                                           self.member_offset + delta * MEMBER_PAGE))
+            self._show_group(self.glist.currentRow())
 
     # ------------------------------------------------------------------------ group view
     def _show_group(self, row: int) -> None:
+        row += self.group_offset
         if not (0 <= row < len(self.groups)):
             return
+        if self._group_index != row:
+            self.member_offset = 0
+        self._group_index = row
         g = self.groups[row]
         marked = self.marked[row]
         items = []
-        for f in g.files:
+        for f in g.files[self.member_offset:self.member_offset + MEMBER_PAGE]:
             best = f["id"] == g.best_id
             items.append({**f, "caption": f["name"], "badge": "BEST" if best else "", "badge_kind": "best",
                           "checked": f["id"] in marked, "dim_unchecked": False,
                           "sub": g.reasons.get(f["id"], "").replace("Best pick: ", "").replace("Weaker: ", ""),
                           "sub_color": theme.OK if best else theme.MUTED,
-                          "tip": f"{f['rel_path']}\n{g.reasons.get(f['id'], '')}"})
+                          "tip": f"{self.ctx.library.display_path(f['rel_path'])}\n{g.reasons.get(f['id'], '')}"})
         self.grid.set_items(items)
         kind = "Burst" if g.burst else f"Similar {self.noun}s"
         self.g_title.setText(f"{kind}: {len(g.files)} {self.noun}s")
         self.g_reason.setText("✓ " + g.reasons[g.best_id])
         self.best_btn.setEnabled(False)
         self.preview.clear()
+        end = self.member_offset + len(items)
+        self.member_scope.setText(f"Files {self.member_offset + 1:,}–{end:,} of {len(g.files):,}. "
+                                  "Ticks persist across pages.")
+        self.member_previous.setEnabled(self.member_offset > 0)
+        self.member_next.setEnabled(end < len(g.files))
 
     def _file_selected(self, it: dict) -> None:
-        row = self.glist.currentRow()
+        row = self._index()
         g = self.groups[row] if 0 <= row < len(self.groups) else None
         extra = ""
         if g:
             color = theme.OK if it["id"] == g.best_id else theme.MUTED
-            extra = f"<span style='color:{color}'>{g.reasons.get(it['id'], '')}</span>"
+            extra = f"<span style='color:{color}'>{escape(g.reasons.get(it['id'], ''))}</span>"
             self.best_btn.setEnabled(it["id"] != g.best_id)
         self.preview.show_row(it, extra)
 
     def _make_best(self) -> None:
-        row = self.glist.currentRow()
+        row = self._index()
         sel = self.grid.selected_items()
         if row < 0 or not sel:
             return
@@ -161,13 +225,15 @@ class GroupReview(QWidget):
         g.best_id = sel[0]["id"]
         g.reasons[g.best_id] = "Best pick: chosen by you"
         self.marked[row] = {f["id"] for f in g.files if f["id"] != g.best_id}
-        self._show_group(row)
+        self._show_group(self.glist.currentRow())
         self._update_summary()
 
     def _checks_changed(self) -> None:
-        row = self.glist.currentRow()
+        row = self._index()
         if 0 <= row < len(self.groups):
-            self.marked[row] = {it["id"] for it in self.grid.model_.checked()}
+            visible = {it["id"] for it in self.grid.items()}
+            self.marked[row].difference_update(visible)
+            self.marked[row].update(it["id"] for it in self.grid.model_.checked())
         self._update_summary()
 
     def _mark_all(self, best_only: bool) -> None:
@@ -180,6 +246,8 @@ class GroupReview(QWidget):
         rows = []
         for i, g in enumerate(self.groups):
             ids = self.marked.get(i, set())
+            if not ids:
+                continue
             if len(ids) >= len(g.files):
                 ids = ids - {g.best_id}   # never move every item of a group
             rows.extend(f for f in g.files if f["id"] in ids)
@@ -189,8 +257,8 @@ class GroupReview(QWidget):
         rows = self._planned_rows()
         size = sum(r["size"] for r in rows)
         self.t_marked.set(f"{len(rows):,}", fmt_size(size))
-        self.summary.setText(f"{fmt_n(len(rows), self.noun)} ({fmt_size(size)}) will move to Recovery"
-                             if rows else "Nothing selected")
+        self.summary.setText((f"{fmt_n(len(rows), self.noun)} ({fmt_size(size)}) will move to Recovery"
+                              if rows else "Nothing selected") + " · Across all pages")
         self.apply_btn.setEnabled(bool(rows) and not self.page.busy)
 
     def apply(self) -> None:
@@ -236,6 +304,27 @@ class SimilarPage(Page):
             self.tabs.addTab(self.videos, "Similar videos")
         self.tabs.addTab(self._build_blurry(), "Blurry photos")
         self.body.addWidget(self.tabs, 1)
+        self._closed = False
+        self._blurry_rows = []
+        self._blurry_marked = set()
+        self._blurry_offset = 0
+        self.blurry_bg = LatestCall(self)
+        self.blurry_bg.result.connect(self._blurry_loaded)
+        self.blurry_bg.failed.connect(lambda error: self.b_count.setText(f"Could not load blurry photos: {error}"))
+
+    def _mark_stale(self):
+        self.blurry_bg.invalidate()
+        for review in self.reviews():
+            review.preview.clear()
+        self.bpreview.clear()
+        super()._mark_stale()
+
+    def shutdown(self):
+        self._closed = True
+        self.blurry_bg.wait()
+        self.bpreview.shutdown()
+        for review in self.reviews():
+            review.preview.shutdown()
 
     # compatibility helpers used by tools/ui_screenshots.py and tests
     @property
@@ -256,7 +345,7 @@ class SimilarPage(Page):
     def on_busy_changed(self, busy: bool) -> None:
         for r in self.reviews():
             r.on_busy_changed(busy)
-        self.b_apply.setEnabled(not busy and bool(self.bgrid.model_.checked()))
+        self.b_apply.setEnabled(not busy and bool(self._blurry_marked))
 
     def update_badge(self) -> None:
         self.ctx.set_badge("similar", sum(sum(len(g.files) - 1 for g in r.groups) for r in self.reviews()))
@@ -276,8 +365,10 @@ class SimilarPage(Page):
         self.b_count = label("", "muted")
         self.b_summary_lbl = label("")
         self.b_apply = button("Move ticked to Recovery", "primary", self.apply_blurry)
-        sel_all = button("Tick all", "link", lambda: self.bgrid.model_.set_all_checked(True))
-        sel_none = button("Untick all", "link", lambda: self.bgrid.model_.set_all_checked(False))
+        sel_all = button("Tick all pages", "link", lambda: self._b_mark_all(True))
+        sel_none = button("Untick all pages", "link", lambda: self._b_mark_all(False))
+        self.b_previous = button("Previous", on_click=lambda: self._b_step(-1))
+        self.b_next = button("Next", on_click=lambda: self._b_step(1))
         split = QSplitter()
         split.addWidget(self.bgrid)
         split.addWidget(self.bpreview)
@@ -287,28 +378,67 @@ class SimilarPage(Page):
         w.setLayout(vbox(hbox(label("Sensitivity", "muted"), self.sens, 12, self.b_count, None),
                          Banner("Blur is measured from fine detail. Night shots, fog or intentionally soft photos can "
                                 "appear here too — nothing is ticked until you choose.", "info"),
-                         split, hbox(sel_all, sel_none, 12, self.b_summary_lbl, None, self.b_apply),
+                         split, hbox(self.b_previous, self.b_next, None),
+                         hbox(sel_all, sel_none, 12, self.b_summary_lbl, None, self.b_apply),
                          spacing=10, margins=(0, 10, 0, 0)))
         return w
 
     def find_blurry(self) -> None:
         if self.lib is None:
             return
-        rows = similar.find_blurry(self.lib, similar.BLUR_PRESETS[self.sens.currentData()])
-        items = [{**r, "caption": r["name"], "checked": False,
-                  "sub": f"Sharpness {r['sharpness']:.0f} · {PurePath(r['rel_path']).parent}"} for r in rows]
+        lib, generation, threshold = self.lib, self.ctx.generation, similar.BLUR_PRESETS[self.sens.currentData()]
+        self._blurry_rows, self._blurry_marked, self._blurry_offset = [], set(), 0
+        self.b_apply.setEnabled(False)
+        self.bpreview.clear()
+        self.b_count.setText("Finding blurry photos…")
+        self.bgrid.set_items([])
+        def work():
+            try:
+                return lib, generation, similar.find_blurry(lib, threshold)
+            finally:
+                lib.close_thread()
+        self.blurry_bg.call(work)
+
+    def _blurry_loaded(self, result):
+        lib, generation, rows = result
+        if self._closed or (lib, generation) != (self.lib, self.ctx.generation):
+            return
+        self._blurry_rows, self._blurry_marked, self._blurry_offset = rows, set(), 0
+        self._b_fill()
+
+    def _b_fill(self):
+        rows = self._blurry_rows[self._blurry_offset:self._blurry_offset + MEMBER_PAGE]
+        items = [{**r, "caption": r["name"], "checked": r["id"] in self._blurry_marked,
+                  "sub": f"Sharpness {r['sharpness']:.0f} · {self.lib.display_path(r['folder'])}"} for r in rows]
         self.bgrid.set_items(items)
-        self.b_count.setText(f"{fmt_n(len(rows), 'photo')} found")
+        end = self._blurry_offset + len(rows)
+        self.b_count.setText(f"Showing {self._blurry_offset + 1 if rows else 0:,}–{end:,} of "
+                             f"{len(self._blurry_rows):,} photos")
+        self.b_previous.setEnabled(self._blurry_offset > 0)
+        self.b_next.setEnabled(end < len(self._blurry_rows))
+        self.bpreview.clear()
         self._b_summary()
 
+    def _b_step(self, delta):
+        self._blurry_offset = max(0, min((max(1, len(self._blurry_rows)) - 1) // MEMBER_PAGE * MEMBER_PAGE,
+                                        self._blurry_offset + delta * MEMBER_PAGE))
+        self._b_fill()
+
+    def _b_mark_all(self, checked):
+        self._blurry_marked = {row["id"] for row in self._blurry_rows} if checked else set()
+        self._b_fill()
+
     def _b_summary(self) -> None:
-        rows = self.bgrid.model_.checked()
+        self._blurry_marked.difference_update(row["id"] for row in self.bgrid.items())
+        self._blurry_marked.update(row["id"] for row in self.bgrid.model_.checked())
+        rows = [row for row in self._blurry_rows if row["id"] in self._blurry_marked]
         size = sum(r["size"] for r in rows)
-        self.b_summary_lbl.setText(f"{fmt_n(len(rows), 'photo')} ({fmt_size(size)}) ticked" if rows else "Nothing ticked")
+        self.b_summary_lbl.setText((f"{fmt_n(len(rows), 'photo')} ({fmt_size(size)}) ticked" if rows else
+                                    "Nothing ticked") + " · Across all pages")
         self.b_apply.setEnabled(bool(rows) and not self.busy)
 
     def apply_blurry(self) -> None:
-        rows = self.bgrid.model_.checked()
+        rows = [row for row in self._blurry_rows if row["id"] in self._blurry_marked]
         size = sum(r["size"] for r in rows)
         self.apply_actions(
             "similar", "Move blurry photos to Recovery", similar.plan_recycle(self.lib, rows, "Blurry"),

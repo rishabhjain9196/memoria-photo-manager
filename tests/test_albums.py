@@ -143,7 +143,7 @@ def test_suggest_button_uses_selected_mode_and_displays_results(library, monkeyp
         assert not slot_errors, slot_errors
         assert started == ["Suggesting albums"]
         deadline = time.monotonic() + 10
-        while runner.busy and time.monotonic() < deadline:
+        while (runner.busy or page._suggestion_query.running) and time.monotonic() < deadline:
             app.processEvents()
             time.sleep(.01)
         app.processEvents()
@@ -163,6 +163,7 @@ def test_suggest_button_uses_selected_mode_and_displays_results(library, monkeyp
         runner.cancel()
         runner.wait()
         app.processEvents()
+        page.shutdown()
         page.close()
         page.deleteLater()
         app.processEvents()

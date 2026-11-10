@@ -227,7 +227,7 @@ def test_real_tasks_route_once_keep_undo_and_hide_private_details(qt, tmp_path, 
         apply([actions.Action("copy", str(source), str(output), size=source.stat().st_size + 1)])
         expect("operation_partial", 1)
         with monkeypatch.context() as patch:
-            patch.setattr(actions, "apply", lambda *args: actions.BatchResult("", cancelled=True))
+            patch.setattr(actions, "apply", lambda *args, **kwargs: actions.BatchResult("", cancelled=True))
             apply([actions.Action("copy", str(source), str(output))])
             expect("task_cancelled")
 

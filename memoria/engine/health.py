@@ -35,6 +35,7 @@ class HealthReport:
     problems: list[dict] = field(default_factory=list)   # rows with "status" and "detail"
     checked: int = 0
     bytes: int = 0
+    offline_roots: int = 0
 
 
 def _decode_ok(path) -> Optional[str]:
@@ -53,8 +54,9 @@ def _decode_ok(path) -> Optional[str]:
 def run_health(lib: Library, progress: Optional[Progress] = None, decode_images: bool = True) -> HealthReport:
     progress = progress or Progress()
     scan(lib, progress)
-    rows = [dict(r) for r in lib.files()]
+    rows = [dict(r) for r in lib.readable_files()]
     rep = HealthReport(counts={k: 0 for k in STATUS_LABEL})
+    rep.offline_roots = sum(not source["online"] for source in lib.roots())
     missing = lib.missing()
     rep.counts["missing"] = len(missing)
     rep.problems.extend({**r, "status": "missing", "detail": "Not found at its last known location. "
@@ -64,6 +66,7 @@ def run_health(lib: Library, progress: Optional[Progress] = None, decode_images:
 
     def check(r):
         p = lib.abspath(r["rel_path"])
+        lib.check_path(p)
         h = full_hash(p)
         if h is None:
             return r, "unreadable", "File could not be read", None

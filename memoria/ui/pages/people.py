@@ -3,21 +3,20 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QInputDialog, QLineEdit, QListView, QListWidget, QListWidgetItem,
                                QMenu, QSplitter, QStackedWidget, QWidget)
 
 from ...engine import albums, faces
+from .. import people_queries as queries
+from ..tasks import LatestCall
 from ..widgets import (Banner, EmptyState, PhotoGrid, Preview, Viewer, button, confirm, fmt_n, hbox, label, vbox)
 from .base import Page
 
 TRUST = ("<b>Private by design.</b> Faces are found and recognised on this computer by small open models. Face "
          "data stays in this library's catalogue — nothing is uploaded — and photos are never changed. "
          "You can forget all face data at any time.")
-MAX_FACES = 400
-
-
 class PeoplePage(Page):
     title = "People"
     subtitle = "Find the people in your photos, name them, and see every photo someone is in."
@@ -36,6 +35,7 @@ class PeoplePage(Page):
         self.header_actions.addWidget(self.more_btn)
         self.header_actions.addWidget(self.find_btn)
         self.groups: list[faces.Group] = []
+        self.shown = []
         self.min_photos = 2
         self.mode = "person"          # "person" | "similar"
 
@@ -57,12 +57,16 @@ class PeoplePage(Page):
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search people")
         self.search.setClearButtonEnabled(True)
-        self.search.textChanged.connect(self._fill_list)
+        self.search.textChanged.connect(self._search_changed)
         self.list = QListWidget()
         self.list.setIconSize(QSize(56, 56))
         self.list.currentRowChanged.connect(self._show_group)
         left = QWidget()
-        left.setLayout(vbox(self.search, self.list, spacing=8))
+        self.group_scope = label("", "small", wrap=True)
+        self.group_prev = button("Previous", on_click=lambda: self._group_step(-1))
+        self.group_next = button("Next", on_click=lambda: self._group_step(1))
+        left.setLayout(vbox(self.search, self.list, self.group_scope,
+                           hbox(self.group_prev, self.group_next), spacing=8))
         left.setFixedWidth(280)
 
         self.g_title = label("", "h2")
@@ -92,11 +96,18 @@ class PeoplePage(Page):
         self.grid.current_item.connect(lambda it: self.preview.show_row(it))
         self.grid.activated_item.connect(self._view)
         self.preview = Preview(ctx, 280)
+        self.photo_scope = label("", "small", wrap=True)
+        self.photo_prev = button("Previous photos", on_click=lambda: self._content_step("photo", -1))
+        self.photo_next = button("Next photos", on_click=lambda: self._content_step("photo", 1))
+        self.face_scope = label("", "small", wrap=True)
+        self.face_prev = button("Previous faces", on_click=lambda: self._content_step("face", -1))
+        self.face_next = button("Next faces", on_click=lambda: self._content_step("face", 1))
         detail = QWidget()
         detail.setLayout(vbox(hbox(self.back_btn, self.g_title, None), self.g_info,
                               hbox(self.name_btn, self.merge_btn, self.album_btn, self.hide_btn, None),
                               hbox(label("<b>Faces</b>"), None, self.like_btn, self.not_btn), self.faces,
-                              self.grid, spacing=6))
+                              hbox(self.face_scope, None, self.face_prev, self.face_next),
+                              self.grid, hbox(self.photo_scope, None, self.photo_prev, self.photo_next), spacing=6))
         split = QSplitter()
         split.addWidget(left)
         split.addWidget(detail)
@@ -110,27 +121,71 @@ class PeoplePage(Page):
         self.results = results
         self.stack.addWidget(results)
         self.body.addWidget(self.stack, 1)
+        self._closed = False
+        self.group_offset = self.photo_offset = self.face_offset = 0
+        self.group_total = 0
+        self._covers = {}
+        self._similar_rows = []
+        self._select_name = None
+        self.bg, self.contents_bg = LatestCall(self), LatestCall(self)
+        self.bg.result.connect(self._groups_loaded)
+        self.bg.failed.connect(self._failed)
+        self.contents_bg.result.connect(self._contents_loaded)
+        self.contents_bg.failed.connect(self._failed)
+        self.search_timer = QTimer(self)
+        self.search_timer.setSingleShot(True)
+        self.search_timer.setInterval(180)
+        self.search_timer.timeout.connect(self.refresh)
+        ctx.library_opened.connect(self._invalidate)
+        ctx.library_modified.connect(self._invalidate)
 
     # ------------------------------------------------------------------ lifecycle
     def refresh(self) -> None:
+        if self._closed or self.lib is None:
+            return
         if not faces.available():
             self.stack.setCurrentWidget(self.empty)
             return
-        st = faces.status(self.lib)
+        lib, generation = self.lib, self.ctx.generation
+        minimum, search, offset = self.min_photos, self.search.text(), self.group_offset
+        self.stack.setCurrentWidget(self.results)
+        self.status.setText("Reading people…")
+        self.contents_bg.invalidate()
+        self.list.setEnabled(False)
+        self.grid.set_items([])
+        self.faces.clear()
+        self.preview.clear()
+        def work():
+            try:
+                return (lib, generation, queries.group_page(lib, minimum, search, offset))
+            finally:
+                lib.close_thread()
+        self.bg.call(work)
+
+    def _groups_loaded(self, result):
+        lib, generation, data = result
+        if self._closed or (lib, generation) != (self.lib, self.ctx.generation):
+            return
+        st = data["status"]
         scanned = st["photos"] - st["pending"]
         if scanned == 0 and st["faces"] == 0:
             self.stack.setCurrentWidget(self.empty)
             return
-        self.groups = faces.groups(self.lib, self.min_photos)
+        self.groups, self._covers = data["groups"], data["covers"]
+        self.group_total, self.group_offset = data["total"], data["offset"]
+        self.list.setEnabled(True)
         self._update_status(st)
-        if not self.groups:
+        if not self.groups and not self.search.text().strip():
             self.stack.setCurrentWidget(self.none)
             return
         self.stack.setCurrentWidget(self.results)
         self._fill_list()
 
     def _update_status(self, st: Optional[dict] = None) -> None:
-        st = st or faces.status(self.lib)
+        st = st or getattr(self, "_status", {})
+        self._status = st
+        if not st:
+            return
         text = (f"{fmt_n(st['photos'] - st['pending'], 'photo')} checked · {fmt_n(st['faces'], 'face')} · "
                 f"{fmt_n(st['people'], 'person named', 'people named')}")
         if st["pending"]:
@@ -142,7 +197,12 @@ class PeoplePage(Page):
 
     def find(self) -> None:
         lib = self.lib
-        self.run("Finding people", lambda p: faces.scan(lib, p), self._found)
+        def work(progress):
+            try:
+                return faces.scan(lib, progress)
+            finally:
+                lib.close_thread()
+        self.run("Finding people", work, self._found)
 
     def _found(self, res: faces.ScanResult) -> None:
         self.refresh()
@@ -156,25 +216,34 @@ class PeoplePage(Page):
         return g.name or "Unnamed person"
 
     def _fill_list(self) -> None:
-        q = self.search.text().strip().lower()
         cur = self._current()
         key = cur.key if cur else None
         self.list.blockSignals(True)
         self.list.clear()
-        self.shown = [g for g in self.groups if not q or q in (g.name or "unnamed person").lower()]
+        self.shown = self.groups
         select = 0
         for i, g in enumerate(self.shown):
             sub = fmt_n(g.photos, "photo") + ("" if g.named else " · click Name… to name")
             it = QListWidgetItem(f"{self._label(g)}\n{sub}")
-            pm = self._face_pixmap(g.cover)
-            if pm:
-                it.setIcon(QIcon(pm))
+            image = self._covers.get(g.cover)
+            if image is not None and not image.isNull():
+                it.setIcon(QIcon(QPixmap.fromImage(image)))
             self.list.addItem(it)
             if g.key == key:
                 select = i
+            if self._select_name and (g.name or "").casefold() == self._select_name.casefold():
+                select = i
+        self._select_name = None
+        self.group_scope.setText(f"People {self.group_offset + 1 if self.shown else 0:,}–"
+                                 f"{self.group_offset + len(self.shown):,} of {self.group_total:,}. "
+                                 "Search finds people across all pages.")
+        self.group_prev.setEnabled(self.group_offset > 0)
+        self.group_next.setEnabled(self.group_offset + len(self.shown) < self.group_total)
         self.list.blockSignals(False)
         if self.shown:
+            self.list.blockSignals(True)
             self.list.setCurrentRow(select)
+            self.list.blockSignals(False)
             self._show_group(select)
         else:
             self.grid.set_items([])
@@ -182,13 +251,15 @@ class PeoplePage(Page):
             self.g_title.setText("No one matches")
             self.g_info.setText("")
 
-    def _face_pixmap(self, face_id: int) -> Optional[QPixmap]:
-        data = faces.face_thumb(self.lib, face_id) if face_id else None
-        if not data:
-            return None
-        pm = QPixmap()
-        pm.loadFromData(data)
-        return pm
+    def _search_changed(self):
+        self.group_offset = 0
+        self.bg.invalidate()
+        self.contents_bg.invalidate()
+        self.search_timer.start()
+
+    def _group_step(self, delta):
+        self.group_offset = max(0, self.group_offset + delta * queries.GROUP_PAGE)
+        self.refresh()
 
     def _current(self) -> Optional[faces.Group]:
         row = self.list.currentRow()
@@ -200,6 +271,8 @@ class PeoplePage(Page):
         if g is None:
             return
         self.mode = "person"
+        self._similar_rows = []
+        self.photo_offset = self.face_offset = 0
         self.back_btn.setVisible(False)
         self.g_title.setText(self._label(g))
         self.g_info.setText(
@@ -213,20 +286,111 @@ class PeoplePage(Page):
         others = [o for o in self.groups if o.named and o.key != g.key]
         for o in others:
             self.merge_menu.addAction(o.name, lambda o=o: self.merge_into(o))
-        self.merge_btn.setEnabled(bool(others))
+        self.merge_menu.addAction("Choose another name…", self.name_group)
+        self.merge_btn.setEnabled(True)
+        self._load_contents()
+
+    def _load_contents(self):
+        g = self._current()
+        if g is None or self.lib is None:
+            return
+        lib, generation = self.lib, self.ctx.generation
+        photo_offset, face_offset, key = self.photo_offset, self.face_offset, g.key
+        self.photo_scope.setText("Loading photos…")
+        self.face_scope.setText("Loading faces…")
+        self.grid.set_items([])
         self.faces.clear()
-        for r in faces.faces_of(self.lib, g.key)[:MAX_FACES]:
+        self.preview.clear()
+        self._faces_selected()
+        def work():
+            try:
+                return (lib, generation, key, queries.group_contents(lib, key, photo_offset, face_offset))
+            finally:
+                lib.close_thread()
+        self.contents_bg.call(work)
+
+    def _contents_loaded(self, result):
+        lib, generation, key, data = result
+        group = self._current()
+        if self._closed or (lib, generation) != (self.lib, self.ctx.generation) or not group or group.key != key:
+            return
+        if self.mode == "similar":
+            self._similar_rows = data["photos"]
+            self.photo_offset = 0
+            self._show_similar()
+            return
+        for r in data["faces"]:
             it = QListWidgetItem()
-            pm = self._face_pixmap(r["face_id"])
-            if pm:
-                it.setIcon(QIcon(pm))
+            image = data["thumbs"][r["face_id"]]
+            if not image.isNull():
+                it.setIcon(QIcon(QPixmap.fromImage(image)))
             it.setToolTip(r["rel_path"])
             it.setData(Qt.ItemDataRole.UserRole, r["face_id"])
             self.faces.addItem(it)
-        rows = faces.photos_of(self.lib, g.key)
+        rows = data["photos"]
         self.grid.set_items([{**r, "caption": r["name"], "tip": r["rel_path"]} for r in rows])
-        self.preview.clear()
+        self.photo_scope.setText(f"Photos {self.photo_offset + 1 if rows else 0:,}–"
+                                 f"{self.photo_offset + len(rows):,} of {group.photos:,}. Make album includes all pages.")
+        self.face_scope.setText(f"Faces {self.face_offset + 1 if data['faces'] else 0:,}–"
+                                f"{self.face_offset + len(data['faces']):,} of {group.faces:,}. "
+                                "Corrections apply to selected faces on this page.")
+        self.photo_prev.setEnabled(self.photo_offset > 0)
+        self.photo_next.setEnabled(self.photo_offset + len(rows) < group.photos)
+        self.face_prev.setEnabled(self.face_offset > 0)
+        self.face_next.setEnabled(self.face_offset + len(data["faces"]) < group.faces)
         self._faces_selected()
+
+    def _content_step(self, kind, delta):
+        if self.mode != "person":
+            if kind == "photo":
+                self.photo_offset = max(0, min(
+                    max(0, (len(self._similar_rows) - 1) // queries.PHOTO_PAGE) * queries.PHOTO_PAGE,
+                    self.photo_offset + delta * queries.PHOTO_PAGE))
+                self._show_similar()
+            return
+        if kind == "photo":
+            self.photo_offset = max(0, self.photo_offset + delta * queries.PHOTO_PAGE)
+        else:
+            self.face_offset = max(0, self.face_offset + delta * queries.FACE_PAGE)
+        self._load_contents()
+
+    def _show_similar(self):
+        rows = self._similar_rows[self.photo_offset:self.photo_offset + queries.PHOTO_PAGE]
+        self.preview.clear()
+        self.grid.set_items([{**r, "caption": f"{round(r['similarity'] * 100)}% alike", "tip": r["rel_path"]}
+                             for r in rows])
+        self.g_info.setText(f"{len(self._similar_rows):,} matching photos (top 2,000 at most), most alike first. "
+                            "Make album saves these matching results across all pages.")
+        self.photo_scope.setText(f"Photos {self.photo_offset + 1 if rows else 0:,}–"
+                                 f"{self.photo_offset + len(rows):,} of {len(self._similar_rows):,} look-alikes. "
+                                 "Photo selection applies to this page.")
+        self.photo_prev.setEnabled(self.photo_offset > 0)
+        self.photo_next.setEnabled(self.photo_offset + len(rows) < len(self._similar_rows))
+
+    def _invalidate(self):
+        self.bg.invalidate()
+        self.contents_bg.invalidate()
+        self.search_timer.stop()
+        self.preview.clear()
+        self.grid.set_items([])
+        self.faces.clear()
+        self.groups = []
+        self._similar_rows = []
+        self.shown = []
+        self.list.clear()
+        if self.isVisible() and self.can_refresh:
+            self.refresh()
+
+    def _failed(self, error):
+        self.status.setText(f"Could not load people: {error}")
+        self.list.setEnabled(True)
+
+    def shutdown(self):
+        self._closed = True
+        self.search_timer.stop()
+        self.bg.wait()
+        self.contents_bg.wait()
+        self.preview.shutdown()
 
     def _faces_selected(self) -> None:
         n = len(self.faces.selectedItems())
@@ -251,7 +415,7 @@ class PeoplePage(Page):
         if name is None:
             dlg = QInputDialog(self)
             dlg.setWindowTitle("Name this person" if not g.named else "Rename")
-            dlg.setLabelText("Name (choose an existing name to join the two):")
+            dlg.setLabelText("Name (type any existing name to join the two; suggestions are from this page):")
             dlg.setComboBoxItems(self._names())
             dlg.setComboBoxEditable(True)
             dlg.setTextValue(g.name or "")
@@ -300,13 +464,22 @@ class PeoplePage(Page):
         sel = self.faces.selectedItems()
         if len(sel) != 1:
             return
-        rows = faces.similar(self.lib, sel[0].data(Qt.ItemDataRole.UserRole))
+        face_id = sel[0].data(Qt.ItemDataRole.UserRole)
+        lib, generation, key = self.lib, self.ctx.generation, self._current().key
         self.mode = "similar"
+        self._similar_rows = []
         self.back_btn.setVisible(True)
         self.g_title.setText("Look-alikes")
-        self.g_info.setText(f"{fmt_n(len(rows), 'photo')} with a face like the one you selected, most alike first.")
-        self.grid.set_items([{**r, "caption": f"{round(r['similarity'] * 100)}% alike", "tip": r["rel_path"]}
-                             for r in rows])
+        self.g_info.setText("Finding look-alikes…")
+        self.grid.set_items([])
+        for control in (self.photo_prev, self.photo_next, self.face_prev, self.face_next):
+            control.setEnabled(False)
+        def work():
+            try:
+                return lib, generation, key, {"photos": queries.similar_page(lib, face_id)}
+            finally:
+                lib.close_thread()
+        self.contents_bg.call(work)
         self._faces_selected()
 
     def _back(self) -> None:
@@ -317,11 +490,18 @@ class PeoplePage(Page):
         items = self.grid.items()
         if g is None or not items:
             return
-        name = g.name or "Unnamed person"
-        aid = albums.create(self.lib, name, [r["id"] for r in items], "person")
-        self.ctx.albums_changed.emit()
-        self.ctx.toast_requested.emit(f"Saved album “{name}” with {fmt_n(len(items), 'item')}.", "")
-        return aid
+        name, lib, key = g.name or "Unnamed person", self.lib, g.key
+        displayed = [r["id"] for r in self._similar_rows] if self.mode == "similar" else None
+        def work(progress):
+            try:
+                ids = displayed if displayed is not None else queries.group_ids(lib, key)
+                return albums.create(lib, name, ids, "person"), len(ids)
+            finally:
+                lib.close_thread()
+        def done(result):
+            self.ctx.albums_changed.emit()
+            self.ctx.toast_requested.emit(f"Saved album “{name}” with {fmt_n(result[1], 'item')}.", "")
+        self.run("Saving people album", work, done)
 
     def _toggle_small(self) -> None:
         self.min_photos = 1 if self.small_action.isChecked() else 2
@@ -334,19 +514,13 @@ class PeoplePage(Page):
         self.ctx.toast_requested.emit(f"{fmt_n(n, 'hidden face')} shown again." if n else "Nothing was hidden.", "")
 
     def _after_change(self, msg: str, select_name: Optional[str] = None) -> None:
-        self.groups = faces.groups(self.lib, self.min_photos)
+        self._select_name = select_name
         if select_name:
             self.search.blockSignals(True)
             self.search.clear()
             self.search.blockSignals(False)
-        self._fill_list()
-        if select_name:
-            norm = " ".join(select_name.split()).lower()
-            for i, g in enumerate(self.shown):
-                if (g.name or "").lower() == norm:
-                    self.list.setCurrentRow(i)
-                    break
-        self._update_status()
+            self.group_offset = 0
+        self.refresh()
         self.ctx.people_changed.emit()
         self.ctx.toast_requested.emit(msg, "")
 

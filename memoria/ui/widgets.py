@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QFrame, QG
                                QStyledItemDelegate, QVBoxLayout, QWidget)
 
 from . import theme
+from .tasks import LatestCall
+from .image_loader import checked_path, read_image
 from ..engine.db import Library
 
 
@@ -552,9 +554,10 @@ class PhotoGrid(QListView):
 class Preview(QFrame):
     """Large preview of one file with its key facts."""
 
-    def __init__(self, ctx: AppContext, width: int = 340):
+    def __init__(self, ctx: AppContext, width: int = 340, *, hold_on_index_update: bool = False):
         super().__init__()
         self.ctx = ctx
+        self._hold_on_index_update = hold_on_index_update
         self.setObjectName("card")
         self.setFixedWidth(width)
         self.image = QLabel()
@@ -576,9 +579,38 @@ class Preview(QFrame):
         lay.setContentsMargins(14, 14, 14, 14)
         self.setLayout(lay)
         self.row: Optional[dict] = None
+        self.loader = LatestCall(self)
+        self.loader.result.connect(self._loaded)
+        self.loader.failed.connect(self._load_failed)
+        self.access = LatestCall(self)
+        self.access.result.connect(self._external_ready)
+        self.access.failed.connect(self._load_failed)
+        self._request = None
+        self._facts = ""
+        ctx.library_opened.connect(self.clear)
+        ctx.library_modified.connect(self._library_modified)
+        self.clear()
+
+    def _library_modified(self) -> None:
+        if (self._hold_on_index_update and self.ctx.index_update and self.row is not None
+                and self._request is not None and self._request[0] is self.ctx.library):
+            # Photos deliberately holds its selected row while indexing. Retain the
+            # displayed snapshot, but never accept work from the previous generation.
+            pending = self.image.pixmap().isNull() and self.image.text() == "Loading preview…"
+            self.loader.invalidate()
+            self.access.invalidate()
+            lib = self.ctx.library
+            self._request = (lib, self.ctx.generation, self.row["rel_path"])
+            if pending:
+                request, snapshot = self._request, dict(self.row)
+                self.loader.call(lambda: (request, read_image(lib, snapshot, 900)))
+            return
         self.clear()
 
     def clear(self) -> None:
+        self.loader.invalidate()
+        self.access.invalidate()
+        self._request = None
         self.row = None
         self.image.setPixmap(QPixmap())
         self.image.setText("Select a photo to see details")
@@ -597,25 +629,13 @@ class Preview(QFrame):
             self.clear()
             return
         self.row = row
-        path = lib.abspath(row["rel_path"])
-        pm = None
-        if row.get("kind") == "image" and not row.get("error"):
-            try:
-                from ..engine.media import load_for_display
-                img = load_for_display(path, 900)
-                qimg = QImage(img.tobytes(), img.width, img.height, img.width * 3, QImage.Format.Format_RGB888)
-                pm = QPixmap.fromImage(qimg.copy())
-            except Exception:
-                pm = None
-        if pm is None and row.get("id") is not None:
-            pm = self.ctx.thumbs.get(row["id"])
-        w = self.width() - 28
-        if pm is not None:
-            self.image.setPixmap(pm.scaled(w, int(w * 0.85), Qt.AspectRatioMode.KeepAspectRatio,
-                                           Qt.TransformationMode.SmoothTransformation))
-        else:
-            self.image.setPixmap(QPixmap())
-            self.image.setText("No preview available")
+        self.access.invalidate()
+        self.image.setPixmap(QPixmap())
+        self.image.setText("Loading preview…")
+        request = (lib, self.ctx.generation, row["rel_path"])
+        self._request = request
+        snapshot = dict(row)
+        self.loader.call(lambda: (request, read_image(lib, snapshot, 900)))
         self.title.setText(row.get("name") or Path(row["rel_path"]).name)
         facts = []
         src = {"exif": "camera", "metadata": "video metadata", "filename": "file name",
@@ -663,19 +683,56 @@ class Preview(QFrame):
         facts.append(f"<span style='color:{theme.MUTED}'>{escape(row['rel_path'])}</span>")
         if extra:
             facts.append(extra)
-        self.facts.setText("<br>".join(facts))
+        self._facts = "<br>".join(facts)
+        self.facts.setText(self._facts)
         self.open_btn.setEnabled(row.get("kind") in ("image", "video"))
         self.open_btn.setToolTip("" if row.get("kind") in ("image", "video") else
                                  "Only photos and videos can be opened from Memoria. Use Show in folder.")
         self.show_btn.setEnabled(True)
 
+    def _loaded(self, result) -> None:
+        request, (image, error) = result
+        if request != self._request or request[:2] != (self.ctx.library, self.ctx.generation):
+            return
+        if image.isNull():
+            self.image.setText("Could not load preview" if error else "No preview available")
+        else:
+            w = self.width() - 28
+            self.image.setPixmap(QPixmap.fromImage(image).scaled(
+                w, int(w * .85), Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation))
+        if error:
+            self._load_failed(error)
+
+    def _load_failed(self, error) -> None:
+        if not self._request or self._request[:2] != (self.ctx.library, self.ctx.generation):
+            return
+        if self.image.pixmap().isNull():
+            self.image.setText("Could not load preview")
+        self.facts.setText(self._facts + f"<br><b>Preview unavailable</b><br>{escape(str(error))}<br>"
+                           "Check the format/codec and file access before assuming damage. "
+                           "A cached preview may be shown.")
+
+    def shutdown(self) -> None:
+        self.loader.wait()
+        self.access.wait()
+
     def _open(self):
         if self.row and self.ctx.library and self.row.get("kind") in ("image", "video"):
-            open_path(self.ctx.library.abspath(self.row["rel_path"]))
+            self._external("open")
 
     def _show(self):
         if self.row and self.ctx.library:
-            show_in_explorer(self.ctx.library.abspath(self.row["rel_path"]))
+            self._external("show")
+
+    def _external(self, action):
+        lib, request, key = self.ctx.library, self._request, self.row["rel_path"]
+        self.access.call(lambda: (request, action, checked_path(lib, key)))
+
+    def _external_ready(self, result):
+        request, action, path = result
+        if request == self._request and request[:2] == (self.ctx.library, self.ctx.generation):
+            (open_path if action == "open" else show_in_explorer)(path)
 
 
 # ------------------------------------------------------------------------------ dialogs
@@ -769,14 +826,24 @@ class Viewer(QDialog):
         prev_b = button("‹  Previous", on_click=lambda: self.step(-1), tip="Left arrow")
         next_b = button("Next  ›", on_click=lambda: self.step(1), tip="Right arrow")
         open_b = button("Open in default app", on_click=self._open_external)
-        show_b = button("Show in folder", on_click=lambda: self.current and show_in_explorer(
-            self.ctx.library.abspath(self.current["rel_path"])))
+        show_b = button("Show in folder", on_click=lambda: self._external("show"))
         close_b = button("Close", on_click=self.close, tip="Esc")
         lay = vbox(self.image, self.caption, hbox(prev_b, next_b, None, open_b, show_b, close_b),
                    spacing=10, margins=(16, 16, 16, 14))
         lay.setStretch(0, 1)
         self.setLayout(lay)
         self._pixmap = QPixmap()
+        self.loader = LatestCall(self)
+        self.loader.result.connect(self._loaded)
+        self.loader.failed.connect(self._load_failed)
+        self.access = LatestCall(self)
+        self.access.result.connect(self._external_ready)
+        self.access.failed.connect(self._load_failed)
+        self._request = None
+        self._library = ctx.library
+        self.finished.connect(lambda *_: (self.loader.invalidate(), self.access.invalidate()))
+        ctx.library_opened.connect(self._invalidate)
+        ctx.library_modified.connect(self._invalidate)
         if self.items:
             target = items[index] if 0 <= index < len(items) else None
             self.index = next((n for n, it in enumerate(self.items) if it is target), 0)
@@ -794,26 +861,57 @@ class Viewer(QDialog):
 
     def _load(self) -> None:
         it = self.current
-        if it is None:
+        if it is None or self.ctx.library is not self._library or self._library is None:
             return
-        pm = None
-        if it.get("kind") == "image" and not it.get("error"):
-            try:
-                from ..engine.media import load_for_display
-                screen = max(self.width(), self.height(), 1600)
-                img = load_for_display(self.ctx.library.abspath(it["rel_path"]), screen)
-                q = QImage(img.tobytes(), img.width, img.height, img.width * 3, QImage.Format.Format_RGB888)
-                pm = QPixmap.fromImage(q.copy())
-            except Exception:
-                pm = None
-        if pm is None:
-            pm = self.ctx.thumbs.get(it["id"]) or QPixmap()
-        self._pixmap = pm
-        self._fit()
+        self._pixmap = QPixmap()
+        self.access.invalidate()
+        self.image.clear()
+        self.image.setText("Loading preview…")
+        lib = self._library
+        request = (lib, self.ctx.generation, self.index)
+        self._request = request
+        snapshot, edge = dict(it), min(2400, max(self.width(), self.height(), 1600))
+        self.loader.call(lambda: (request, read_image(lib, snapshot, edge)))
         when = fmt_date(it.get("taken_at"), True) if it.get("taken_at") else ""
         extra = "  ·  ▶ video — use “Open in default app” to play" if it.get("kind") == "video" else ""
-        self.caption.setText(f"<b>{it.get('name', '')}</b>   {when}   "
-                             f"<span style='color:#A1A7B0'>{self.index + 1} of {len(self.items)}{extra}</span>")
+        self._caption = (f"<b>{escape(it.get('name', ''))}</b>   {escape(when)}   "
+                         f"<span style='color:#A1A7B0'>{self.index + 1} of {len(self.items)}{extra}</span>")
+        if it.get("error"):
+            self._caption += f"<br>{escape(it['error'])}"
+        self.caption.setText(self._caption)
+
+    def _loaded(self, result) -> None:
+        request, (image, error) = result
+        if request != self._request or request[:2] != (self.ctx.library, self.ctx.generation):
+            return
+        self._pixmap = QPixmap.fromImage(image)
+        if image.isNull():
+            self.image.setText("Could not load preview" if error else "No preview available")
+        else:
+            self._fit()
+        if error:
+            self._load_failed(error)
+
+    def _load_failed(self, error) -> None:
+        if not self._request or self._request[:2] != (self.ctx.library, self.ctx.generation):
+            return
+        if self._pixmap.isNull():
+            self.image.setText("Could not load preview")
+        self.caption.setText(self._caption + f"<br>{escape(str(error))}<br>"
+                             "Check format/codec and access before assuming damage. A cached preview may be shown.")
+
+    def _invalidate(self) -> None:
+        self.loader.invalidate()
+        self.access.invalidate()
+        self._request = None
+        self.items = []
+        self._pixmap = QPixmap()
+        self.image.clear()
+        self.image.setText("Library changed. Close this viewer and select the file again.")
+
+    def shutdown(self) -> None:
+        self.loader.wait()
+        self.access.wait()
 
     def _fit(self) -> None:
         if not self._pixmap.isNull():
@@ -833,8 +931,20 @@ class Viewer(QDialog):
             super().keyPressEvent(e)
 
     def _open_external(self) -> None:
-        if self.current and self.current.get("kind") in ("image", "video"):
-            open_path(self.ctx.library.abspath(self.current["rel_path"]))
+        if (self.current and self.ctx.library is self._library
+                and self.current.get("kind") in ("image", "video")):
+            self._external("open")
+
+    def _external(self, action):
+        if not self.current or self.ctx.library is not self._library:
+            return
+        lib, request, key = self._library, self._request, self.current["rel_path"]
+        self.access.call(lambda: (request, action, checked_path(lib, key)))
+
+    def _external_ready(self, result):
+        request, action, path = result
+        if request == self._request and request[:2] == (self.ctx.library, self.ctx.generation):
+            (open_path if action == "open" else show_in_explorer)(path)
 
 
 class MessageDialog(QDialog):

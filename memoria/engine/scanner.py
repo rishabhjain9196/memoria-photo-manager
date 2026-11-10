@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Optional
 
-from . import config, ffmpeg, media
+from . import config, ffmpeg, media, roots
 from .db import DERIVED, METADATA_VERSION, Library, LibraryUnavailable
 from .progress import Progress
 
@@ -25,6 +25,7 @@ class ScanResult:
     removed: int = 0
     unreadable_folders: int = 0
     unreadable_files: int = 0
+    offline_roots: int = 0
 
 
 @dataclass
@@ -98,24 +99,47 @@ def walk_dirs(root: Path) -> list[str]:
 
 def scan(lib: Library, progress: Optional[Progress] = None) -> ScanResult:
     progress = progress or Progress()
-    root = str(lib.root)
+    result = ScanResult()
+    sources = lib.roots()
+    for index, source in enumerate(sources):
+        try:
+            roots.check(lib, source["id"])
+            part = _scan_root(lib, source, progress.step(index, len(sources), f"Scanning {source['label']}"))
+        except LibraryUnavailable as error:
+            if source["id"] == 1:
+                raise
+            lib.db.execute("UPDATE library_roots SET online=0,error=? WHERE id=?",
+                           (str(error)[:300], source["id"]))
+            result.offline_roots += 1
+            continue
+        for field in ("total", "added", "changed", "removed", "unreadable_folders", "unreadable_files"):
+            setattr(result, field, getattr(result, field) + getattr(part, field))
+    progress.update(1, 1, f"Scan complete: {result.total:,} files"
+                    + (f"; {result.offline_roots} offline folder(s) retained" if result.offline_roots else ""), force=True)
+    return result
+
+
+def _scan_root(lib: Library, source: dict, progress: Progress) -> ScanResult:
+    root = source["path"]
+    source_id = source["id"]
     cut = len(root.rstrip(os.sep)) + 1
     if not os.path.isdir(root):
         raise LibraryUnavailable(f"The library folder can't be reached ({root}). If it is on an external or "
                                  "network drive, reconnect it and try again. Nothing was changed.")
     existing = {r["rel_path"].lower(): (r["id"], r["size"], r["mtime"])
-                for r in lib.db.execute("SELECT id, rel_path, size, mtime FROM files")}
-    missing = {r["rel_path"].lower(): r for r in lib.missing()}
+                for r in lib.db.execute("SELECT id, rel_path, size, mtime FROM files WHERE root_id=?", (source_id,))}
+    missing = {r["rel_path"].lower(): r for r in lib.missing()
+               if roots.split_key(r["rel_path"])[0] == source_id}
     existing.update({k: (r["id"], r["size"], r["mtime"]) for k, r in missing.items()})
     seen: set[str] = set()
     failed: list[str] = []
     new_rows, changed_ids = [], []
     returned = []
     res = ScanResult()
-    for n, entry in enumerate(walk_files(lib.root, failed=failed), 1):
+    for n, entry in enumerate(walk_files(Path(root), failed=failed), 1):
         if n % 500 == 0:
             progress.update(n, 0, f"Scanning… {n:,} files found")
-        rel = entry.path[cut:]
+        rel = roots.key_for(source_id, entry.path[cut:])
         key = rel.lower()
         seen.add(key)
         try:
@@ -129,14 +153,14 @@ def scan(lib: Library, progress: Optional[Progress] = None) -> ScanResult:
         if old is None:
             folder, name = os.path.split(rel)
             ext = os.path.splitext(name)[1].lower()
-            new_rows.append((rel, folder, name, ext, config.kind_for_ext(ext), st.st_size, st.st_mtime))
+            new_rows.append((rel, folder, name, ext, config.kind_for_ext(ext), st.st_size, st.st_mtime, source_id))
         elif old[1] != st.st_size or abs(old[2] - st.st_mtime) > 0.001:
             changed_ids.append((st.st_size, st.st_mtime, old[0]))
     if root in failed or not os.path.isdir(root):
         raise LibraryUnavailable(f"The library folder stopped responding while it was being read ({root}). "
                                  "Nothing was changed.")
     # Files inside folders that couldn't be read are kept: unreadable is not the same as deleted.
-    unreadable = tuple(f[cut:].lower() + os.sep for f in failed)
+    unreadable = tuple(roots.key_for(source_id, f[cut:]).lower() + os.sep for f in failed)
     removed = [v[0] for k, v in existing.items() if k not in seen and k not in missing
                and not k.startswith(unreadable)]
     res.unreadable_folders = len(failed)
@@ -147,8 +171,8 @@ def scan(lib: Library, progress: Optional[Progress] = None) -> ScanResult:
             db.execute(f"INSERT INTO files ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})",
                        [row[c] for c in cols])
             db.execute("DELETE FROM missing_files WHERE file_id=?", (row["id"],))
-        db.executemany("INSERT INTO files (rel_path, folder, name, ext, kind, size, mtime) "
-                       "VALUES (?,?,?,?,?,?,?)", new_rows)
+        db.executemany("INSERT INTO files (rel_path, folder, name, ext, kind, size, mtime, root_id) "
+                       "VALUES (?,?,?,?,?,?,?,?)", new_rows)
         reset = ", ".join(f"{c}=NULL" for c in DERIVED if c != "analyzed")
         db.executemany(f"UPDATE files SET size=?, mtime=?, analyzed=0, {reset} WHERE id=?", changed_ids)
     lib.mark_missing(removed)
@@ -198,6 +222,7 @@ def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = co
     progress = progress or Progress()
     rows = lib.db.execute("SELECT id, rel_path, kind, name, mtime FROM files "
                           "WHERE (analyzed=0 OR COALESCE(metadata_version,0)<?) AND kind!='other' "
+                          "AND root_id IN (SELECT id FROM library_roots WHERE online=1) "
                           "ORDER BY kind, rel_path", (METADATA_VERSION,)).fetchall()
     total = len(rows)
     res = AnalyzeResult()
@@ -237,13 +262,18 @@ def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = co
         last_flush = time.monotonic()
 
     video_workers = max(1, min(4, workers // 2))
+    def analyze_one(row):
+        path = lib.abspath(row["rel_path"])
+        lib.check_path(path)
+        return _analyze_one(path, row["kind"], row["name"], row["mtime"])
+
     with ThreadPoolExecutor(max_workers=workers) as pool, ThreadPoolExecutor(max_workers=video_workers) as vpool:
         futures = {}
         remaining = iter(rows)
 
         def submit(r):
             p = vpool if r["kind"] == "video" else pool
-            futures[p.submit(_analyze_one, lib.abspath(r["rel_path"]), r["kind"], r["name"], r["mtime"])] = r["id"]
+            futures[p.submit(analyze_one, r)] = r["id"]
 
         try:
             for _ in range(2 * (workers + video_workers)):

@@ -140,12 +140,13 @@ def compressor_ui(tmp_path, monkeypatch):
 
     class Prober(QObject):
         probed = Signal(str, object, object)
+        failed = Signal(str, str)
 
         def __init__(self, parent):
             super().__init__(parent)
             self.requests = []
 
-        def request(self, key, path, frame):
+        def request(self, key, path, frame, *, library=None):
             self.requests.append((key, path, frame))
 
         def stop(self):
@@ -243,6 +244,11 @@ def test_compressor_external_selection_with_empty_catalogue_and_shutdown(compres
     path.write_bytes(b"synthetic probe input")
     ctx.video_selection = [str(path), str(path)]
     page._refresh_now()
+    import time
+    deadline = time.monotonic() + 5
+    while page.input_bg.running and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(.005)
     assert not ctx.video_selection and len(page.checked_rows()) == page.model.rowCount() == 1
     assert len(page.prober.requests) == 1 and page.prober.requests[0][2]
     key = page.prober.requests[0][0]
@@ -257,3 +263,22 @@ def test_compressor_external_selection_with_empty_catalogue_and_shutdown(compres
     page.prober.probed.emit(key, None, None)
     assert page._info[key] is info
     assert path.read_bytes() == b"synthetic probe input"
+
+
+def test_compressor_rejects_probe_from_previous_catalogue_generation(compressor_ui):
+    from memoria.ui.pages.video import C_EST
+    app, lib, ctx, page = compressor_ui
+    _catalogue_videos(lib, 1)
+    page._refresh_now()
+    page._check_all(True)
+    key = page.prober.requests[0][0]
+    old = ffmpeg.VideoInfo(duration=1, width=100, height=100)
+    ctx.library_modified.emit()
+    page.prober.failed.emit(key, "Old drive failure")
+    page.prober.probed.emit(key, old, None)
+    assert key not in page._info and key not in page._probe_errors
+    assert len(page.prober.requests) == 2
+    current = ffmpeg.VideoInfo(duration=10, width=1920, height=1080, fps=30)
+    page.prober.probed.emit(key, current, None)
+    assert page._info[key] is current
+    assert page.model.index(0, C_EST).data() != "Can't read"

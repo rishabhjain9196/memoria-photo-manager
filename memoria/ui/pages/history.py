@@ -1,184 +1,279 @@
-"""History of every change, undo, and the Recovery folder."""
+"""Paged operation history and Recovery across the library's media folders."""
 from __future__ import annotations
+
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QHeaderView, QSplitter, QTreeWidget, QTreeWidgetItem
+from PySide6.QtWidgets import QComboBox, QHeaderView, QSplitter, QTreeWidget, QTreeWidgetItem, QWidget
 
-from ...engine import actions
+from ...engine import actions, config, roots
 from .. import theme
-from ..widgets import (Banner, Card, ConfirmDialog, button, fmt_date, fmt_n, fmt_size, hbox, label, open_path,
-                       show_in_explorer, vbox)
+from ..tasks import LatestCall
+from ..widgets import Card, ConfirmDialog, button, fmt_date, fmt_n, fmt_size, hbox, label, open_path, show_in_explorer, vbox
 from .base import Page
 
-def status_label(status: str) -> tuple[str, str]:
-    return {"applied": ("Done", theme.OK), "partial": ("Partly done", theme.WARN), "undone": ("Undone", theme.MUTED),
-            "emptied": ("Done · Recovery emptied", theme.MUTED),
-            "applying": ("In progress", theme.WARN)}.get(status, (status, theme.TEXT))
-
-
+BATCH_PAGE = 200
+OP_PAGE = 500
 KIND = {"duplicates": "Duplicates", "similar": "Similar / blurry", "tidy": "Tidy up", "organize": "Organise",
         "sync": "Compare & sync", "batch": "Photos & videos", "edit": "Editor",
         "albums": "Albums export", "story": "Story maker", "video": "Video compressor"}
 OP = {"recycle": "Moved to Recovery", "move": "Moved", "copy": "Copied", "rmdir": "Removed empty folder",
-      "create": "Created"}
-OP_STATUS = {"done": "Done", "undone": "Undone", "skipped": "Skipped", "failed": "Failed", "purged": "Deleted from Recovery",
-             "pending": "Interrupted"}
+      "create": "Created", "metadata": "Merged organisation"}
+OP_STATUS = {"done": "Done", "undone": "Undone", "skipped": "Skipped", "failed": "Failed",
+             "purged": "Deleted from Recovery", "pending": "Interrupted", "superseded": "Cleared by reset"}
+
+
+def status_label(status):
+    return {"applied": ("Done", theme.OK), "partial": ("Partly done", theme.WARN),
+            "undone": ("Undone", theme.MUTED), "emptied": ("Done - Recovery emptied", theme.MUTED),
+            "applying": ("In progress", theme.WARN)}.get(status, (status, theme.TEXT))
 
 
 class HistoryPage(Page):
     title = "History & recovery"
-    subtitle = "Every change Memoria has made to this library. Undo any of them."
+    subtitle = "Review recorded changes. Undo applies to the whole selected change, not just its displayed steps."
 
     def __init__(self, ctx):
         super().__init__(ctx)
+        self._closed = False
+        self._batch_offset = self._op_offset = self._batch_count = self._op_count = 0
+        self._recovery_count = self._recovery_bytes = self._offline = 0
+        self._can_undo = False
         self.batches = QTreeWidget()
         self.batches.setHeaderLabels(["When", "What", "Files", "Size", "Status"])
         self.batches.setRootIsDecorated(False)
         self.batches.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for c in (0, 2, 3, 4):
-            self.batches.header().setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
         self.batches.currentItemChanged.connect(self._select)
         self.ops = QTreeWidget()
         self.ops.setHeaderLabels(["Action", "File", "Now at", "Status"])
         self.ops.setRootIsDecorated(False)
-        self.ops.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.ops.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.ops.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.ops.header().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        for column in (1, 2):
+            self.ops.header().setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
         self.ops.itemDoubleClicked.connect(self._reveal)
         self.undo_btn = button("Undo this change", "primary", self.undo)
         self.undo_btn.setEnabled(False)
         self.detail = label("", "muted", wrap=True)
+        self.batch_note, self.op_note = label("", "small"), label("", "small")
+        self.batch_prev = button("Previous changes", on_click=lambda: self._turn_batches(-1))
+        self.batch_next = button("Next changes", on_click=lambda: self._turn_batches(1))
+        self.op_prev = button("Previous steps", on_click=lambda: self._turn_ops(-1))
+        self.op_next = button("Next steps", on_click=lambda: self._turn_ops(1))
+        top, bottom = QWidget(), QWidget()
+        top.setLayout(vbox(self.batches, hbox(self.batch_prev, self.batch_note, None, self.batch_next)))
+        bottom.setLayout(vbox(hbox(self.detail, None, self.undo_btn), self.ops,
+                              hbox(self.op_prev, self.op_note, None, self.op_next)))
         split = QSplitter(Qt.Orientation.Vertical)
-        split.addWidget(self.batches)
-        from PySide6.QtWidgets import QWidget
-        bottom = QWidget()
-        bottom.setLayout(vbox(hbox(self.detail, None, self.undo_btn), self.ops, spacing=6))
+        split.addWidget(top)
         split.addWidget(bottom)
-        split.setSizes([300, 400])
-
-        self.rec_label = label("", "")
-        self.open_rec = button("Open Recovery folder", on_click=lambda: self.lib and self.lib.recovery.mkdir(
-            parents=True, exist_ok=True) or open_path(self.lib.recovery))
-        self.empty_btn = button("Empty Recovery…", "danger", self.empty_recovery)
-        rec = Card(vbox(hbox(label("Recovery folder", "h2"), None, self.open_rec, self.empty_btn), self.rec_label,
-                        spacing=6))
-        self.body.addWidget(rec)
+        self.rec_label = label("Reading available Recovery...", "", wrap=True)
+        self.recovery_root = QComboBox()
+        self.open_rec = button("Open Recovery folder", on_click=self._open_recovery)
+        self.empty_btn = button("Empty Recovery...", "danger", self.empty_recovery)
+        self.empty_btn.setEnabled(False)
+        self.body.addWidget(Card(vbox(hbox(label("Recovery", "h2"), self.recovery_root, None,
+                                          self.open_rec, self.empty_btn), self.rec_label)))
         self.body.addWidget(split, 1)
+        self.bg, self.op_bg = LatestCall(self), LatestCall(self)
+        self.bg.result.connect(self._show_batches)
+        self.bg.failed.connect(lambda error: self.rec_label.setText(f"History could not be read: {error}"))
+        self.op_bg.result.connect(self._show_ops)
+        self.op_bg.failed.connect(lambda error: self.detail.setText(f"Steps could not be read: {error}"))
+        self.on_busy_changed(False)
 
-    def on_busy_changed(self, busy: bool) -> None:
-        self._select(self.batches.currentItem(), None)
-        self.empty_btn.setEnabled(not busy and actions.recovery_size(self.lib)[0] > 0 if self.lib else False)
+    def shutdown(self):
+        self._closed = True
+        self.bg.wait()
+        self.op_bg.wait()
 
-    def refresh(self) -> None:
-        files, size = actions.recovery_size(self.lib)
-        self.rec_label.setText(
-            f"{fmt_n(files, 'file')} ({fmt_size(size)}) are being kept safe in Recovery. They stay there until you "
-            "empty it — only then are they permanently deleted." if files else
-            "Recovery is empty.")
-        self.empty_btn.setEnabled(files > 0 and not self.busy)
-        cur = self.batches.currentItem()
-        cur_id = cur.data(0, Qt.ItemDataRole.UserRole)["id"] if cur else None
-        self.batches.clear()
-        select = None
-        all_batches = actions.batches(self.lib)
-        newest = all_batches[0]["id"] if all_batches else None
-        if newest != getattr(self, "_newest_id", None):
-            cur_id = None                      # a new change arrived: show it rather than an older selection
-        self._newest_id = newest
-        for b in all_batches:
-            label_, color = status_label(b["status"])
-            it = QTreeWidgetItem([fmt_date(b["created_at"], True), b["title"], f"{b['files']:,}",
-                                  fmt_size(b["bytes"]), label_])
-            it.setForeground(4, QColor(color))
-            it.setData(0, Qt.ItemDataRole.UserRole, b)
-            self.batches.addTopLevelItem(it)
-            if b["id"] == cur_id or select is None:
-                select = it if b["id"] == cur_id or select is None else select
-        if self.batches.topLevelItemCount() == 0:
-            self.ops.clear()
-            self.detail.setText("No changes yet. When you apply a clean-up or organise, it will appear here.")
-            self.undo_btn.setEnabled(False)
-        else:
-            self.batches.setCurrentItem(select)
+    def on_busy_changed(self, busy):
+        self.undo_btn.setEnabled(self._can_undo and not busy)
+        self.empty_btn.setEnabled(self._recovery_count > 0 and not self._offline and not busy)
+        self.open_rec.setEnabled(not busy and self.recovery_root.count() > 0)
 
-    def _select(self, cur, _prev) -> None:
-        if cur is None or self.lib is None:
-            self.undo_btn.setEnabled(False)
+    def refresh(self):
+        self._batch_offset = 0
+        self._load_batches()
+
+    def _load_batches(self):
+        lib, generation, offset = self.lib, self.ctx.generation, self._batch_offset
+        if lib is None or self._closed:
             return
-        b = cur.data(0, Qt.ItemDataRole.UserRole)
-        ops = actions.operations(self.lib, b["id"])
-        self.ops.clear()
-        for o in ops[:5000]:
-            it = QTreeWidgetItem([OP.get(o["op"], o["op"]), self._short(o["src"]), self._short(o["dst"]),
-                                  OP_STATUS.get(o["status"], o["status"])])
-            it.setToolTip(1, o["src"])
-            it.setToolTip(2, o["dst"] or "")
-            if o["status"] in ("failed", "skipped"):
-                it.setForeground(3, QColor(theme.WARN))
-                it.setToolTip(3, o["error"] or "")
-            it.setData(0, Qt.ItemDataRole.UserRole, o)
-            self.ops.addTopLevelItem(it)
-        can_undo = any(o["status"] == "done" for o in ops) and b["status"] != "emptied"
-        purged = any(o["status"] == "purged" for o in ops)
-        self.undo_btn.setEnabled(can_undo and not self.busy)
-        kind = KIND.get(b["kind"], b["kind"])
-        self.detail.setText(f"{kind} · {fmt_date(b['created_at'], True)} · {fmt_n(len(ops), 'step')}"
-                            + (" · Recovery for this change was emptied, so it can't be undone." if purged else ""))
+        self.empty_btn.setEnabled(False)
+        def work():
+            try:
+                recovery = actions.recovery_size(lib)
+                return {"generation": generation, "offset": offset, "recovery": recovery, "roots": lib.roots(),
+                        "count": lib.db.execute("SELECT COUNT(*) FROM batches WHERE status!='nothing'").fetchone()[0],
+                        "batches": actions.batches(lib, BATCH_PAGE, offset)}
+            finally:
+                lib.close_thread()
+        self.bg.call(work)
 
-    def _short(self, path) -> str:
-        """Paths inside the library are shown relative to it; Recovery is named as such."""
+    def _show_batches(self, data):
+        if self._closed or data["generation"] != self.ctx.generation or data["offset"] != self._batch_offset:
+            return
+        self._recovery_count, self._recovery_bytes = data["recovery"]
+        self._offline = sum(not root["online"] for root in data["roots"])
+        self.rec_label.setText(
+            f"Available Recovery: {fmt_n(self._recovery_count, 'file')} ({fmt_size(self._recovery_bytes)}). "
+            "Moving here does not free disk space. Empty Recovery permanently deletes these files."
+            + (f" {self._offline} folder(s) offline; their Recovery is not included. Reconnect before emptying."
+               if self._offline else ""))
+        selected_root = self.recovery_root.currentData()
+        self.recovery_root.clear()
+        for root in data["roots"]:
+            self.recovery_root.addItem(root["label"] + ("" if root["online"] else " (offline)"), root["id"])
+        self.recovery_root.setCurrentIndex(max(0, self.recovery_root.findData(selected_root)))
+        current = self.batches.currentItem()
+        selected = current.data(0, Qt.ItemDataRole.UserRole)["id"] if current else None
+        newest = data["batches"][0]["id"] if data["batches"] else None
+        if self._batch_offset == 0 and newest != getattr(self, "_newest_id", None):
+            selected = newest
+            self._newest_id = newest
+        self.batches.blockSignals(True)
+        self.batches.clear()
+        selected_item = None
+        for batch in data["batches"]:
+            text, color = status_label(batch["status"])
+            item = QTreeWidgetItem([fmt_date(batch["created_at"], True), batch["title"],
+                                   str(batch["files"]), fmt_size(batch["bytes"]), text])
+            item.setForeground(4, QColor(color))
+            item.setData(0, Qt.ItemDataRole.UserRole, batch)
+            self.batches.addTopLevelItem(item)
+            if selected_item is None or batch["id"] == selected:
+                selected_item = item
+        self.batches.setCurrentItem(selected_item)
+        self.batches.blockSignals(False)
+        self._batch_count = data["count"]
+        self.batch_note.setText(f"{len(data['batches'])} shown of {self._batch_count:,} changes")
+        self.batch_prev.setEnabled(self._batch_offset > 0)
+        self.batch_next.setEnabled(self._batch_offset + BATCH_PAGE < self._batch_count)
+        self._op_offset = 0
+        self._select(selected_item, None)
+        self.on_busy_changed(self.busy)
+
+    def _select(self, current, previous):
+        self._can_undo = False
+        self.undo_btn.setEnabled(False)
+        if current is None or self.lib is None:
+            self.ops.clear()
+            self.detail.setText("No changes yet.")
+            return
+        if current is not previous:
+            self._op_offset = 0
+        self._load_ops()
+
+    def _load_ops(self):
+        current = self.batches.currentItem()
+        if current is None or self._closed:
+            return
+        batch = current.data(0, Qt.ItemDataRole.UserRole)
+        lib, generation, offset = self.lib, self.ctx.generation, self._op_offset
+        self.detail.setText("Reading change steps...")
+        def work():
+            try:
+                count, done, purged = lib.db.execute(
+                    "SELECT COUNT(*),SUM(status='done'),SUM(status='purged') FROM operations WHERE batch_id=?",
+                    (batch["id"],)).fetchone()
+                return {"generation": generation, "batch": batch, "offset": offset, "count": count,
+                        "done": done or 0, "purged": purged or 0,
+                        "ops": actions.operations(lib, batch["id"], OP_PAGE, offset)}
+            finally:
+                lib.close_thread()
+        self.op_bg.call(work)
+
+    def _show_ops(self, data):
+        current = self.batches.currentItem()
+        if self._closed or data["generation"] != self.ctx.generation or current is None or (
+                current.data(0, Qt.ItemDataRole.UserRole)["id"] != data["batch"]["id"]) or data["offset"] != self._op_offset:
+            return
+        self.ops.clear()
+        for op in data["ops"]:
+            item = QTreeWidgetItem([OP.get(op["op"], op["op"]), self._short(op["src"]),
+                                   self._short(op["dst"]), OP_STATUS.get(op["status"], op["status"])])
+            item.setToolTip(1, op["src"] or "")
+            item.setToolTip(2, op["dst"] or "")
+            item.setToolTip(3, op["error"] or "")
+            item.setData(0, Qt.ItemDataRole.UserRole, op)
+            self.ops.addTopLevelItem(item)
+        self._op_count = data["count"]
+        self._can_undo = data["done"] > 0 and data["batch"]["status"] != "emptied"
+        self.detail.setText(f"{KIND.get(data['batch']['kind'], data['batch']['kind'])} - "
+                            f"{fmt_n(self._op_count, 'step')}. Undo applies to the whole change."
+                            + (" Some Recovery files were permanently deleted." if data["purged"] else ""))
+        self.op_note.setText(f"Steps {self._op_offset + 1 if self._op_count else 0}-"
+                            f"{self._op_offset + len(data['ops'])} of {self._op_count:,}")
+        self.op_prev.setEnabled(self._op_offset > 0)
+        self.op_next.setEnabled(self._op_offset + OP_PAGE < self._op_count)
+        self.on_busy_changed(self.busy)
+
+    def _turn_batches(self, direction):
+        self._batch_offset = max(0, self._batch_offset + direction * BATCH_PAGE)
+        self._load_batches()
+
+    def _turn_ops(self, direction):
+        self._op_offset = max(0, self._op_offset + direction * OP_PAGE)
+        self._load_ops()
+
+    def _short(self, path):
         if not path:
             return ""
-        from pathlib import Path
         p = Path(path)
+        for source, folder in self.lib.recovery_folders():
+            if folder in p.parents:
+                relative = p.relative_to(folder)
+                return f"Recovery (folder {source}) - " + str(Path(*relative.parts[1:]))
         try:
-            rel = p.relative_to(self.lib.recovery)
-            return "Recovery › " + str(Path(*rel.parts[1:])) if len(rel.parts) > 1 else "Recovery"
-        except ValueError:
-            pass
-        try:
-            return str(p.relative_to(self.lib.root))
+            return self.lib.display_path(self.lib.rel(p, resolve=False))
         except ValueError:
             return str(p)
 
-    def _reveal(self, item, _col) -> None:
-        o = item.data(0, Qt.ItemDataRole.UserRole)
-        from pathlib import Path
-        for p in (o["dst"], o["src"]):
-            if p and Path(p).exists():
-                show_in_explorer(p)
+    def _reveal(self, item, _column):
+        op = item.data(0, Qt.ItemDataRole.UserRole)
+        for path in (op["dst"], op["src"]):
+            if path and Path(path).exists():
+                show_in_explorer(path)
                 return
 
-    def undo(self) -> None:
-        cur = self.batches.currentItem()
-        if cur is None:
+    def _open_recovery(self):
+        source, lib = self.recovery_root.currentData(), self.lib
+        if source is None or self.busy:
             return
-        b = cur.data(0, Qt.ItemDataRole.UserRole)
-        dlg = ConfirmDialog(self, "Undo this change?", f"“{b['title']}” from {fmt_date(b['created_at'], True)} will be reversed.",
-                            ["Moved files go back to where they were. If a file with that name has appeared there "
-                             "since, the restored file gets a new name — nothing is overwritten.",
-                             "Copies made by Compare & sync are removed only if they are unchanged."],
-                            "Undo")
-        if dlg.exec():
-            self.window().undo_batch(b["id"])
+        def work(progress):
+            progress.check()
+            roots.check(lib, source)
+            folder = config.recovery_dir(lib.abspath(roots.key_for(source)))
+            folder.mkdir(parents=True, exist_ok=True)
+            return folder
+        self.run("Opening Recovery folder", work, open_path, notify_success=False)
 
-    def empty_recovery(self) -> None:
-        files, size = actions.recovery_size(self.lib)
-        dlg = ConfirmDialog(self, "Permanently delete files in Recovery?",
-                            f"{fmt_n(files, 'file')} ({fmt_size(size)}) will be deleted forever.",
-                            ["This permanently deletes the files stored in Recovery.",
-                             "Changes whose files are deleted can no longer be undone."],
-                            "Delete permanently", danger=True,
-                            require_ack="I understand these files cannot be recovered", note=None)
-        if not dlg.exec():
+    def undo(self):
+        current = self.batches.currentItem()
+        if current is None or not self._can_undo:
+            return
+        batch = current.data(0, Qt.ItemDataRole.UserRole)
+        dialog = ConfirmDialog(self, "Undo this change?", f"{batch['title']} will be reversed.",
+                               ["This applies to the whole change, including steps on other pages.",
+                                "Reconnect affected media folders first. Changed generated copies are left alone."], "Undo")
+        if dialog.exec():
+            self.window().undo_batch(batch["id"])
+
+    def empty_recovery(self):
+        if self.busy or self._offline or not self._recovery_count:
+            return
+        dialog = ConfirmDialog(
+            self, "Permanently delete files in Recovery?",
+            f"{fmt_n(self._recovery_count, 'file')} ({fmt_size(self._recovery_bytes)}) will be deleted forever.",
+            ["This deletes Recovery on all registered media folders.",
+             "Reconnect every folder first. Deleted Recovery files can no longer be restored."],
+            "Delete permanently", danger=True, require_ack="I understand these files cannot be recovered", note=None)
+        if not dialog.exec():
             return
         lib = self.lib
-
-        def done(n):
+        def done(count):
             self.ctx.library_modified.emit()
-            self.ctx.toast_requested.emit(f"Recovery emptied: {fmt_n(n, 'file')} deleted.", "")
-            self.ctx.notification_requested.emit("operation_complete", n)
-
-        self.run("Emptying Recovery", lambda p: actions.empty_recovery(lib, progress=p), done, notify_success=False)
+            self.ctx.toast_requested.emit(f"Recovery emptied: {fmt_n(count, 'file')} deleted.", "")
+            self.ctx.notification_requested.emit("operation_complete", count)
+        self.run("Emptying Recovery", lambda progress: actions.empty_recovery(lib, progress=progress),
+                 done, notify_success=False)

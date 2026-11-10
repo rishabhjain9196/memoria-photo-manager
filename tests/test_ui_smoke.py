@@ -54,7 +54,7 @@ def test_every_page_runs_without_errors(pristine_library, tmp_path):
     check.close()
     assert {"photos-viewer", "dark-overview", "dark-similar", "07-editor-crop", "07-editor-video"} <= shots
     assert {"13-people", "13-people-lookalike", "14-albums", "14-albums-make"} <= shots
-    assert {"insights-storage", "insights-timeline", "insights-india", "insights-world",
+    assert {"insights-storage", "insights-files", "insights-timeline", "insights-india", "insights-world",
             "dark-insights", "photos-largest", "library-filters", "storage-reset", "storage-reset-hard"} <= shots
     assert {"library-filters-video", "library-filters-camera", "photos-video-metadata"} <= shots
     check = Library(lib)
@@ -69,6 +69,7 @@ def test_every_page_runs_without_errors(pristine_library, tmp_path):
 
 
 def test_thumbnail_budget_invalidation_and_single_selection(tmp_path):
+    import time
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     from PIL import Image
     from PySide6.QtWidgets import QApplication
@@ -102,6 +103,11 @@ def test_thumbnail_budget_invalidation_and_single_selection(tmp_path):
         assert ctx.thumbs.get(fid).toImage().pixelColor(0, 0) != before
         page = PhotosPage(ctx)
         page.refresh()
+        deadline = time.monotonic() + 10
+        while page._query.running and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(.005)
+        app.processEvents()
         page.grid.setCurrentIndex(page.grid.model_.index(0))
         assert len(page.selected()) == 1
         assert not page.sel_bar.isHidden()
@@ -112,6 +118,7 @@ def test_thumbnail_budget_invalidation_and_single_selection(tmp_path):
         review.photos._mark_all(True)
         assert len(review.photos._planned_rows()) == 1
         review.deleteLater()
+        page.shutdown()
         page.deleteLater()
         app.processEvents()
     finally:

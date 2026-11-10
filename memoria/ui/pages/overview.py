@@ -99,7 +99,7 @@ class OverviewPage(Page):
         self.cards["compare"].set("Check a backup drive or old laptop folder against this library and copy what's missing.")
         self.cards["insights"].set("Explore folder sizes, file types, capture dates and an offline GPS map.")
         from ...engine import albums, faces
-        n_albums = len(albums.albums(lib))
+        n_albums = lib.db.execute("SELECT COUNT(*) FROM albums").fetchone()[0]
         self.cards["albums"].set(f"{fmt_n(n_albums, 'album')}. Make more from dates, places or people." if n_albums else
                                  "Let Memoria suggest albums by event, trip, place or person — no files are moved.")
         fs = faces.status(lib)
@@ -117,7 +117,9 @@ class OverviewPage(Page):
         self.updating.setText("")
         rf, rs = d["recovery"]
         self.trust.setText(
-            f"<b>Recovery is not a backup.</b> Recovery holds {fmt_n(rf, 'file')} ({fmt_size(rs)}). "
+            f"<b>Recovery is not a backup.</b> Available Recovery holds {fmt_n(rf, 'file')} ({fmt_size(rs)}). "
+            + (f"{d['offline_roots']} media folder(s) offline; their Recovery is not included. " if d["offline_roots"] else "")
+            +
             "Keep a separate backup before cleaning up. Use Health check to review missing or unreadable files.")
         if d["dup_groups"] is not None:
             n = d["dup_copies"]
@@ -163,6 +165,7 @@ def _insights(lib, cached: dict) -> dict:
     try:
         d = {"recovery": actions.recovery_size(lib), "blurry": len(similar.find_blurry(lib)),
              "health": health.last_checked(lib), "batches": len(actions.batches(lib))}
+        d["offline_roots"] = sum(not source["online"] for source in lib.roots())
         d["maybe_dupes"] = lib.db.execute(
             "SELECT COUNT(*) FROM files WHERE kind!='other' AND size>0 AND size IN "
             "(SELECT size FROM files WHERE kind!='other' AND size>0 GROUP BY size HAVING COUNT(*)>1)").fetchone()[0]

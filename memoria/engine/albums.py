@@ -7,13 +7,14 @@ journaled so History can undo it.
 from __future__ import annotations
 
 import re
+import json
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable, Optional
 
-from . import config, duplicates, faces, places
+from . import catalogue, duplicates, faces, organisation, places
 from .actions import Action
 from .db import Library
 from .progress import Progress
@@ -21,6 +22,7 @@ from .progress import Progress
 RELIABLE = ("exif", "metadata", "filename")
 _SCREENSHOT = re.compile(r"screen ?shot|screen_\d|screenrecord", re.I)
 _BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+ALBUM_PAGE_SIZE = 100
 
 
 @dataclass
@@ -185,18 +187,22 @@ def suggest_people(lib: Library, min_items: int = 1) -> list[Suggestion]:
 
 # ----------------------------------------------------------------------------- saved albums
 def _unique_name(lib: Library, name: str, skip: Optional[int] = None) -> str:
-    taken = {r[0].lower() for r in lib.db.execute("SELECT name FROM albums WHERE id IS NOT ?", (skip,))}
     base, n, out = name, 2, name
-    while out.lower() in taken:
+    while any(row[0].lower() == out.lower() for row in
+              lib.db.execute("SELECT name FROM albums WHERE id IS NOT ?", (skip,))):
         out = f"{base} ({n})"
         n += 1
     return out
 
 
 def create(lib: Library, name: str, file_ids: Iterable[int], kind: str = "manual") -> int:
+    if kind not in ("manual", "event", "place", "person"):
+        raise ValueError("Choose a static album type.")
     name = " ".join(name.split()) or "Untitled album"
     ids = list(dict.fromkeys(file_ids))
     with lib.transaction() as tx:
+        for file_id in ids:
+            organisation.require_file(lib, file_id, live=True)
         aid = tx.execute("INSERT INTO albums (name, kind, created_at, cover_id) VALUES (?,?,?,?)",
                          (_unique_name(lib, name), kind, datetime.now().isoformat(sep=" ", timespec="seconds"),
                           ids[len(ids) // 3] if ids else None)).lastrowid
@@ -213,7 +219,7 @@ def albums(lib: Library) -> list[dict]:
     """Saved albums with live item counts, date range and cover, newest content first."""
     out = []
     for r in lib.db.execute(
-            "SELECT a.id, a.name, a.kind, a.created_at, a.cover_id, COUNT(f.id) AS items, "
+            "SELECT a.id, a.name, a.kind, a.created_at, a.cover_id, a.rule_json, COUNT(f.id) AS items, "
             "SUM(f.kind='image') AS photos, SUM(f.kind='video') AS videos, SUM(f.size) AS bytes, "
             "MIN(f.taken_at) AS start, MAX(f.taken_at) AS end, MIN(f.id) AS any_id "
             "FROM albums a LEFT JOIN album_items i ON i.album_id=a.id LEFT JOIN files f ON f.id=i.file_id "
@@ -222,17 +228,111 @@ def albums(lib: Library) -> list[dict]:
         alive = lib.db.execute("SELECT 1 FROM files WHERE id=?", (d["cover_id"],)).fetchone() if d["cover_id"] else None
         d["cover"] = d["cover_id"] if alive else d["any_id"]
         d["photos"], d["videos"], d["bytes"] = d["photos"] or 0, d["videos"] or 0, d["bytes"] or 0
+        if d["rule_json"] is not None:
+            d.update(_smart_summary(lib, d["rule_json"]))
         out.append(d)
     return out
 
 
+def _album(lib: Library, album_id: int, *, static=False) -> dict:
+    organisation._id(album_id)
+    row = lib.db.execute("SELECT * FROM albums WHERE id=?", (album_id,)).fetchone()
+    if not row:
+        raise ValueError("That album no longer exists.")
+    if static and row["rule_json"] is not None:
+        raise ValueError("Smart albums update from their filters; edit the rules instead.")
+    return dict(row)
+
+
+def _saved_rule(lib, filters, sort):
+    value = catalogue.rule(filters, sort)
+    if filters.album_id is not None:
+        _album(lib, filters.album_id, static=True)
+    return json.dumps(value, ensure_ascii=False, allow_nan=False)
+
+
+def create_smart(lib: Library, name: str, filters: catalogue.Filters, sort: str = "newest") -> int:
+    name = " ".join(name.split())
+    if not name:
+        raise ValueError("Type an album name.")
+    value = _saved_rule(lib, filters, sort)
+    with lib.transaction() as tx:
+        return tx.execute("INSERT INTO albums(name,kind,created_at,rule_json) VALUES (?,'smart',?,?)",
+                          (_unique_name(lib, name), datetime.now().isoformat(timespec="seconds"), value)).lastrowid
+
+
+def update_smart(lib: Library, album_id: int, filters: catalogue.Filters, sort: str = "newest") -> None:
+    if _album(lib, album_id)["rule_json"] is None:
+        raise ValueError("That is a static album.")
+    value = _saved_rule(lib, filters, sort)
+    lib.db.execute("UPDATE albums SET rule_json=? WHERE id=?", (value, album_id))
+
+
+def _smart_summary(lib, value):
+    filters, _ = catalogue.read_rule(value)
+    sql, params = catalogue.where(filters)
+    return dict(lib.db.execute(
+        "SELECT COUNT(*) AS items,COALESCE(SUM(f.kind='image'),0) AS photos,"
+        "COALESCE(SUM(f.kind='video'),0) AS videos,COALESCE(SUM(f.size),0) AS bytes,"
+        "MIN(f.taken_at) AS start,MAX(f.taken_at) AS end,MIN(f.id) AS cover "
+        f"FROM files f WHERE {sql}", params).fetchone())
+
+
+def list_page(lib: Library, offset: int = 0, *, album_id: Optional[int] = None) -> tuple[list[dict], int, int]:
+    """Only materialize 100 album cards. Smart counts are evaluated when an album is opened."""
+    if type(offset) is not int or offset < 0:
+        raise ValueError("Invalid album offset.")
+    order = "name COLLATE NOCASE,id"
+    if album_id is not None:
+        target = _album(lib, album_id)
+        position = lib.db.execute(
+            "SELECT COUNT(*) FROM albums WHERE name COLLATE NOCASE < ? COLLATE NOCASE "
+            "OR (name=? COLLATE NOCASE AND id<?)", (target["name"], target["name"], album_id)).fetchone()[0]
+        offset = position // ALBUM_PAGE_SIZE * ALBUM_PAGE_SIZE
+    total = lib.db.execute("SELECT COUNT(*) FROM albums").fetchone()[0]
+    offset = min(offset, max(0, (total - 1) // ALBUM_PAGE_SIZE * ALBUM_PAGE_SIZE))
+    out = []
+    for row in lib.db.execute(f"SELECT * FROM albums ORDER BY {order} LIMIT ? OFFSET ?", (ALBUM_PAGE_SIZE, offset)):
+        item = dict(row)
+        if item["rule_json"] is None:
+            item.update(dict(lib.db.execute(
+                "SELECT COUNT(f.id) AS items,COALESCE(SUM(f.kind='image'),0) AS photos,"
+                "COALESCE(SUM(f.kind='video'),0) AS videos,COALESCE(SUM(f.size),0) AS bytes,"
+                "MIN(f.taken_at) AS start,MAX(f.taken_at) AS end,MIN(f.id) AS cover "
+                "FROM album_items i JOIN files f ON f.id=i.file_id WHERE i.album_id=?", (item["id"],)).fetchone()))
+            if item["cover_id"] and lib.db.execute(
+                    "SELECT 1 FROM album_items i JOIN files f ON f.id=i.file_id "
+                    "WHERE i.album_id=? AND i.file_id=?", (item["id"], item["cover_id"])).fetchone():
+                item["cover"] = item["cover_id"]
+        else:
+            item.update(items=0, photos=0, videos=0, bytes=0, start=None, end=None, cover=None)
+        out.append(item)
+    return out, total, offset
+
+
+def item_page(lib: Library, album_id: int, offset: int = 0) -> tuple[list[dict], int, int]:
+    album = _album(lib, album_id)
+    if album["rule_json"] is not None:
+        filters, sort = catalogue.read_rule(album["rule_json"])
+    else:
+        filters, sort = catalogue.Filters(kind="all", album_id=album_id), "oldest"
+    return catalogue.page(lib, filters, sort, offset)
+
+
 def items(lib: Library, album_id: int) -> list[dict]:
+    album = _album(lib, album_id)
+    if album["rule_json"] is not None:
+        filters, sort = catalogue.read_rule(album["rule_json"])
+        sql, params = catalogue.where(filters)
+        return [dict(r) for r in lib.db.execute(
+            f"SELECT f.* FROM files f WHERE {sql} ORDER BY {catalogue.SORTS[sort]}", params)]
     return [dict(r) for r in lib.db.execute(
         "SELECT f.* FROM album_items i JOIN files f ON f.id=i.file_id WHERE i.album_id=? "
         "ORDER BY COALESCE(f.taken_at, ''), i.pos", (album_id,))]
 
 
 def rename(lib: Library, album_id: int, name: str) -> str:
+    _album(lib, album_id)
     name = " ".join(name.split())
     if not name:
         raise ValueError("Type a name.")
@@ -242,21 +342,33 @@ def rename(lib: Library, album_id: int, name: str) -> str:
 
 
 def add(lib: Library, album_id: int, file_ids: Iterable[int]) -> int:
+    _album(lib, album_id, static=True)
+    ids = list(dict.fromkeys(file_ids))
     start = lib.db.execute("SELECT COALESCE(MAX(pos), -1) + 1 FROM album_items WHERE album_id=?", (album_id,)).fetchone()[0]
     with lib.transaction() as tx:
+        for file_id in ids:
+            organisation.require_file(lib, file_id, live=True)
         before = tx.total_changes
         tx.executemany("INSERT OR IGNORE INTO album_items (album_id, file_id, pos) VALUES (?,?,?)",
-                       [(album_id, f, start + i) for i, f in enumerate(file_ids)])
+                       [(album_id, f, start + i) for i, f in enumerate(ids)])
         return tx.total_changes - before
 
 
 def remove(lib: Library, album_id: int, file_ids: Iterable[int]) -> None:
     """Take items out of an album (the files themselves are not touched)."""
+    _album(lib, album_id, static=True)
+    ids = [organisation._id(file_id) for file_id in file_ids]
     with lib.transaction() as tx:
-        tx.executemany("DELETE FROM album_items WHERE album_id=? AND file_id=?", [(album_id, f) for f in file_ids])
+        tx.executemany("DELETE FROM album_items WHERE album_id=? AND file_id=?", [(album_id, f) for f in ids])
+        tx.executemany("UPDATE albums SET cover_id=NULL WHERE id=? AND cover_id=?", [(album_id, f) for f in ids])
 
 
 def set_cover(lib: Library, album_id: int, file_id: int) -> None:
+    _album(lib, album_id, static=True)
+    organisation._id(file_id)
+    if not lib.db.execute("SELECT 1 FROM album_items i JOIN files f ON f.id=i.file_id "
+                          "WHERE i.album_id=? AND i.file_id=?", (album_id, file_id)).fetchone():
+        raise ValueError("Choose a live item in this album.")
     lib.db.execute("UPDATE albums SET cover_id=? WHERE id=?", (file_id, album_id))
 
 
@@ -264,14 +376,14 @@ def delete(lib: Library, album_ids: Iterable[int]) -> None:
     """Delete albums (only the album — its photos and videos stay exactly where they are)."""
     with lib.transaction() as tx:
         for a in album_ids:
+            organisation._id(a)
             tx.execute("DELETE FROM album_items WHERE album_id=?", (a,))
             tx.execute("DELETE FROM albums WHERE id=?", (a,))
 
 
 def cleanup(lib: Library) -> None:
     """Drop album entries of files that are gone for good (files in Recovery keep theirs, for Undo)."""
-    lib.db.execute("DELETE FROM album_items WHERE file_id NOT IN "
-                   "(SELECT id FROM files UNION SELECT file_id FROM parked_files UNION SELECT file_id FROM missing_files)")
+    organisation.cleanup(lib)
 
 
 # ----------------------------------------------------------------------------- export
@@ -288,7 +400,7 @@ def plan_export(lib: Library, album_ids: Iterable[int], dest: str | Path) -> lis
     """Verified copies of each album into ``dest\\<album name>``. Nothing is overwritten (names get a
     number); originals are not touched."""
     dest = Path(dest).resolve()
-    if config.APP_DIR_NAME in dest.parts:
+    if lib.in_app_storage(dest):
         raise ValueError("Choose a folder outside Memoria's own .memoria folder.")
     acts, used = [], set()
     names = {r["id"]: r["name"] for r in lib.db.execute("SELECT id, name FROM albums")}
@@ -300,14 +412,11 @@ def plan_export(lib: Library, album_ids: Iterable[int], dest: str | Path) -> lis
             n += 1
         used.add(sub.lower())
         for r in items(lib, aid):
+            lib.check_path(lib.abspath(r["rel_path"]))
             acts.append(Action(op="copy", src=str(lib.abspath(r["rel_path"])), dst=str(dest / sub / r["name"]),
                                size=r["size"], hash=r.get("chash"), reason=f"Album “{names.get(aid)}” exported"))
     return acts
 
 
 def inside_library(lib: Library, dest: str | Path) -> bool:
-    try:
-        Path(dest).resolve().relative_to(lib.root)
-        return True
-    except ValueError:
-        return False
+    return lib.contains(dest)

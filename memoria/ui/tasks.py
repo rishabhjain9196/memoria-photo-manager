@@ -10,7 +10,7 @@ import time
 import traceback
 from typing import Any, Callable, Optional
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QThread, Signal
 
 from ..engine.progress import Cancelled, Progress
 from ..engine.diagnostics import OPERATIONS
@@ -195,3 +195,90 @@ class BackgroundCall(QObject):
     def wait(self) -> None:
         for t in list(self._threads):
             t.wait()
+
+
+_read_threads: set[_CallThread] = set()
+_quit_hook = False
+
+
+def _wait_reads() -> None:
+    for thread in list(_read_threads):
+        thread.wait()
+
+
+def _release_read(thread) -> None:
+    _read_threads.discard(thread)
+    thread.deleteLater()
+
+
+class LatestCall(QObject):
+    """One running read and one replaceable pending read, with stale-result rejection.
+
+    Workers must not touch widgets and must close their own SQLite connections.
+    Destruction invalidates delivery without blocking the GUI; application exit waits
+    for outstanding reads so a running QThread is never destroyed.
+    """
+    result = Signal(object)
+    failed = Signal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        global _quit_hook
+        if not _quit_hook and QCoreApplication.instance() is not None:
+            QCoreApplication.instance().aboutToQuit.connect(_wait_reads)
+            _quit_hook = True
+        self._token = 0
+        self._thread = None
+        self._pending = None
+        self._alive = True
+        self.destroyed.connect(lambda *_: self._destroyed())
+
+    def _destroyed(self, *_):
+        self._alive = False
+        self.invalidate()
+
+    @property
+    def running(self) -> bool:
+        return self._thread is not None or self._pending is not None
+
+    def invalidate(self) -> None:
+        self._token += 1
+        self._pending = None
+
+    def call(self, fn: Callable[[], Any]) -> None:
+        if not self._alive:
+            return
+        self._token += 1
+        self._pending = (self._token, fn)
+        if self._thread is None:
+            self._start()
+
+    def _start(self) -> None:
+        if self._pending is None or not self._alive:
+            return
+        token, fn = self._pending
+        self._pending = None
+        thread = _CallThread(token, fn)
+        self._thread = thread
+        _read_threads.add(thread)
+        thread.done.connect(self._done)
+        thread.finished.connect(self._finished)
+        thread.finished.connect(lambda thread=thread: _release_read(thread))
+        thread.start()
+
+    def _done(self, token, value, error) -> None:
+        if not self._alive or token != self._token:
+            return
+        if error is not None:
+            self.failed.emit(error)
+        else:
+            self.result.emit(value)
+
+    def _finished(self) -> None:
+        self._thread = None
+        self._start()
+
+    def wait(self) -> None:
+        self.invalidate()
+        if self._thread is not None:
+            self._thread.wait()

@@ -33,7 +33,7 @@ def cached_library(tmp_path):
         db.execute("INSERT INTO people VALUES (1,?,'2024-01-01')", (SECRET,))
         db.execute("INSERT INTO faces(file_id,x,y,w,h,score,emb,person_id) VALUES (1,0,0,1,1,1,?,1)",
                    (SECRET.encode(),))
-        db.execute("INSERT INTO albums VALUES (1,?,'manual','2024-01-01',1)", (SECRET,))
+        db.execute("INSERT INTO albums(id,name,kind,created_at,cover_id) VALUES (1,?,'manual','2024-01-01',1)", (SECRET,))
         db.execute("INSERT INTO album_items VALUES (1,1,0)")
         db.execute("INSERT INTO batches VALUES ('batch','2024-01-01','batch',?,'partial',0,0)", (SECRET,))
         db.execute("INSERT INTO operations(batch_id,seq,op,src,dst,hash,reason,status,error) "

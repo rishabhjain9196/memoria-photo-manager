@@ -1,6 +1,7 @@
 """Base class for every page plus the single, shared Find → Review → Apply → Undo flow."""
 from __future__ import annotations
 
+from html import escape
 from typing import Any, Callable, Optional
 
 from PySide6.QtCore import Qt
@@ -104,28 +105,11 @@ class Page(QWidget):
                       confirm_text: str, note: str, done_message: Callable[[actions.BatchResult], str],
                       after: Optional[Callable[[actions.BatchResult], None]] = None, rescan: bool = False,
                       require_ack: Optional[str] = None, confirm_action: bool = True,
-                      before_apply: Optional[Callable[[], None]] = None) -> bool:
+                      before_apply: Optional[Callable[[], None]] = None,
+                      on_declined: Optional[Callable[[], None]] = None) -> bool:
         if not acts:
             return False
-        ids = [a.file_id for a in acts if a.file_id is not None]
-        if confirm_action and not confirm(self, title, summary, details, confirm_text, note=note,
-                                          thumbs=self.ctx.thumbs, file_ids=ids, require_ack=require_ack,
-                                          danger=bool(require_ack), note_kind="warn" if require_ack else "trust"):
-            return False
         lib = self.lib
-
-        def work(prog):
-            prog.check()
-            if before_apply:
-                before_apply()
-            if not rescan:
-                return actions.apply(lib, kind, title, acts, prog)
-            res = actions.apply(lib, kind, title, acts, prog.step(0, 2, title))
-            if res.cancelled:
-                return res
-            from ...engine import scanner
-            scanner.index(lib, prog.step(1, 2, "Updating the catalogue"))
-            return res
 
         def done(res: actions.BatchResult):
             self.ctx.library_modified.emit()
@@ -148,7 +132,72 @@ class Page(QWidget):
             if after:
                 after(res)
 
-        return self.run(title, work, done, on_cancel=lambda: self.ctx.library_modified.emit(), notify_success=False)
+        def prepare(prog):
+            from ...engine import assets
+            prog.update(0, 0, "Reviewing linked photo, video and edit components...", force=True)
+            try:
+                return assets.prepare(lib, acts, kind)
+            finally:
+                lib.close_thread()
+
+        def ready(prepared):
+            plan = prepared.actions
+            shown_details, acknowledgement, shown_summary = list(details), require_ack, summary
+            shown_confirm = confirm_text
+            if prepared.groups:
+                count = sum(action.op != "rmdir" for action in plan)
+                size = sum(action.size for action in plan)
+                shown_summary = f"Final plan: {fmt_n(count, 'file')} ({fmt_size(size)}), including linked components."
+                shown_confirm = ("Copy " if all(action.op in ("copy", "rmdir") for action in plan) else "Move ") + \
+                    fmt_n(count, "file")
+                shown_details[:0] = [
+                    "<b>Linked parts are included, even if they are not duplicates.</b>",
+                    "Matching names in the same folder link Live Photo image/video parts, RAW+JPEG and AAE/XMP "
+                    "sidecars. Review these inferred links; Apple edit instructions are not applied.",
+                    "Removing an image can also move its unique video and edit sidecars to Recovery.",
+                    *[" + ".join(escape(row["name"]) for row in group[:4])
+                      + (f" (+{len(group) - 4} parts)" if len(group) > 4 else "")
+                      for group in prepared.groups[:3]],
+                ]
+                if len(prepared.groups) > 3:
+                    shown_details.append(f"{len(prepared.groups) - 3} more linked assets are included. "
+                                         "Cancel and review smaller selections if needed.")
+                acknowledgement = ((require_ack + " ") if require_ack else "") + \
+                    "I reviewed the linked parts, including any unique video or edit files."
+            if prepared.merges:
+                shown_details.append(
+                    f"<b>Organisation is preserved in retained copies ({len(prepared.merges)} merge(s)).</b> "
+                    "Tags, static album membership and favourites are combined. Unset ratings/review states are "
+                    "filled; the keeper wins conflicts. Face records and health baselines are not transferred. "
+                    "Undo restores organisation only if it has not subsequently changed.")
+            ids = [action.file_id for action in plan if action.file_id is not None]
+            if (confirm_action or prepared.groups) and not confirm(
+                    self, title, shown_summary, shown_details, shown_confirm, note=note,
+                    thumbs=self.ctx.thumbs, file_ids=ids, require_ack=acknowledgement,
+                    danger=bool(acknowledgement), note_kind="warn" if acknowledgement else "trust"):
+                self.ctx.toast_requested.emit("Nothing was changed.", "")
+                if on_declined:
+                    on_declined()
+                return
+
+            def work(prog):
+                try:
+                    prog.check()
+                    if before_apply:
+                        before_apply()
+                    result = actions.apply(lib, kind, title, plan,
+                                           prog.step(0, 2, title) if rescan else prog, companions_reviewed=True)
+                    if rescan and not result.cancelled:
+                        from ...engine import scanner
+                        scanner.index(lib, prog.step(1, 2, "Updating the catalogue"))
+                    return result
+                finally:
+                    lib.close_thread()
+            if not self.run(title, work, done, on_cancel=lambda: self.ctx.library_modified.emit(),
+                            notify_success=False) and on_declined:
+                on_declined()
+
+        return self.run("Preparing " + title, prepare, ready, notify_success=False)
 
 
 def recovery_note() -> str:

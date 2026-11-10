@@ -19,6 +19,7 @@ class ResetOptions:
     videos: bool = True
     people: bool = False
     albums: bool = False
+    organisation: bool = False
     health: bool = False
     missing: bool = False
     duplicate_choices: bool = False
@@ -78,9 +79,12 @@ def _clear_catalogue(lib: Library, options: ResetOptions) -> None:
             forgotten["files"] = [r[0] for r in db.execute("SELECT file_id FROM missing_files")]
             forgotten["faces"] = [r[0] for r in db.execute(
                 "SELECT id FROM faces WHERE file_id IN (SELECT file_id FROM missing_files)")]
+            db.execute("UPDATE operations SET status='superseded' WHERE op='metadata' AND id IN "
+                       "(SELECT op_id FROM metadata_journal WHERE file_id IN (SELECT file_id FROM missing_files))")
+            db.execute("DELETE FROM metadata_journal WHERE file_id IN (SELECT file_id FROM missing_files)")
             db.execute("DELETE FROM face_rejects WHERE face_id IN "
                        "(SELECT id FROM faces WHERE file_id IN (SELECT file_id FROM missing_files))")
-            for table in ("faces", "face_scans", "album_items"):
+            for table in ("faces", "face_scans", "album_items", "file_tags", "file_metadata"):
                 db.execute(f"DELETE FROM {table} WHERE file_id IN (SELECT file_id FROM missing_files)")
             db.execute("UPDATE albums SET cover_id=NULL WHERE cover_id IN (SELECT file_id FROM missing_files)")
             db.execute("DELETE FROM missing_files")
@@ -90,6 +94,21 @@ def _clear_catalogue(lib: Library, options: ResetOptions) -> None:
         if options.albums:
             db.execute("DELETE FROM album_items")
             db.execute("DELETE FROM albums")
+        if options.organisation:
+            for table in ("file_tags", "file_metadata", "tags"):
+                db.execute(f"DELETE FROM {table}")
+        if options.organisation or options.albums:
+            for row in db.execute("SELECT op_id,before_json,after_json FROM metadata_journal").fetchall():
+                snapshots = []
+                for key in ("before_json", "after_json"):
+                    value = json.loads(row[key])
+                    if options.organisation:
+                        value.update(rating=0, favorite=False, review="unreviewed", tags=[])
+                    if options.albums:
+                        value["albums"] = []
+                    snapshots.append(json.dumps(value))
+                db.execute("UPDATE metadata_journal SET before_json=?,after_json=? WHERE op_id=?",
+                           (*snapshots, row["op_id"]))
         if options.duplicate_choices:
             db.execute("DELETE FROM duplicate_kept")
         db.execute("INSERT INTO storage_reset VALUES (1,?,'caches',?)",

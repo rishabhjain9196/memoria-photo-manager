@@ -171,6 +171,8 @@ class MainWindow(QMainWindow):
         self.ctx.album_requested.connect(self.open_album)
         self.ctx.badges_changed.connect(self._update_badges)
         self.ctx.checkup_requested.connect(self.run_checkup)
+        self.ctx.library_modified.connect(self._root_status)
+        self.runner.finished.connect(lambda _outcome: self._root_status())
         self.toast.undo_clicked.connect(self.undo_batch)
         geo = self.settings.value("geometry")
         if geo is not None:
@@ -196,6 +198,8 @@ class MainWindow(QMainWindow):
         sl.addWidget(self.lib_label)
         change = button("Change library…", "link", self.choose_library, tip="Ctrl+O")
         sl.addLayout(hbox(8, change, None))
+        self.roots_btn = button("Library folders...", "link", self.manage_roots)
+        sl.addLayout(hbox(8, self.roots_btn, None))
         self.storage_btn = button("Storage && reset…", "link", self.manage_storage)
         sl.addLayout(hbox(8, self.storage_btn, None))
         self.diagnostics_btn = button("Diagnostics…", "link", self.manage_diagnostics)
@@ -334,6 +338,7 @@ class MainWindow(QMainWindow):
 
     def _show_library_ui(self, has_lib: bool) -> None:
         self.nav_container.setEnabled(has_lib)
+        self.roots_btn.setEnabled(has_lib)
         self.storage_btn.setEnabled(has_lib and not self.runner.busy)
         if not has_lib:
             self.welcome.set_recent(self.settings.value("recent", [], list) or [])
@@ -429,12 +434,14 @@ class MainWindow(QMainWindow):
                 bits.append(f"{fmt_n(s.unreadable_folders, 'folder')} couldn't be read (kept as they were)")
             if s.unreadable_files:
                 bits.append(f"{fmt_n(s.unreadable_files, 'file')} couldn't be read (catalogue entries kept)")
+            if s.offline_roots:
+                bits.append(f"{s.offline_roots} media folder(s) offline; cached files retained")
             if bits:
                 self.toast.show_message("Library updated: " + ", ".join(bits) + ".", seconds=6)
             else:
                 self.toast.show_message("Library indexing finished.", seconds=4)
             self.ctx.notification_requested.emit(
-                "index_issues" if s.unreadable_folders or s.unreadable_files or a.errors else
+                "index_issues" if s.unreadable_folders or s.unreadable_files or s.offline_roots or a.errors else
                 "index_complete" if live else "rebuild_complete", 0)
 
         if live:
@@ -540,6 +547,26 @@ class MainWindow(QMainWindow):
         self.ctx.edit_selection.clear()
         self.ctx.thumbs.clear()
         self.stack.setCurrentWidget(self.welcome)
+
+    def manage_roots(self) -> None:
+        if self.ctx.library is None or self.runner.busy or self.ctx.indexing or self.ctx.maintenance:
+            self.toast.show_message("Finish the current task or rebuild before changing library folders.")
+            return
+        from .library_roots import LibraryRootsDialog
+        dialog = LibraryRootsDialog(self, self.ctx)
+        dialog.exec()
+        if dialog.changed:
+            self.index_library()
+            self.ctx.library_modified.emit()
+        dialog.deleteLater()
+
+    def _root_status(self) -> None:
+        if self.ctx.library is None or self._closing:
+            return
+        sources = self.ctx.library.roots()
+        offline = sum(not source["online"] for source in sources)
+        self.roots_btn.setText(f"Library folders ({len(sources)}"
+                               + (f", {offline} offline" if offline else "") + ")...")
 
     def manage_storage(self) -> None:
         lib = self.ctx.library

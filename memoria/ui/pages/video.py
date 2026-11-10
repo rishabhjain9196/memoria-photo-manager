@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComb
 from ...engine import config, ffmpeg, videotools
 from ...engine.ffmpeg import VideoInfo
 from .. import theme
+from ..tasks import LatestCall
 from ..widgets import (Banner, Card, MessageDialog, button, fmt_duration, fmt_n, fmt_size, hbox, label, scroll,
                        show_in_explorer, vbox)
 from .base import Page
@@ -210,41 +211,62 @@ class _VideoModel(QAbstractTableModel):
 class _Prober(QObject):
     """Background ffprobe-style reads (one at a time) so the table never blocks."""
     probed = Signal(str, object, object)  # key, VideoInfo | None, QImage | None
+    failed = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._q: queue.Queue = queue.Queue()
+        self._q: queue.Queue = queue.Queue(maxsize=MAX_PENDING_PROBES)
         self._alive = True
-        threading.Thread(target=self._loop, name="video-probe", daemon=True).start()
+        self._thread = threading.Thread(target=self._loop, name="video-probe", daemon=True)
+        self._thread.start()
 
-    def request(self, key: str, path: Path, want_frame: bool) -> None:
-        self._q.put((key, path, want_frame))
+    def request(self, key: str, path: Path, want_frame: bool, *, library=None) -> None:
+        if self._alive:
+            self._q.put_nowait((key, path, want_frame, library))
 
     def stop(self) -> None:
         self._alive = False
-        self._q.put(None)
+        while True:
+            try:
+                self._q.get_nowait()
+            except queue.Empty:
+                break
+        self._q.put_nowait(None)
+        if threading.current_thread() is not self._thread:
+            self._thread.join()
 
     def _loop(self) -> None:
         while True:
             job = self._q.get()
             if job is None or not self._alive:
                 return
-            key, path, want_frame = job
+            key, path, want_frame, lib = job
+            img, error = None, ""
             try:
+                if lib is not None:
+                    if lib._lock_key is None:
+                        raise RuntimeError("The source library is closed.")
+                    lib.check_path(path)
                 info = ffmpeg.probe(path)
-            except Exception:
-                info = None
-            img = None
-            if want_frame and info is not None:
-                try:
+                if want_frame and info is not None:
+                    if lib is not None:
+                        if lib._lock_key is None:
+                            raise RuntimeError("The source library is closed.")
+                        lib.check_path(path)
                     data = ffmpeg.video_frame(path, at=min(1.0, info.duration / 2), max_side=256)
                     if data:
                         img = QImage.fromData(data, "JPG")
-                except Exception:
-                    img = None
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+                info = None
+            finally:
+                if lib is not None:
+                    lib.close_thread()
             if not self._alive:
                 return
             try:
+                if error:
+                    self.failed.emit(key, error)
                 self.probed.emit(key, info, img)
             except RuntimeError:
                 return
@@ -263,6 +285,8 @@ class VideoPage(Page):
         self._checked: set[str] = set()
         self._info: dict[str, Optional[VideoInfo]] = {}
         self._pending: set[str] = set()
+        self._pending_requests = {}
+        self._probe_errors = {}
         self._probe_queue: deque[str] = deque()
         self._estimates: dict[str, _Estimate] = {}
         self._total_src = self._total_est = 0.0
@@ -272,7 +296,13 @@ class VideoPage(Page):
 
         self.prober = _Prober(self)
         self.prober.probed.connect(self._probed)
+        self.prober.failed.connect(self._probe_failed)
         self.destroyed.connect(self.prober.stop)
+        self.input_bg = LatestCall(self)
+        self.input_bg.result.connect(self._inputs_ready)
+        self.input_bg.failed.connect(lambda error: MessageDialog(
+            self, "Could not add videos", str(error)).exec())
+        self._incoming = {}
 
         self.body.addWidget(Banner(
             "<b>Your original videos are never changed.</b> Compressed copies are saved as new files and "
@@ -435,7 +465,16 @@ class VideoPage(Page):
     def shutdown(self) -> None:
         self._closed = True
         self._probe_queue.clear()
+        self.input_bg.wait()
         self.prober.stop()
+
+    def _mark_stale(self):
+        self.input_bg.invalidate()
+        self._incoming.clear()
+        self._info.clear()
+        self._probe_errors.clear()
+        self._probe_queue.clear()
+        super()._mark_stale()
 
     def refresh(self) -> None:
         lib = self.lib
@@ -504,25 +543,48 @@ class VideoPage(Page):
 
     def add_external_files(self, files: list[Path]) -> None:
         """Add videos that live outside the library (they are checked and probed right away)."""
-        known, errors = set(self._row_of), []
+        known = set(self._row_of)
         for f in files:
+            f = Path(f)
             key = str(f).lower()
             if key in known:
                 self._checked.add(key)
                 continue
-            if not f.is_file():
-                errors.append(f"{f.name}: file is unavailable")
-                continue
+            self._incoming[key] = f
+        self._settings_changed()
+        if not self._incoming:
+            return
+        lib, generation, inputs = self.lib, self.ctx.generation, dict(self._incoming)
+        def work():
+            rows, errors = [], []
             try:
-                size = f.stat().st_size
-            except OSError as error:
-                errors.append(f"{f.name}: {error}")
-                continue
-            self._external.append({"key": key, "id": None, "path": f, "name": f.name, "tip": str(f),
-                                   "sub": f"Outside the library · {f.parent}", "size": size,
-                                   "duration": None, "width": None, "height": None, "external": True})
-            self._checked.add(key)
-            known.add(key)
+                for key, path in inputs.items():
+                    try:
+                        if lib is not None:
+                            lib.check_path(path)
+                        if not path.is_file():
+                            raise FileNotFoundError("file is unavailable")
+                        size = path.stat().st_size
+                        rows.append({"key": key, "id": None, "path": path, "name": path.name, "tip": str(path),
+                                     "sub": f"Opened file · {path.parent}", "size": size,
+                                     "duration": None, "width": None, "height": None, "external": True})
+                    except (OSError, ValueError, RuntimeError) as error:
+                        errors.append(f"{path.name}: {error}")
+                return lib, generation, inputs, rows, errors
+            finally:
+                if lib is not None:
+                    lib.close_thread()
+        self.input_bg.call(work)
+
+    def _inputs_ready(self, result):
+        lib, generation, inputs, rows, errors = result
+        if self._closed or (lib, generation) != (self.lib, self.ctx.generation):
+            return
+        for key in inputs:
+            self._incoming.pop(key, None)
+        known = set(self._row_of)
+        self._external.extend(row for row in rows if row["key"] not in known)
+        self._checked.update(row["key"] for row in rows)
         lib_rows = [r for r in self._rows if not r["external"]]
         self._fill(lib_rows + self._external)
         if errors:
@@ -534,6 +596,12 @@ class VideoPage(Page):
         if self._closed:
             return
         self._pending.discard(key)
+        request = self._pending_requests.pop(key, None)
+        if request != (self.lib, self.ctx.generation):
+            if key in self._checked and key in self._row_of:
+                self._probe_queue.append(key)
+            self._queue_probes()
+            return
         i = self._row_of.get(key)
         if i is None:
             self._queue_probes()
@@ -550,6 +618,10 @@ class VideoPage(Page):
         self.model.dataChanged.emit(self.model.index(i, C_THUMB), self.model.index(i, C_EST))
         self._queue_probes()
         self._update_summary()
+
+    def _probe_failed(self, key, error):
+        if not self._closed and self._pending_requests.get(key) == (self.lib, self.ctx.generation):
+            self._probe_errors[key] = error
 
     def settings(self) -> videotools.CompressSettings:
         return videotools.CompressSettings(
@@ -592,7 +664,8 @@ class VideoPage(Page):
             if key in self._checked and key in self._row_of and key not in self._info and key not in self._pending:
                 row = self._rows[self._row_of[key]]
                 self._pending.add(key)
-                self.prober.request(key, row["path"], row["external"])
+                self._pending_requests[key] = (self.lib, self.ctx.generation)
+                self.prober.request(key, row["path"], row["external"], library=self.lib)
 
     def _estimate(self, row, settings) -> _Estimate:
         key = row["key"]
@@ -600,7 +673,8 @@ class VideoPage(Page):
             return _Estimate("Checking…", color=theme.MUTED, unknown=1)
         info = self._info[key]
         if info is None:
-            return _Estimate("Can't read", "FFmpeg could not read this video.", theme.DANGER, unknown=1)
+            return _Estimate("Can't read", self._probe_errors.get(key, "FFmpeg could not read this video."),
+                             theme.DANGER, unknown=1)
         estimate = videotools.estimate(info, settings)
         if estimate.get("est_mb") is None:
             return _Estimate("Unknown", estimate["note"], theme.MUTED, unknown=1)
@@ -657,7 +731,7 @@ class VideoPage(Page):
         if not rows:
             return
         out = self.output.path()
-        if self.lib is not None and _inside(out, config.app_dir(self.lib.root)):
+        if self.lib is not None and self.lib.in_app_storage(out):
             MessageDialog(self, "Choose another folder",
                           "That folder belongs to Memoria's own catalogue. Please pick a normal folder.").exec()
             return
@@ -667,8 +741,18 @@ class VideoPage(Page):
         lib = self.lib
 
         def work(progress):
-            with actions.created_batch(lib, "video", "Compress videos"):
-                return videotools.compress_many(files, out, settings, progress)
+            try:
+                if lib is not None:
+                    if lib._lock_key is None:
+                        raise RuntimeError("The source library is closed.")
+                    for path in files:
+                        lib.check_path(path)
+                    lib.check_path(out)
+                with actions.created_batch(lib, "video", "Compress videos"):
+                    return videotools.compress_many(files, out, settings, progress)
+            finally:
+                if lib is not None:
+                    lib.close_thread()
 
         def cancelled():
             self.ctx.library_modified.emit()

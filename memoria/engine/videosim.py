@@ -281,7 +281,7 @@ def find_similar_videos(lib: Library, progress: Optional[Progress] = None,
                         threshold: int = FRAME_THRESHOLD) -> list[SimilarGroup]:
     """Groups of visually similar videos, best first within each group. Changes no files."""
     progress = progress or Progress()
-    rows = [dict(r) for r in lib.files("kind='video' AND error IS NULL AND duration > 0")]
+    rows = [dict(r) for r in lib.readable_files("kind='video' AND error IS NULL AND duration > 0")]
     if len(rows) < 2:
         progress.update(1, 1, "Found 0 groups of similar videos", force=True)
         return []

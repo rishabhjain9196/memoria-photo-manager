@@ -1,4 +1,4 @@
-"""Read-only storage distributions, capture timeline and offline photo locations."""
+"""Library files and actions, storage distributions, timeline and offline locations."""
 from dataclasses import replace
 
 from PySide6.QtCore import Qt, QTimer
@@ -7,14 +7,14 @@ from PySide6.QtWidgets import QComboBox, QListWidget, QListWidgetItem, QSplitter
 from ...engine import catalogue, geography
 from ..insight_charts import BarChart, GeoChart
 from ..library_filters import FilterDialog
-from ..tasks import BackgroundCall
+from ..tasks import LatestCall
 from ..widgets import button, fmt_size, hbox, label, vbox
 from .base import Page
 
 
 class InsightsPage(Page):
     title = "Library insights"
-    subtitle = "Explore catalogue storage, dates and GPS locations. Nothing here changes your files."
+    subtitle = "Find your largest files, review storage and explore dates and offline GPS locations."
 
     def __init__(self, ctx):
         super().__init__(ctx)
@@ -25,10 +25,14 @@ class InsightsPage(Page):
         self._shown_key = self._mapped_key = None
         self._auto_bounds = geography.INDIA
         self.folder = QComboBox()
+        self.folder.setEditable(True)
+        self.folder.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.folder.setMinimumWidth(200)
         self.header_actions.addWidget(self.folder)
-        self.header_actions.addWidget(button("Filters…", on_click=self._filters))
-        self.header_actions.addWidget(button("Clear", "link", self._clear))
+        self.filter_btn = button("Filters…", on_click=self._filters)
+        self.clear_btn = button("Clear", "link", self._clear)
+        self.header_actions.addWidget(self.filter_btn)
+        self.header_actions.addWidget(self.clear_btn)
         self.summary = label("", "muted", wrap=True)
         self.status = label("", "small", wrap=True)
         self.tabs = QTabWidget()
@@ -93,10 +97,24 @@ class InsightsPage(Page):
         map_layout.setStretchFactor(map_split, 1)
         map_tab.setLayout(map_layout)
         self.tabs.addTab(map_tab, "Map")
+        from .photos import PhotosPage
+        self.files_page = PhotosPage(ctx, embedded=True)
+        files_tab = QWidget()
+        files_layout = vbox(label(
+            "All indexed file types, across the whole library, largest first. No folder selection is needed. "
+            "Use metadata sorts and filters to find top contributors. Recovery moves alone do not free disk space; "
+            "space is freed only when Recovery is emptied. Compression applies only to selected videos.",
+            "small", wrap=True), self.files_page)
+        files_layout.setStretchFactor(self.files_page, 1)
+        files_tab.setLayout(files_layout)
+        self.tabs.addTab(files_tab, "All files")
+        self._files_tab = files_tab
+        self.header_actions.addWidget(button("All files", "primary", self._all_files))
+        self.files_page.open_all_files()
         self.body.addWidget(self.summary)
         self.body.addWidget(self.status)
         self.body.addWidget(self.tabs, 1)
-        self.bg = BackgroundCall(self)
+        self.bg = LatestCall(self)
         self.bg.result.connect(self._show)
         self.bg.failed.connect(self._failed)
         self.timer = QTimer(self)
@@ -104,6 +122,8 @@ class InsightsPage(Page):
         self.timer.setInterval(180)
         self.timer.timeout.connect(self._load)
         self.folder.currentIndexChanged.connect(self._folder)
+        self.folder.lineEdit().returnPressed.connect(self._typed_folder)
+        self.tabs.currentChanged.connect(self._tab_changed)
         self.folders.chosen.connect(self._drill_folder)
         self.types.chosen.connect(lambda row: self.ctx.browse_requested.emit(
             replace(self.filters, extension=row["key"])))
@@ -121,18 +141,23 @@ class InsightsPage(Page):
         self._closed = True
         self.timer.stop()
         self.bg.wait()
+        self.files_page.shutdown()
 
     def refresh(self):
-        self.folder.blockSignals(True)
-        self.folder.clear()
-        for folder in catalogue.folders(self.lib):
-            self.folder.addItem(folder or "Whole library", folder)
-        selected = self.folder.findData(self.filters.folder)
-        if selected < 0:
-            self.folder.addItem(f"{self.filters.folder} (not currently indexed)", self.filters.folder)
-            selected = self.folder.count() - 1
-        self.folder.setCurrentIndex(selected)
-        self.folder.blockSignals(False)
+        self._load()
+
+    def _all_files(self):
+        self.files_page.open_all_files()
+        self.tabs.setCurrentWidget(self._files_tab)
+
+    def _tab_changed(self):
+        files = self.tabs.currentWidget() is self._files_tab
+        for control in (self.folder, self.filter_btn, self.clear_btn, self.summary, self.status):
+            control.setVisible(not files)
+
+    def _typed_folder(self):
+        folder = self.folder.currentText().strip()
+        self.filters = replace(self.filters, folder="" if folder == "Whole library" else folder, recursive=True)
         self._load()
 
     def _load(self):
@@ -140,9 +165,6 @@ class InsightsPage(Page):
             return
         if self.lib is None or self.busy:
             self.stale = True
-            return
-        if self.bg.running:
-            self.timer.start()
             return
         lib, filters, prefix, bounds, generation = self.lib, self.filters, self.prefix, self.bounds, self.ctx.generation
         map_only = self._shown_key == (generation, filters, prefix)
@@ -157,11 +179,14 @@ class InsightsPage(Page):
         def work():
             try:
                 with self.ctx.diagnostics.measure("insights"):
-                    data = {"generation": generation, "request": (filters, prefix, bounds)}
+                    data = {"library": lib, "generation": generation, "request": (filters, prefix, bounds)}
                     if not map_only:
-                        data.update(distribution=catalogue.distribution(lib, filters),
+                        data.update(distribution=catalogue.distribution(lib, filters, limit=200),
                                     time=catalogue.timeline(lib, filters, prefix),
-                                    albums=catalogue.matching_albums(lib, catalogue.in_period(filters, prefix)))
+                                    albums=catalogue.matching_albums(
+                                        lib, catalogue.in_period(filters, prefix), limit=200))
+                        data["folders"] = [row[0] for row in lib.db.execute(
+                            "SELECT DISTINCT folder FROM files ORDER BY folder COLLATE NOCASE LIMIT 300")]
                     data["map"] = catalogue.map_data(lib, filters, bounds)
                     return data
             finally:
@@ -171,7 +196,8 @@ class InsightsPage(Page):
     def _show(self, data):
         if self._closed:
             return
-        if data["generation"] != self.ctx.generation or data["request"][:2] != (self.filters, self.prefix):
+        if (data["library"] is not self.lib or data["generation"] != self.ctx.generation
+                or data["request"][:2] != (self.filters, self.prefix)):
             self.stale = True
             self.timer.start()
             return
@@ -182,6 +208,19 @@ class InsightsPage(Page):
         for widget in (self.folders, self.types, self.time, self.album_list):
             widget.setEnabled(True)
         distribution = data["distribution"]
+        self.folder.blockSignals(True)
+        self.folder.clear()
+        self.folder.addItem("Whole library", "")
+        for folder in data.get("folders", []):
+            if folder:
+                self.folder.addItem(folder, folder)
+        selected = self.folder.findData(self.filters.folder)
+        if selected < 0:
+            self.folder.addItem(self.filters.folder, self.filters.folder)
+            selected = self.folder.count() - 1
+        self.folder.setCurrentIndex(selected)
+        self.folder.setToolTip("First 300 indexed folders. Type a folder path to explore any other folder.")
+        self.folder.blockSignals(False)
         self.summary.setText(f"{distribution['count']:,} indexed files · {fmt_size(distribution['bytes'])} · "
                              f"{self.filters.folder or 'Library root'}"
                              f"{' (including subfolders)' if self.filters.recursive else ' (direct files only)'} · "
@@ -208,7 +247,8 @@ class InsightsPage(Page):
             self.timer.start()
             return
         self.timer.stop()
-        self.status.setText("Click a bar or photo marker to explore. Data reflects the last scan; F5 refreshes the library.")
+        self.status.setText("Click a bar or photo marker to explore. Up to 200 folders, formats and albums are shown; "
+                            "totals include all matches. Data reflects the last scan; F5 refreshes the library.")
         self._mapped_key = (self.ctx.generation, self.filters)
         if self.bounds is None:
             self._auto_bounds = data["map"]["bounds"]
@@ -251,7 +291,11 @@ class InsightsPage(Page):
         if row["direct"]:
             self.ctx.browse_requested.emit(replace(self.filters, folder=row["key"], recursive=False))
         else:
-            self.folder.setCurrentIndex(self.folder.findData(row["key"]))
+            index = self.folder.findData(row["key"])
+            if index < 0:
+                self.folder.addItem(row["key"], row["key"])
+                index = self.folder.count() - 1
+            self.folder.setCurrentIndex(index)
 
     def _browse(self):
         self.ctx.browse_requested.emit(self.filters)

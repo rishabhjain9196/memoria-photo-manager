@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import config
+from . import config, roots
 from .actions import Action
 from .db import Library
 from .progress import Progress
@@ -46,7 +46,7 @@ def find_tidy(lib: Library, progress: Progress | None = None) -> TidyReport:
     progress = progress or Progress()
     progress.update(0, 2, "Looking for leftovers…")
     rep = TidyReport({k: [] for k in CATEGORIES})
-    for r in lib.files():
+    for r in lib.readable_files():
         r = dict(r)
         if is_apple_edit_sidecar(r["rel_path"]):
             rep.protected_sidecars += 1
@@ -76,11 +76,14 @@ def empty_folders(lib: Library, removing: set[str]) -> list[dict]:
             counts[folder] = counts.get(folder, 0) + 1
             folder = os.path.dirname(folder)
     out = []
-    root = str(lib.root)
-    for d in walk_dirs(lib.root):
-        rel = d[len(root) + 1:]
-        if counts.get(rel.lower(), 0) == 0:
-            out.append({"rel_path": rel, "name": os.path.basename(rel), "size": 0, "folder": os.path.dirname(rel)})
+    for source in lib.roots():
+        if not source["online"]:
+            continue
+        root = source["path"]
+        for d in walk_dirs(Path(root)):
+            rel = roots.key_for(source["id"], d[len(root) + 1:])
+            if counts.get(rel.lower(), 0) == 0:
+                out.append({"rel_path": rel, "name": os.path.basename(rel), "size": 0, "folder": os.path.dirname(rel)})
     out.sort(key=lambda x: -x["rel_path"].count(os.sep))  # deepest first so parents empty out
     return out
 

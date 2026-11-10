@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QFileDialog, QHeaderView, QLineEdit, QStackedWidg
 
 from ...engine import compare
 from .. import theme
+from ..review_pages import ReviewGroup, ReviewPages
 from ..widgets import Banner, Card, EmptyState, Tile, button, fmt_n, fmt_size, hbox, label, vbox
 from .base import Page
 
@@ -43,15 +44,17 @@ class ComparePage(Page):
             Tile(text="In both")
         self.here = _tree()
         self.there = _tree()
-        self.here.itemChanged.connect(lambda *_: self._update())
-        self.there.itemChanged.connect(lambda *_: self._update())
+        self.here_pages = ReviewPages(self.here, self._render_here, lambda row: row["size"])
+        self.there_pages = ReviewPages(self.there, self._render_there, lambda row: row.size)
+        self.here_pages.changed.connect(self._update)
+        self.there_pages.changed.connect(self._update)
         self.copy_out = button("Copy to other folder", "primary", lambda: self.sync(True))
         self.copy_in = button("Copy into this library", "primary", lambda: self.sync(False))
         tabs = QTabWidget()
         w1, w2 = QWidget(), QWidget()
-        w1.setLayout(vbox(self.here, hbox(label("Ticked files are copied to the same sub-folder in the other folder.",
+        w1.setLayout(vbox(self.here, self.here_pages.controls, hbox(label("Ticked files are copied to the same sub-folder in the other folder.",
                                                  "small"), None, self.copy_out), spacing=8, margins=(0, 8, 0, 0)))
-        w2.setLayout(vbox(self.there, hbox(label("Ticked files are copied into this library, keeping their sub-folders.",
+        w2.setLayout(vbox(self.there, self.there_pages.controls, hbox(label("Ticked files are copied into this library, keeping their sub-folders.",
                                                  "small"), None, self.copy_in), spacing=8, margins=(0, 8, 0, 0)))
         tabs.addTab(w1, "Missing from the other folder")
         tabs.addTab(w2, "Missing from this library")
@@ -71,7 +74,7 @@ class ComparePage(Page):
         self._update()
 
     def refresh(self) -> None:
-        if self.result is not None and Path(self.path.text()).is_dir():
+        if self.result is not None and self.path.text().strip():
             self.run_compare()
 
     def _browse(self) -> None:
@@ -81,7 +84,7 @@ class ComparePage(Page):
 
     def run_compare(self) -> None:
         other = self.path.text().strip()
-        if not other or not Path(other).is_dir():
+        if not other:
             self.ctx.toast_requested.emit("Choose a folder that exists.", "")
             return
         lib = self.lib
@@ -93,30 +96,33 @@ class ComparePage(Page):
                         theme.WARN if res.only_here else theme.OK)
         self.t_there.set(f"{len(res.only_there):,}", fmt_size(res.bytes_only_there))
         self.t_both.set(f"{res.in_both:,}")
-        for tree, rows in ((self.here, [(r["rel_path"], r["size"], r) for r in res.only_here]),
-                           (self.there, [(t.rel_path, t.size, t) for t in res.only_there])):
-            tree.blockSignals(True)
-            tree.clear()
-            for rel, size, obj in rows:
-                it = QTreeWidgetItem([rel, fmt_size(size)])
-                it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                it.setCheckState(0, Qt.CheckState.Checked)
-                it.setData(0, Qt.ItemDataRole.UserRole, obj)
-                tree.addTopLevelItem(it)
-            tree.blockSignals(False)
+        self.here_pages.set_groups([ReviewGroup("here", "Copy to other folder", res.only_here,
+                                                size=res.bytes_only_here)])
+        self.there_pages.set_groups([ReviewGroup("there", "Copy into this library", res.only_there,
+                                                 size=res.bytes_only_there)])
         self.tabs.setTabText(0, f"Missing from the other folder ({len(res.only_here):,})")
         self.tabs.setTabText(1, f"Missing from this library ({len(res.only_there):,})")
         self.stack.setCurrentWidget(self.results)
         self._update()
 
     def _checked(self, tree: QTreeWidget) -> list:
-        return [tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole) for i in range(tree.topLevelItemCount())
-                if tree.topLevelItem(i).checkState(0) == Qt.CheckState.Checked]
+        pages, key = (self.here_pages, "here") if tree is self.here else (self.there_pages, "there")
+        return pages.selected().get(key, [])
+
+    def _render_here(self, _key, row):
+        item = QTreeWidgetItem([self.lib.display_path(row["rel_path"]), fmt_size(row["size"])])
+        item.setData(0, Qt.ItemDataRole.UserRole, row)
+        return item
+
+    def _render_there(self, _key, row):
+        item = QTreeWidgetItem([row.rel_path, fmt_size(row.size)])
+        item.setData(0, Qt.ItemDataRole.UserRole, row)
+        return item
 
     def _update(self) -> None:
-        a, b = self._checked(self.here), self._checked(self.there)
-        self.copy_out.setText(f"Copy {fmt_n(len(a), 'file')} to other folder")
-        self.copy_in.setText(f"Copy {fmt_n(len(b), 'file')} into this library")
+        a, b = self.here_pages.selected_count, self.there_pages.selected_count
+        self.copy_out.setText(f"Copy {fmt_n(a, 'file')} to other folder")
+        self.copy_in.setText(f"Copy {fmt_n(b, 'file')} into this library")
         self.copy_out.setEnabled(bool(a) and not self.busy)
         self.copy_in.setEnabled(bool(b) and not self.busy)
 

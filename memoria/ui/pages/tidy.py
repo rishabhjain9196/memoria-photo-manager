@@ -7,6 +7,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHeaderView, QSplitter, QTreeWidget, QTreeWidgetItem
 
 from ...engine import tidy
+from ..review_pages import ReviewGroup, ReviewPages
+from ..tasks import LatestCall
 from ..widgets import Banner, MessageDialog, Preview, button, fmt_date, fmt_n, fmt_size, hbox, label, show_in_explorer
 from .base import Page, recovery_note
 
@@ -24,7 +26,6 @@ class TidyPage(Page):
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.tree.itemChanged.connect(lambda *_: self._update())
         self.tree.currentItemChanged.connect(self._current)
         self.tree.itemDoubleClicked.connect(self._open)
         self.preview = Preview(ctx, 300)
@@ -34,17 +35,25 @@ class TidyPage(Page):
         split.setStretchFactor(0, 1)
         split.setChildrenCollapsible(False)
         self.summary = label("")
+        self.pages = ReviewPages(self.tree, self._render_item, lambda item: item.get("size") or 0)
+        self.pages.changed.connect(self._update)
         self.apply_btn = button("Tidy selected", "primary", self.apply)
         self.body.addWidget(Banner(recovery_note() + " Categories that need a closer look start unticked.", "trust"))
         self.sidecar_note = label("", "muted", wrap=True)
         self.sidecar_note.hide()
         self.body.addWidget(self.sidecar_note)
         self.body.addWidget(split, 1)
+        self.body.addLayout(self.pages.controls)
         self.body.addLayout(hbox(self.summary, None, self.apply_btn))
         self.report: tidy.TidyReport | None = None
+        self.plan_bg = LatestCall(self)
+        self.plan_bg.result.connect(self._apply_ready)
+        self.plan_bg.failed.connect(self._plan_failed)
+        self.ctx.library_opened.connect(self._invalidate)
+        self.ctx.library_modified.connect(self._invalidate)
 
     def on_busy_changed(self, busy: bool) -> None:
-        self.apply_btn.setEnabled(not busy and bool(self._selected_count()))
+        self.apply_btn.setEnabled(not busy and not self.plan_bg.running and bool(self._selected_count()))
         self.rescan_btn.setEnabled(not busy)
 
     def refresh(self) -> None:
@@ -53,7 +62,16 @@ class TidyPage(Page):
             self._show(cached)
             return
         lib = self.lib
-        if not self.run("Looking for leftovers", lambda p: tidy.find_tidy(lib, p), self._show):
+        generation = self.ctx.generation
+        def work(progress):
+            try:
+                return tidy.find_tidy(lib, progress)
+            finally:
+                lib.close_thread()
+        def done(report):
+            if (lib, generation) == (self.lib, self.ctx.generation):
+                self._show(report)
+        if not self.run("Looking for leftovers", work, done):
             self.stale = True
 
     def _show(self, report: tidy.TidyReport) -> None:
@@ -63,59 +81,42 @@ class TidyPage(Page):
             "These can preserve Apple photo edits; Memoria does not apply those edits.")
         self.sidecar_note.setVisible(report.protected_sidecars > 0)
         self.ctx.set_badge("tidy", report.count("junk") + report.count("empty") + report.count("folders"))
-        self.tree.blockSignals(True)
-        self.tree.clear()
+        groups = []
         for cat, (title, desc, default) in tidy.CATEGORIES.items():
             items = self.report.items.get(cat, [])
             if not items:
                 continue
-            top = QTreeWidgetItem([f"{title}  ({len(items):,})", fmt_size(self.report.size(cat)) if cat != "folders" else "", desc])
-            top.setFlags(top.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
-            top.setData(0, Qt.ItemDataRole.UserRole, ("cat", cat))
-            f = top.font(0)
-            f.setBold(True)
-            top.setFont(0, f)
-            for it in items:
-                child = QTreeWidgetItem([it["name"] or it["rel_path"], fmt_size(it["size"]) if cat != "folders" else "",
-                                         it["folder"] or "(library root)"])
-                child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                child.setCheckState(0, Qt.CheckState.Checked if default else Qt.CheckState.Unchecked)
-                child.setData(0, Qt.ItemDataRole.UserRole, ("item", cat, it))
-                child.setToolTip(0, it["rel_path"])
-                top.addChild(child)
-            self.tree.addTopLevelItem(top)
-            top.setExpanded(len(items) <= 12)
-        self.tree.blockSignals(False)
+            groups.append(ReviewGroup(cat, title, items, default, report.size(cat)))
+        self.preview.clear()
+        self.pages.set_groups(groups)
         if self.tree.topLevelItemCount() == 0:
             empty = QTreeWidgetItem(["Nothing to tidy — this library is clean.", "", ""])
             self.tree.addTopLevelItem(empty)
         self._update()
 
     def _selected(self) -> dict[str, list[dict]]:
-        out: dict[str, list[dict]] = {}
-        for i in range(self.tree.topLevelItemCount()):
-            top = self.tree.topLevelItem(i)
-            for j in range(top.childCount()):
-                c = top.child(j)
-                if c.checkState(0) == Qt.CheckState.Checked:
-                    _, cat, it = c.data(0, Qt.ItemDataRole.UserRole)
-                    out.setdefault(cat, []).append(it)
-        return out
+        return self.pages.selected()
+
+    def _render_item(self, cat, it):
+        child = QTreeWidgetItem([it["name"] or it["rel_path"], fmt_size(it["size"]) if cat != "folders" else "",
+                                 it["folder"] or "(library root)"])
+        child.setData(0, Qt.ItemDataRole.UserRole, ("item", cat, it))
+        child.setToolTip(0, it["rel_path"])
+        return child
 
     def _selected_count(self) -> int:
-        return sum(len(v) for v in self._selected().values())
+        return self.pages.selected_count
 
     def _update(self) -> None:
-        sel = self._selected()
-        files = sum(len(v) for k, v in sel.items() if k != "folders")
-        folders = len(sel.get("folders", []))
-        size = sum(i["size"] or 0 for k, v in sel.items() if k != "folders" for i in v)
+        files = sum(g.selected_count for g in self.pages.groups if g.key != "folders")
+        folders = sum(g.selected_count for g in self.pages.groups if g.key == "folders")
+        size = sum(g.selected_bytes for g in self.pages.groups if g.key != "folders")
         parts = []
         if files:
             parts.append(f"{fmt_n(files, 'file')} ({fmt_size(size)}) to Recovery")
         if folders:
             parts.append(f"{fmt_n(folders, 'empty folder')} removed")
-        self.summary.setText(" · ".join(parts) if parts else "Nothing selected")
+        self.summary.setText((" · ".join(parts) if parts else "Nothing selected") + " · Across all pages")
         self.apply_btn.setEnabled(bool(parts) and not self.busy)
 
     def _current(self, cur, _prev) -> None:
@@ -135,11 +136,37 @@ class TidyPage(Page):
             show_in_explorer(self.lib.abspath(data[2]["rel_path"]))
 
     def apply(self) -> None:
+        if self.busy or self.plan_bg.running or self.report is None:
+            return
         sel = self._selected()
-        try:
-            acts = tidy.plan_actions(self.lib, self.report, sel)
-        except ValueError as error:
-            MessageDialog(self, "Tidy selection needs review", str(error)).exec()
+        if any(tidy.is_apple_edit_sidecar(row["rel_path"])
+               for category, rows in sel.items() if category != "folders" for row in rows):
+            MessageDialog(self, "Tidy selection needs review",
+                          "Apple .AAE edit sidecars are protected from Tidy up. "
+                          "Keep them with your photos. Nothing was moved.").exec()
+            return
+        lib, generation, report = self.lib, self.ctx.generation, self.report
+        self.apply_btn.setEnabled(False)
+        self.tree.setEnabled(False)
+        self.summary.setText("Preparing the full selection across all pages…")
+        def work():
+            try:
+                return lib, generation, sel, tidy.plan_actions(lib, report, sel)
+            finally:
+                lib.close_thread()
+        self.plan_bg.call(work)
+
+    def _plan_failed(self, error):
+        self.tree.setEnabled(True)
+        self._update()
+        MessageDialog(self, "Tidy selection needs review", str(error)).exec()
+
+    def _apply_ready(self, result):
+        lib, generation, sel, acts = result
+        self.tree.setEnabled(True)
+        self._update()
+        if (lib, generation) != (self.lib, self.ctx.generation) or self.busy:
+            self.ctx.toast_requested.emit("The library changed. Review the refreshed Tidy selection before applying.", "")
             return
         files = [a for a in acts if a.op == "recycle"]
         folders = [a for a in acts if a.op == "rmdir"]
@@ -154,3 +181,12 @@ class TidyPage(Page):
                     + (f" and {fmt_n(len(folders), 'empty folder')} removed." if folders else "."),
             details=details, confirm_text="Tidy up", note=recovery_note(),
             done_message=lambda r: f"Tidied {fmt_n(r.done, 'item')}.")
+
+    def _invalidate(self):
+        self.plan_bg.invalidate()
+        self.tree.setEnabled(True)
+        self.preview.clear()
+
+    def shutdown(self):
+        self.plan_bg.wait()
+        self.preview.shutdown()

@@ -75,6 +75,14 @@
 before you choose a folder.</figcaption></figure>
 <p>Memoria remembers the last library and page and reopens them next time. Recent libraries are listed on the welcome
 screen; use <b>Change library…</b> in the sidebar to switch.</p>
+<h3>One library, multiple folders</h3>
+<p>Use <b>Library folders...</b> to add other media folders or drives without copying their originals.
+The current folder remains the catalogue home and must stay connected. Added folders can be offline: cached
+metadata, organisation and thumbnails remain available. Filters offer root and online/offline selections.</p>
+<p><b>Reconnect selected...</b> verifies the source identity stored in its hidden <code>.memoria</code> folder.
+Keep that folder when relocating media. A different drive at the same letter is not treated as the original.
+Overlapping roots and separate existing catalogues are rejected, not silently merged. Recovery stays on each
+source drive; History shows available totals and requires all roots connected before permanent emptying.</p>
 </section>
 
 <section id="safety">
@@ -169,6 +177,12 @@ A completed photo is available before the next file finishes. Utilities stay dis
 <h3 id="batch">Batch actions</h3>
 <p>Select one or more items (Ctrl/Shift-click, or Ctrl+A for the <b>current page only</b>) and a selection bar appears
 with count and size. Unseen pages are not included in batch actions:</p>
+<p><b>Linked components need review.</b> Matching names in the same folder can link an image/video pair,
+RAW+JPEG and AAE/XMP sidecars. Moves, archival copies and Recovery include the reviewed parts together and use
+a common collision suffix. Some linked parts may be unique even if the image is a duplicate. Their inclusion
+always requires acknowledgement, including in duplicate Quick remove. Failed partial work is rolled back where
+possible; any rollback failure is reported and retained in History. Links are inferred from names, not proof of
+Apple content identifiers; edit instructions are not rendered and embedded-motion playback is not added.</p>
 <table>
   <tr><th>Action</th><th>What happens</th><th>Undo</th></tr>
   <tr><td><b>Move to Recovery</b> (or Delete key)</td><td>Selected items move to Recovery after a confirmation that shows their thumbnails.</td><td>Yes</td></tr>
@@ -178,6 +192,11 @@ with count and size. Unseen pages are not included in batch actions:</p>
   <tr><td><b>Compress videos</b></td><td>Opens the Video compressor with the selected videos ticked.</td><td>—</td></tr>
   <tr><td><b>Show in folder</b></td><td>Opens Explorer at the first selected item.</td><td>—</td></tr>
 </table>
+<h3>Tags, ratings, favourites and review marks</h3>
+<p>Select files and choose <b>Tags / rating...</b>. Add/remove tags, set an unrated/1-5 rating, choose favourite
+status and mark Unreviewed, Pick or Reject. Leave unchanged preserves existing values. These edits are catalogue-only;
+Reject never deletes anything. Manual organisation edits are not file-operation History Undo. The Organisation
+filter tab combines these fields with existing metadata, root and availability filters.</p>
 <figure><img src="images/photos.png" alt="Photos and videos"><figcaption>Three photos selected: the selection bar offers
 Move to Recovery and More actions. Videos show a ▶ duration tag.</figcaption></figure>
 <h3 id="viewer">Viewer</h3>
@@ -189,8 +208,8 @@ currently shown, <b>Open in default app</b>, <b>Show in folder</b>, and Esc to c
 <figure><img src="images/library-filters-video.png" alt="Video and dimension filters"><figcaption>Inclusive ranges with explicit units. Resolution uses pixel count, not a quality judgement.</figcaption></figure>
 <figure><img src="images/library-filters-camera.png" alt="Camera and exposure filters"><figcaption>Photographic fields are available only when present in standard EXIF metadata.</figcaption></figure>
 <figure><img src="images/photos-video-metadata.png" alt="Video length sorting and metadata preview"><figcaption>Length sorting with reported frame rate, codecs and estimated overall bitrate in the preview.</figcaption></figure>
-<p>Opening an older catalogue upgrades it to schema v7. Catalogues from before v6 refresh media analysis once;
-v7 itself only adds saved duplicate keep choices and does not repeat that analysis. This reads originals in place,
+<p>Opening an older catalogue upgrades it to schema v10. Catalogues from before v6 refresh media analysis once;
+v7-10 add keep choices, roots, organisation and journal data without another media-analysis pass. This reads originals in place,
 preserves identities and health fingerprints, and resumes after cancellation. Older files in Recovery or missing
 records refresh when restored. The preview details scroll when many metadata fields are available.</p>
 <p><b>Interpretation:</b> bitrate is file bytes × 8 ÷ duration, including audio/container overhead, not a video-quality
@@ -202,6 +221,14 @@ equivalent. Aperture is an f-number; exposure is seconds (short exposures displa
 <h2>Library insights</h2>
 <p>Read-only charts of the <b>last indexed catalogue</b>. Choose a folder or apply the same filters as Photos &amp; videos.
 Use F5 after changes outside Memoria. Counts exclude Recovery and the cache; sizes are logical file sizes, not allocated disk clusters.</p>
+<h3>All files: find the biggest contributors</h3>
+<p>Choose <b>All files</b> directly from the header or its tab; no folder drill-down is needed. It opens a flat,
+whole-library file browser, largest first, including non-media files. Use the existing metadata sort/filter controls
+for size, dates, duration, resolution, bitrate and other fields. Select files for Recovery or videos for compression;
+selection covers the current page only. These explicit file actions are not read-only.</p>
+<p>Compression creates new copies and leaves originals intact. Review the output before removing originals.
+Moving originals to Recovery alone does not free their disk space; permanent emptying is a separate acknowledged action.</p>
+<figure><img src="images/insights-files.png" alt="Whole-library flat file view ordered by size"><figcaption>All files starts largest-first and reuses the same filters, organisation and safe actions as Photos &amp; videos.</figcaption></figure>
 <h3>Storage</h3>
 <p>Bars show immediate subfolders, files directly in the selected folder, and file formats. Every matching file is
 counted once. Click a subfolder to drill down, a format to browse its files, or <b>Browse selected folder</b>.</p>
@@ -315,6 +342,10 @@ Storage &amp; reset can clear saved keep choices explicitly.</p>
 <p>Selected copies move into Recovery, keeping their folder structure there. Normal removal checks a surviving copy.
 Explicit Remove both/all has no survivor requirement, but each reviewed file is still checked against its recorded
 content hash and file information. Changed files are skipped.</p>
+<p>When a copy is retained, useful catalogue organisation is merged into it: tags, static album membership and
+favourites are combined, unset rating/review states are filled, and the keeper wins conflicts. Smart albums stay
+rule-based. Faces and health baselines are not transferred. Undo restores the previous organisation only if it has
+not subsequently changed; deliberately cleared organisation cannot be resurrected through older Undo records.</p>
 <p>With normal folder cleanup, reviewed contents go to Recovery; meaningful files are checked against an identical copy that
 stays in the library, and the emptied folders are then removed. If a file in it has changed, or something new has appeared
 in the folder, that file and its folder stay where they are. Undo puts the whole folder back.</p>
@@ -376,8 +407,8 @@ soft photos can appear here. Tick the ones you don't want and click <b>Move tick
 counts and sizes; expand a category to see each file.</p>
 <p><b>Apple .AAE files are protected.</b> These sidecars can preserve Apple photo-editing instructions.
 They are excluded from Tidy up, even if empty; a protected-file count is shown instead. Keep them with the photos.
-Memoria does not apply their Apple-specific edits, and this protection does not add sidecar or Live Photo pairing
-to other tools.</p>
+Memoria does not apply their Apple-specific edits. Other file actions can explicitly review linked components;
+Tidy does not separate or delete those linked units.</p>
 <table>
   <tr><th>Category</th><th>Examples</th><th>Ticked by default</th></tr>
   <tr><td>System and app leftovers</td><td>Thumbs.db, desktop.ini, .DS_Store, Picasa.ini, <code>._</code> files from Macs, unfinished downloads (.crdownload, .part, .tmp)</td><td>Yes</td></tr>
@@ -443,6 +474,12 @@ it; suggestions you have already saved are shown unticked.</p>
 <figure><img src="images/albums-make.png" alt="Make albums"><figcaption>A three-day trip in one place becomes one album, named
 after the place.</figcaption></figure>
 <h3>Your albums</h3>
+<p><b>Smart albums:</b> choose <b>Save smart album...</b> in Photos &amp; videos (also available in Insights All files)
+to save current filters and sort order. The album updates as the catalogue changes; <b>Edit rules...</b> changes
+its definition. Static albums retain explicit memberships. Exporting a smart album copies its current matching
+files through the normal reviewed, verified export flow.</p>
+<p>Album lists show at most 100 entries and member views at most 500 files per page. Album exports and suggestion
+group selections cover the explicitly labelled full album/group; file-grid selections cover their current page.</p>
 <ul>
   <li><b>Rename…</b>, <b>Delete album…</b> (the photos stay), <b>Remove from album</b> and <b>Use as cover</b>.</li>
   <li>Add photos from <b>Photos &amp; videos</b>: select them, then <b>More actions → Add to album…</b> (or right-click). Pick an
@@ -782,8 +819,9 @@ for you — try the "Only very blurry" sensitivity.</p>
 Memoria is scanning it, the scan stops rather than treating inaccessible entries as deleted. Reconnect and press F5;
 check History for completed steps if the interruption happened during a file operation.</p>
 <h4>Can one library contain multiple independent folders or drives?</h4>
-<p>Not yet. A library includes one root and its subfolders. The Insights folder picker narrows that existing library;
-it does not combine drives. Multi-folder libraries remain deferred.</p>
+<p>Yes: use <b>Library folders...</b>. The catalogue home stays available, while added roots may be disconnected.
+Their cached entries are retained, not treated as deleted. Reconnect verifies the source identity before scanning
+or changing its originals. This does not merge separate existing catalogues.</p>
 <h4>Why does it say the library is already open?</h4>
 <p>Another Memoria window is using it. Only one window may work on a library at a time so changes can never collide.</p>
 </section>

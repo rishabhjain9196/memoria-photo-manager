@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePath
 from typing import Iterable, Optional
 
-from . import config
+from . import config, roots
 from .actions import Action
 from .db import Library
 from .hashing import full_hash, quick_hash
@@ -52,6 +52,7 @@ def _hash_pass(lib: Library, rows: list, fn, column: str, progress: Progress, la
     if todo:
         def work(r):
             p = lib.abspath(r["rel_path"])
+            lib.check_path(p)
             return r["id"], (fn(p, r["size"]) if column == "qhash" else fn(p))
         updates = []
         with ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
@@ -127,7 +128,7 @@ def _make_group(h: str, members: list) -> DuplicateGroup:
 
 def find_duplicates(lib: Library, progress: Optional[Progress] = None, media_only: bool = True) -> list[DuplicateGroup]:
     where = "kind!='other'" if media_only else "1"
-    rows = lib.files(where)
+    rows = lib.readable_files(where)
     groups = [_make_group(h, m) for h, m in confirm_identical(lib, rows, progress, "Finding exact duplicates").items()]
     groups.sort(key=lambda g: g.wasted, reverse=True)
     return groups
@@ -160,7 +161,8 @@ def plan_removal(lib: Library, groups: list[DuplicateGroup], keepers: Optional[d
             actions.append(Action(op="recycle", src=str(lib.abspath(f["rel_path"])), size=f["size"],
                                   mtime=f["mtime"], hash=g.hash, guards=guards,
                                   reason=f"Duplicate of {keeper['rel_path']}" if keeper else
-                                  "All shown copies explicitly selected for Recovery", file_id=f["id"]))
+                                  "All shown copies explicitly selected for Recovery", file_id=f["id"],
+                                  merge_into=keeper["id"] if keeper else None))
     return actions
 
 
@@ -293,6 +295,8 @@ class DuplicateReport:
 def _parents(folder: str):
     """'a\\b\\c' → 'a\\b\\c', 'a\\b', 'a'. The library root is not a folder here."""
     while folder:
+        if not roots.split_key(folder)[1]:
+            break
         yield folder
         folder = os.path.dirname(folder)
 
@@ -323,7 +327,7 @@ def find_all(lib: Library, progress: Optional[Progress] = None) -> DuplicateRepo
     """Exact duplicate photos/videos, plus whole folders that duplicate another folder."""
     from .tidy import is_junk
     progress = progress or Progress()
-    rows = [dict(r) for r in lib.files()]
+    rows = [dict(r) for r in lib.readable_files()]
     content = [r for r in rows if r["size"] > 0 and not is_junk(r["name"])]
     ident = confirm_identical(lib, content, progress, "Finding exact duplicates")
     groups = []
@@ -522,7 +526,7 @@ def plan_cleanup(lib: Library, report: DuplicateReport, folders: Iterable[str] =
     file_actions = plan_removal(lib, [g for g in loose if g.hash in wanted], file_keepers, protected,
                                 removals=file_removals)
     gone = {a.file_id for a in file_actions}
-    rows = [dict(r) for r in lib.files()]
+    rows = [dict(r) for r in lib.files("root_id IN (SELECT id FROM library_roots WHERE online=1)")]
 
     def owner(r, keys: dict[str, str]) -> Optional[str]:
         for p in _parents(r["folder"].lower()):
@@ -557,16 +561,18 @@ def plan_cleanup(lib: Library, report: DuplicateReport, folders: Iterable[str] =
             src = str(lib.abspath(r["rel_path"]))
             if p in unguarded:
                 actions.append(Action(op="recycle", src=src, size=r["size"], mtime=r["mtime"], hash=r["chash"],
-                                      reason="All identical folders explicitly selected for Recovery", file_id=r["id"]))
+                                      reason="All identical folders explicitly selected for Recovery", file_id=r["id"],
+                                      companions_locked=True))
             elif r["size"] > 0 and not is_junk(r["name"]):
                 keep = min(survivors[r["chash"]], key=keeper_score)
                 actions.append(Action(op="recycle", src=src, size=r["size"], mtime=r["mtime"], hash=r["chash"],
                                       guards=[(str(lib.abspath(keep["rel_path"])), r["chash"])],
                                       reason=f"In duplicate folder “{p}”; identical copy kept at {keep['rel_path']}",
-                                      file_id=r["id"]))
+                                      file_id=r["id"], merge_into=keep["id"], companions_locked=True))
             else:
                 actions.append(Action(op="recycle", src=src, size=r["size"], mtime=r["mtime"],
-                                      reason=f"Leftover in duplicate folder “{p}”", file_id=r["id"]))
+                                      reason=f"Leftover in duplicate folder “{p}”", file_id=r["id"],
+                                      companions_locked=True))
         top_dir = str(lib.abspath(p))
         for d in sorted(walk_dirs(top_dir) + [top_dir], key=lambda d: -d.count(os.sep)):
             actions.append(Action(op="rmdir", src=d, reason=f"Duplicate folder “{p}”, now empty"))

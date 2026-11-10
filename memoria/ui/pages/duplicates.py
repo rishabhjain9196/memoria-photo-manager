@@ -7,18 +7,20 @@ from pathlib import PurePath
 from typing import Optional
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QColor, QFont, QIcon
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QHeaderView, QListWidget, QListWidgetItem, QSplitter,
                                QStackedWidget, QTreeWidget, QTreeWidgetItem, QWidget)
 
 from ...engine import duplicates
 from .. import theme
+from ..tasks import LatestCall
 from ..widgets import (Banner, ConfirmDialog, EmptyState, MessageDialog, PhotoGrid, Preview, Tile, button, fmt_n, fmt_size, hbox, label,
                        show_in_explorer, vbox)
 from .base import Page, recovery_note, recycle_summary
 
 COLUMNS = ["Folder", "Total size", "Photos", "Videos", "Other files"]
-MAX_CONTENTS = 600
+GROUP_PAGE = 200
+MAX_CONTENTS = 500
 
 
 class DuplicatesPage(Page):
@@ -47,6 +49,19 @@ class DuplicatesPage(Page):
         self.kept: set[str] = set()
         self._group_action_running = False
         self.entries: list[tuple[str, object]] = []     # per list row: ("head"|"folder"|"file", item)
+        self.visible_groups = []
+        self._group_selections = {}
+        self.group_offset = self.file_offset = self.folder_offset = self.contents_offset = 0
+        self._detail_key = self._contents_path = None
+        self._file_keys = {}
+        self._closed = False
+        self._building = False
+        self._large_report = False
+        self.review_bg, self.contents_bg = LatestCall(self), LatestCall(self)
+        self.review_bg.result.connect(self._review_loaded)
+        self.review_bg.failed.connect(self._review_failed)
+        self.contents_bg.result.connect(self._contents_loaded)
+        self.contents_bg.failed.connect(self._contents_failed)
 
         self.stack = QStackedWidget()
         self.empty = EmptyState("\uE8C8", "Find exact copies",
@@ -74,6 +89,13 @@ class DuplicatesPage(Page):
         self.list.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         self.list.currentRowChanged.connect(self._show_entry)
         self.list.itemChanged.connect(self._toggled)
+        self.group_scope = label("", "small", wrap=True)
+        self.group_previous = button("Previous groups", on_click=lambda: self._group_step(-1))
+        self.group_next = button("Next groups", on_click=lambda: self._group_step(1))
+        group_panel = QWidget()
+        group_panel.setLayout(vbox(self.list, self.group_scope,
+                                   hbox(self.group_previous, self.group_next), spacing=6))
+        group_panel.setFixedWidth(360)
         self.preview = Preview(ctx, 300)
 
         # -- single-file group view
@@ -89,8 +111,12 @@ class DuplicatesPage(Page):
                                  tip="Move only the selected copy to Recovery, then refresh this group.")
         self.remove_all = button("Remove both", "danger", on_click=lambda: self._choose_file("all"))
         self.keep_all = button("Keep both", on_click=lambda: self._choose_file("keep"))
+        self.file_scope = label("", "small", wrap=True)
+        self.file_previous = button("Previous copies", on_click=lambda: self._file_step(-1))
+        self.file_next = button("Next copies", on_click=lambda: self._file_step(1))
         file_view = QWidget()
         file_view.setLayout(vbox(hbox(self.group_title, None, self.keep_btn), self.group_note, self.grid,
+                                 hbox(self.file_scope, None, self.file_previous, self.file_next),
                                  hbox(self.remove_one, self.remove_all, self.keep_all, None), spacing=6))
 
         # -- whole-folder view
@@ -120,9 +146,16 @@ class DuplicatesPage(Page):
                                    tip="Move only the selected duplicate folder to Recovery, then refresh the list.")
         self.f_remove_all = button("Remove both", "danger", on_click=lambda: self._choose_folder("all"))
         self.f_keep_all = button("Keep both", on_click=lambda: self._choose_folder("keep"))
+        self.folder_scope = label("", "small", wrap=True)
+        self.folder_previous = button("Previous folders", on_click=lambda: self._folder_step(-1))
+        self.folder_next = button("Next folders", on_click=lambda: self._folder_step(1))
+        self.contents_previous = button("Previous files", on_click=lambda: self._contents_step(-1))
+        self.contents_next = button("Next files", on_click=lambda: self._contents_step(1))
         folder_view = QWidget()
         folder_view.setLayout(vbox(self.f_title, self.f_note, self.table,
+                                   hbox(self.folder_scope, None, self.folder_previous, self.folder_next),
                                    hbox(self.f_contents, None, self.f_open_btn, self.f_keep_btn), self.f_grid,
+                                   hbox(self.contents_previous, self.contents_next, None),
                                    hbox(self.f_remove_one, self.f_remove_all, self.f_keep_all, None), spacing=6))
 
         self.detail = QStackedWidget()
@@ -130,7 +163,7 @@ class DuplicatesPage(Page):
         self.detail.addWidget(folder_view)
         self.file_view, self.folder_view = file_view, folder_view
         split = QSplitter()
-        split.addWidget(self.list)
+        split.addWidget(group_panel)
         split.addWidget(self.detail)
         split.addWidget(self.preview)
         split.setStretchFactor(1, 1)
@@ -163,6 +196,21 @@ class DuplicatesPage(Page):
         self.ctx.runner.finished.connect(self._group_finished)
 
     # ------------------------------------------------------------------ lifecycle
+    def _mark_stale(self) -> None:
+        self.review_bg.invalidate()
+        self.contents_bg.invalidate()
+        self._building = False
+        self.preview.clear()
+        self.grid.set_items([])
+        self.f_grid.set_items([])
+        super()._mark_stale()
+
+    def shutdown(self):
+        self._closed = True
+        self.review_bg.wait()
+        self.contents_bg.wait()
+        self.preview.shutdown()
+
     def refresh(self) -> None:
         cached = self.ctx.cached("duplicate_report")
         if cached is not None:
@@ -175,15 +223,22 @@ class DuplicatesPage(Page):
 
     def on_busy_changed(self, busy: bool) -> None:
         self.find_btn.setEnabled(not busy)
-        self.apply_btn.setEnabled(not busy and self._has_selection())
-        self.list.setEnabled(not busy)
+        self.apply_btn.setEnabled(not busy and not self._building and self._has_selection())
+        self.list.setEnabled(not busy and not self._building)
         self.show_previous.setEnabled(not busy)
         self.quick_remove.setEnabled(not busy)
         self._choice_buttons()
 
     def find(self) -> None:
         lib = self.lib
-        self.run("Finding duplicates", lambda p: duplicates.find_all(lib, p), self._show)
+        generation = self.ctx.generation
+        def work(progress):
+            try:
+                return duplicates.find_all(lib, progress)
+            finally:
+                lib.close_thread()
+        self.run("Finding duplicates", work,
+                 lambda report: self._show(report) if (lib, generation) == (self.lib, self.ctx.generation) else None)
 
     def _show(self, report: duplicates.DuplicateReport) -> None:
         try:
@@ -194,6 +249,10 @@ class DuplicatesPage(Page):
             MessageDialog(self, "Previous duplicate choices unavailable", str(error)).exec()
             return
         self.report = report
+        self._large_report = len(report.groups) + len(report.folders) > GROUP_PAGE or sum(
+            len(group.files) for group in report.groups) > 5000 or sum(
+            len(match.folders) for match in report.folders) > MAX_CONTENTS or sum(
+            folder.files for match in report.folders for folder in match.folders) > 5000
         self.kept = kept
         self.file_removals.clear()
         self.folder_removals.clear()
@@ -205,34 +264,77 @@ class DuplicatesPage(Page):
     def _rebuild(self, reset: bool = False) -> None:
         """Recompute the file groups left once duplicate folders are accounted for, and refill the list."""
         rep = self.report
-        if rep is None:
+        if rep is None or self._closed:
             return
+        lib, generation, current = self.lib, self.ctx.generation, self._current_key()
+        state = dict(folder_keepers=dict(self.folder_keepers), keepers=dict(self.keepers),
+                     included=set(self.included), included_folders=set(self.included_folders),
+                     known=set(self._known), file_removals=dict(self.file_removals),
+                     folder_removals=dict(self.folder_removals), kept=set(self.kept))
+        self.contents_bg.invalidate()
+        self.preview.clear()
+        self._building = True
+        self.list.setEnabled(False)
+        self.show_previous.setEnabled(False)
+        self.detail.setEnabled(False)
+        self.apply_btn.setEnabled(False)
+        self.group_scope.setText("Preparing all duplicate groups…")
+        previous = self.show_previous.isChecked()
+        def work():
+            return lib, generation, rep, current, self._build_review(rep, state, reset, previous)
+        if self._large_report:
+            self.review_bg.call(work)
+        else:
+            self.review_bg.invalidate()
+            self._review_loaded(work())
+
+    @staticmethod
+    def _build_review(rep, state, reset, show_previous):
+        folder_removals, included_folders = state["folder_removals"], state["included_folders"]
+        kept, folder_keepers = state["kept"], state["folder_keepers"]
+        folder_keys = {match.id: rep.folder_review_key(match) for match in rep.folders}
         for match in rep.folders:
-            if rep.folder_review_key(match) in self.kept:
-                self.folder_removals[match.id] = set()
-                self.included_folders.discard(match.id)
-        covered = [f.path for m in rep.folders if m.id in self.folder_removals for f in m.folders]
-        self.loose = rep.loose_groups(self.folder_keepers, covered)
-        hashes = {g.hash for g in self.loose}
-        self.included = hashes if reset else (self.included & hashes) | (hashes - self._known)
-        self._known = hashes
-        self.keepers = {g.hash: self.keepers[g.hash] for g in self.loose if
-                        self.keepers.get(g.hash) in {f["id"] for f in g.files}}
-        self.file_removals = {k: v for k, v in self.file_removals.items() if k in hashes}
-        for group in self.loose:
-            if duplicates.file_review_key(group) in self.kept:
-                self.file_removals[group.hash] = set()
-                self.included.discard(group.hash)
-        visible_folders = [m for m in rep.folders if self.show_previous.isChecked() or
-                           rep.folder_review_key(m) not in self.kept]
-        visible_files = [g for g in self.loose if self.show_previous.isChecked() or
-                         duplicates.file_review_key(g) not in self.kept]
+            if folder_keys[match.id] in kept:
+                folder_removals[match.id] = set()
+                included_folders.discard(match.id)
+        covered = [f.path for m in rep.folders if m.id in folder_removals for f in m.folders]
+        loose = rep.loose_groups(folder_keepers, covered)
+        hashes = {g.hash for g in loose}
+        included = set(hashes) if reset else (state["included"] & hashes) | (hashes - state["known"])
+        keepers = {g.hash: state["keepers"][g.hash] for g in loose if
+                   state["keepers"].get(g.hash) in {f["id"] for f in g.files}}
+        file_removals = {k: v for k, v in state["file_removals"].items() if k in hashes}
+        file_keys = {g.hash: duplicates.file_review_key(g) for g in loose}
+        for group in loose:
+            if file_keys[group.hash] in kept:
+                file_removals[group.hash] = set()
+                included.discard(group.hash)
+        visible_folders = [m for m in rep.folders if show_previous or folder_keys[m.id] not in kept]
+        visible_files = [g for g in loose if show_previous or file_keys[g.hash] not in kept]
         duplicate_ids = {f["id"] for g in rep.groups for f in g.files}
-        pending = len({r["id"] for m in rep.folders if rep.folder_review_key(m) not in self.kept
-                       for folder in m.redundant(self.folder_keepers) for r in rep.folder_files[folder.path]
+        pending = len({r["id"] for m in rep.folders if folder_keys[m.id] not in kept
+                       for folder in m.redundant(folder_keepers) for r in rep.folder_files[folder.path]
                        if r["id"] in duplicate_ids})
-        pending += sum(len(g.files) - 1 for g in self.loose if duplicates.file_review_key(g) not in self.kept)
-        self.ctx.set_badge("duplicates", pending)
+        pending += sum(len(g.files) - 1 for g in loose if file_keys[g.hash] not in kept)
+        return dict(loose=loose, included=included, known=hashes, keepers=keepers, file_removals=file_removals,
+                    folder_removals=folder_removals, included_folders=included_folders, file_keys=file_keys,
+                    visible_folders=visible_folders, visible_files=visible_files, pending=pending)
+
+    def _review_loaded(self, result):
+        lib, generation, rep, current, state = result
+        if self._closed or rep is not self.report or (lib, generation) != (self.lib, self.ctx.generation):
+            return
+        for name in ("loose", "included", "keepers", "file_removals", "folder_removals", "included_folders"):
+            setattr(self, name, state[name])
+        self._known, self._file_keys = state["known"], state["file_keys"]
+        self._building = False
+        self.list.setEnabled(not self.busy)
+        self.show_previous.setEnabled(not self.busy)
+        self.detail.setEnabled(True)
+        visible_folders, visible_files = state["visible_folders"], state["visible_files"]
+        self.visible_groups = [("folder", match) for match in visible_folders] + [
+            ("file", group) for group in visible_files]
+        self.ctx.set_badge("duplicates", state["pending"])
         if not visible_folders and not visible_files:
             self.list.blockSignals(True)
             self.entries = []
@@ -246,26 +348,49 @@ class DuplicatesPage(Page):
         self.t_folders.set(f"{sum(len(m.redundant(fk)) for m in visible_folders):,}")
         self.t_copies.set(f"{sum(len(g.files) - 1 for g in visible_files):,}")
 
-        cur = self._current_key()
+        selected = next((index for index, (kind, obj) in enumerate(self.visible_groups)
+                         if current == (kind, obj.id if kind == "folder" else obj.hash)), None)
+        if selected is not None:
+            self.group_offset = selected // GROUP_PAGE * GROUP_PAGE
+        self.group_offset = min(self.group_offset, (len(self.visible_groups) - 1) // GROUP_PAGE * GROUP_PAGE)
+        self._fill_groups(current)
+        self._update_summary()
+
+    def _review_failed(self, error):
+        self._building = False
+        self.group_scope.setText(f"Could not prepare duplicate groups: {error}")
+        self.list.setEnabled(False)
+        self.show_previous.setEnabled(not self.busy)
+        self.detail.setEnabled(False)
+
+    def _fill_groups(self, current=None):
         self.list.blockSignals(True)
         self.list.clear()
         self.entries = []
         select = None
-        if visible_folders:
-            self._header(f"DUPLICATE FOLDERS · {len(visible_folders)}")
-            for m in visible_folders:
-                self._add_folder_item(m)
-                if cur == ("folder", m.id):
-                    select = self.list.count() - 1
-        if visible_files:
-            self._header(f"DUPLICATE FILES · {len(visible_files)}" + (" (outside those folders)" if rep.folders else ""))
-            for g in visible_files:
-                self._add_file_item(g)
-                if cur == ("file", g.hash):
-                    select = self.list.count() - 1
+        previous_kind = None
+        for kind, obj in self.visible_groups[self.group_offset:self.group_offset + GROUP_PAGE]:
+            if kind != previous_kind:
+                self._header("DUPLICATE FOLDERS" if kind == "folder" else "DUPLICATE FILES")
+                previous_kind = kind
+            (self._add_folder_item if kind == "folder" else self._add_file_item)(obj)
+            if current == (kind, obj.id if kind == "folder" else obj.hash):
+                select = self.list.count() - 1
         self.list.blockSignals(False)
         self.list.setCurrentRow(select if select is not None else 1)
-        self._update_summary()
+        end = min(len(self.visible_groups), self.group_offset + GROUP_PAGE)
+        self.group_scope.setText(f"Groups {self.group_offset + 1:,}–{end:,} of {len(self.visible_groups):,}. "
+                                 "Include all/none and bulk Apply cover every page.")
+        self.group_previous.setEnabled(self.group_offset > 0)
+        self.group_next.setEnabled(end < len(self.visible_groups))
+
+    def _group_step(self, delta):
+        if self._building or not self.visible_groups:
+            return
+        self._group_selections[self.group_offset] = self._current_key()
+        self.group_offset = max(0, min((len(self.visible_groups) - 1) // GROUP_PAGE * GROUP_PAGE,
+                                       self.group_offset + delta * GROUP_PAGE))
+        self._fill_groups(self._group_selections.get(self.group_offset))
 
     def _current_key(self):
         row = self.list.currentRow()
@@ -290,15 +415,14 @@ class DuplicatesPage(Page):
         fk = self.folder_keepers
         red = m.redundant(fk)
         keep = m.keeper_path(fk)
-        names = ", ".join(f.path for f in red)
-        rel = f"Same files as “{keep}”" if m.kind == "same" else f"Everything is also in “{keep}”"
+        names = ", ".join(self.lib.display_path(f.path) for f in red[:3])
+        if len(red) > 3:
+            names += f", +{len(red) - 3:,} folders"
+        display_keep = self.lib.display_path(keep)
+        rel = f"Same files as “{display_keep}”" if m.kind == "same" else f"Everything is also in “{display_keep}”"
         photos, videos = sum(f.photos for f in red), sum(f.videos for f in red)
         it = QListWidgetItem(f"{names}\n{rel}\n{fmt_n(photos, 'photo')} · {fmt_n(videos, 'video')} · "
                              f"{fmt_size(m.wasted(fk))} duplicate")
-        sample = self._sample_id(red[0].path)
-        pm = self.ctx.thumbs.get(sample) if sample else None
-        if pm:
-            it.setIcon(QIcon(pm))
         it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         it.setCheckState(Qt.CheckState.Checked if m.id in self.included_folders else Qt.CheckState.Unchecked)
         it.setToolTip("Untick to leave these folders exactly as they are")
@@ -310,25 +434,24 @@ class DuplicatesPage(Page):
     def _add_file_item(self, g: duplicates.DuplicateGroup) -> None:
         keeper = self._keeper(g)
         it = QListWidgetItem(f"{keeper['name']}\n{len(g.files)} copies · {fmt_size(g.size)} each")
-        pm = self.ctx.thumbs.get(keeper["id"])
-        if pm:
-            it.setIcon(QIcon(pm))
         it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         it.setCheckState(Qt.CheckState.Checked if g.hash in self.included else Qt.CheckState.Unchecked)
         it.setToolTip("Untick to leave this group exactly as it is")
-        if duplicates.file_review_key(g) in self.kept:
+        if self._file_keys.get(g.hash) in self.kept:
             it.setText(it.text() + "\nPreviously kept")
         self.list.addItem(it)
         self.entries.append(("file", g))
 
     # ------------------------------------------------------------------ folders
-    def _folder_rows(self, path: str) -> list:
-        return self.lib.files("folder=? OR substr(folder, 1, ?)=?", (path, len(path) + 1, path + os.sep))
-
-    def _sample_id(self, path: str) -> Optional[int]:
-        r = self.lib.db.execute("SELECT id FROM files WHERE kind!='other' AND (folder=? OR substr(folder, 1, ?)=?) "
-                                "ORDER BY kind='video', rel_path LIMIT 1", (path, len(path) + 1, path + os.sep)).fetchone()
-        return r[0] if r else None
+    @staticmethod
+    def _folder_rows(lib, path, offset):
+        condition = "folder=? OR substr(folder, 1, ?)=?"
+        params = (path, len(path) + 1, path + os.sep)
+        total = lib.db.execute(f"SELECT COUNT(*) FROM files WHERE {condition}", params).fetchone()[0]
+        rows = [dict(row) for row in lib.db.execute(
+            f"SELECT * FROM files WHERE {condition} ORDER BY rel_path LIMIT ? OFFSET ?",
+            (*params, MAX_CONTENTS, offset))]
+        return total, rows
 
     def _show_entry(self, row: int) -> None:
         if row < 0 or row >= len(self.entries):
@@ -338,10 +461,19 @@ class DuplicatesPage(Page):
             if row + 1 < self.list.count():
                 self.list.setCurrentRow(row + 1)
             return
+        key = kind, obj.id if kind == "folder" else obj.hash
+        selected_folder = self._selected_folder() if key == self._detail_key and kind == "folder" else None
+        if key != self._detail_key:
+            self.file_offset = self.folder_offset = self.contents_offset = 0
+            self._contents_path = None
+            self.grid.set_items([])
+        self._detail_key = key
+        self.contents_bg.invalidate()
+        self.f_grid.set_items([])
         self.preview.clear()
         if kind == "folder":
             self.detail.setCurrentWidget(self.folder_view)
-            self._show_folder(obj)
+            self._show_folder(obj, select=selected_folder)
         else:
             self.detail.setCurrentWidget(self.file_view)
             self._show_group(obj)
@@ -354,14 +486,17 @@ class DuplicatesPage(Page):
 
     def _show_folder(self, m: duplicates.FolderMatch, select: Optional[str] = None) -> None:
         fk = self.folder_keepers
+        match_id = m.id
         keep = m.keeper_path(fk)
         red = m.redundant(fk)
         targets = self._folder_targets(m)
         if m.kind == "same":
-            self.f_title.setText(f"“{red[0].path}” has exactly the same files as “{keep}”" if len(red) == 1
+            self.f_title.setText(f"“{self.lib.display_path(red[0].path)}” has exactly the same files as "
+                                 f"“{self.lib.display_path(keep)}”" if len(red) == 1
                                  else f"{len(m.folders)} folders with exactly the same files")
         else:
-            self.f_title.setText(f"Everything in “{red[0].path}” is also in “{keep}”")
+            self.f_title.setText(f"Everything in “{self.lib.display_path(red[0].path)}” is also in "
+                                 f"“{self.lib.display_path(keep)}”")
         note = ("Compared byte by byte, including every sub-folder. File names and layout don't matter; Thumbs.db-style "
                 "leftovers and empty files are ignored. ")
         note += (f"Bulk plan: {len(targets)} folder(s) marked for Recovery."
@@ -371,35 +506,53 @@ class DuplicatesPage(Page):
         if self.report.folder_review_key(m) in self.kept:
             note += " This previous keep choice is remembered."
         if not m.suggested:
-            names = ", ".join(f"“{f.path}”" for f in red)
-            note += f" Not ticked at first because “{keep}” looks like a backup and {names} like the original."
+            names = ", ".join(f"“{self.lib.display_path(f.path)}”" for f in red[:3])
+            note += f" Not ticked at first because “{self.lib.display_path(keep)}” looks like a backup and {names} like the original."
         if m.kind == "same":
             note += " Use “Use as bulk keeper” to change that plan."
-        note += " Remove buttons act on this group only, not the other marked groups."
+        note += " Remove all/Keep all cover every folder in this group across pages, not other marked groups."
         self.f_note.setText(note)
         self.table.blockSignals(True)
         self.table.clear()
         pick = None
-        for f in m.folders:
+        if select:
+            index = next((index for index, folder in enumerate(m.folders) if folder.path == select), 0)
+            self.folder_offset = index // MAX_CONTENTS * MAX_CONTENTS
+        self.folder_offset = min(self.folder_offset, (len(m.folders) - 1) // MAX_CONTENTS * MAX_CONTENTS)
+        visible = m.folders[self.folder_offset:self.folder_offset + MAX_CONTENTS]
+        for f in visible:
             role = "→ To Recovery" if f.path in targets else "✓ Kept"
             subs = f" · {fmt_n(f.subfolders, 'sub-folder')}" if f.subfolders else ""
-            it = QTreeWidgetItem([f"{f.path}\n{role}{subs}", fmt_size(f.total_bytes),
+            display_path = self.lib.display_path(f.path)
+            it = QTreeWidgetItem([f"{display_path}\n{role}{subs}", fmt_size(f.total_bytes),
                                   f"{f.photos:,}\n{fmt_size(f.photo_bytes)}", f"{f.videos:,}\n{fmt_size(f.video_bytes)}",
                                   f"{f.others:,}\n{fmt_size(f.other_bytes)}"])
             for c in range(1, len(COLUMNS)):
                 it.setTextAlignment(c, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             reason = (("Explicit choice: to Recovery" if f.path in targets else "Kept by your choice")
-                      if m.id in self.folder_removals else m.reason(f, fk))
-            it.setToolTip(0, f"{f.path}\n{reason}\n{fmt_n(f.files, 'file')} · {fmt_size(f.total_bytes)}")
+                      if match_id in self.folder_removals else
+                      "Kept" if f.path == keep else f"Same files also exist in “{self.lib.display_path(keep)}”")
+            it.setToolTip(0, f"{display_path}\n{reason}\n{fmt_n(f.files, 'file')} · {fmt_size(f.total_bytes)}")
             it.setForeground(0, QColor(theme.WARN if f.path in targets else theme.OK))
             it.setData(0, Qt.ItemDataRole.UserRole, f.path)
             self.table.addTopLevelItem(it)
             if f.path == (select or red[0].path):
                 pick = it
-        self.table.setFixedHeight(34 + 44 * len(m.folders))
+        self.table.setFixedHeight(34 + 44 * min(5, len(visible)))
+        self.table.setCurrentItem(pick or self.table.topLevelItem(0))
         self.table.blockSignals(False)
-        self.table.setCurrentItem(pick)
+        end = self.folder_offset + len(visible)
+        self.folder_scope.setText(f"Folders {self.folder_offset + 1:,}–{end:,} of {len(m.folders):,}")
+        self.folder_previous.setEnabled(self.folder_offset > 0)
+        self.folder_next.setEnabled(end < len(m.folders))
         self._folder_row_selected()
+
+    def _folder_step(self, delta):
+        match = self._current("folder")
+        if match is not None:
+            self.folder_offset = max(0, min((len(match.folders) - 1) // MAX_CONTENTS * MAX_CONTENTS,
+                                            self.folder_offset + delta * MAX_CONTENTS))
+            self._show_folder(match)
 
     def _selected_folder(self) -> Optional[str]:
         it = self.table.currentItem()
@@ -410,20 +563,55 @@ class DuplicatesPage(Page):
         path = self._selected_folder()
         if m is None or path is None:
             return
-        targets = self._folder_targets(m)
-        rows = self._folder_rows(path)
-        items = []
-        for r in rows[:MAX_CONTENTS]:
-            sub = str(PurePath(r["folder"]).relative_to(path)) if r["folder"] != path else ""
-            kept = path not in targets
-            items.append({**dict(r), "caption": r["name"], "sub": sub or "(top of this folder)",
-                          "badge": "KEEP" if kept else "MOVE",
-                          "badge_kind": "keep" if kept else "muted", "tip": r["rel_path"]})
-        self.f_grid.set_items(items)
-        more = f" — showing the first {MAX_CONTENTS:,}" if len(rows) > MAX_CONTENTS else ""
-        self.f_contents.setText(f"<b>Inside “{PurePath(path).name}”</b> · {fmt_n(len(rows), 'file')}{more}")
+        if path != self._contents_path:
+            self.contents_offset = 0
+            self._contents_path = path
+        targets, offset = self._folder_targets(m), self.contents_offset
+        lib, generation, report = self.lib, self.ctx.generation, self.report
+        request = (lib, generation, report, m.id, path, offset)
+        self.f_grid.set_items([])
+        self.preview.clear()
+        self.f_contents.setText(f"Loading files inside “{self.lib.display_path(path)}”…")
+        self.contents_previous.setEnabled(False)
+        self.contents_next.setEnabled(False)
         self.f_keep_btn.setVisible(m.kind == "same")
         self._choice_buttons()
+        kept = path not in targets
+        def work():
+            try:
+                total, rows = self._folder_rows(lib, path, offset)
+                return request, kept, total, rows
+            finally:
+                lib.close_thread()
+        self.contents_bg.call(work)
+
+    def _contents_loaded(self, result):
+        request, kept, total, rows = result
+        lib, generation, report, key, path, offset = request
+        match = self._current("folder")
+        if (self._closed or self._building or report is not self.report
+                or (lib, generation) != (self.lib, self.ctx.generation)
+                or not match or match.id != key or path != self._selected_folder() or offset != self.contents_offset):
+            return
+        items = []
+        for r in rows:
+            sub = str(PurePath(r["folder"]).relative_to(path)) if r["folder"] != path else ""
+            items.append({**dict(r), "caption": r["name"], "sub": sub or "(top of this folder)",
+                          "badge": "KEEP" if kept else "MOVE",
+                          "badge_kind": "keep" if kept else "muted", "tip": lib.display_path(r["rel_path"])})
+        self.f_grid.set_items(items)
+        self.f_contents.setText(f"Inside “{self.lib.display_path(path)}” · Files "
+                                f"{offset + 1 if rows else 0:,}–{offset + len(rows):,} of {total:,}")
+        self.contents_previous.setEnabled(offset > 0)
+        self.contents_next.setEnabled(offset + len(rows) < total)
+
+    def _contents_failed(self, error):
+        if not self._closed:
+            self.f_contents.setText(f"Could not load folder files: {error}")
+
+    def _contents_step(self, delta):
+        self.contents_offset = max(0, self.contents_offset + delta * MAX_CONTENTS)
+        self._folder_row_selected()
 
     def _keep_folder(self) -> None:
         if not self._review_ready():
@@ -450,24 +638,37 @@ class DuplicatesPage(Page):
         kid = self.keepers.get(g.hash, g.keeper_id)
         return next((f for f in g.files if f["id"] == kid), g.files[0])
 
+    def _file_key(self, group):
+        return self._file_keys.get(group.hash) or duplicates.file_review_key(group)
+
     def _file_targets(self, g) -> set[int]:
-        return (self.file_removals.get(g.hash, {f["id"] for f in g.files if f["id"] != self._keeper(g)["id"]})
-                if g.hash in self.included else set())
+        if g.hash not in self.included:
+            return set()
+        if g.hash in self.file_removals:
+            return self.file_removals[g.hash]
+        keeper = self.keepers.get(g.hash, g.keeper_id)
+        return {f["id"] for f in g.files if f["id"] != keeper}
 
     def _folder_targets(self, match) -> set[str]:
-        return (self.folder_removals.get(match.id, {f.path for f in match.redundant(self.folder_keepers)})
-                if match.id in self.included_folders else set())
+        key = match.id
+        if key not in self.included_folders:
+            return set()
+        if key in self.folder_removals:
+            return self.folder_removals[key]
+        return {f.path for f in match.redundant(self.folder_keepers)}
 
     def _show_group(self, g: duplicates.DuplicateGroup) -> None:
         targets = self._file_targets(g)
         previous = self.grid.selected_items()
         items = []
-        for f in g.files:
+        self.file_offset = min(self.file_offset, (len(g.files) - 1) // MAX_CONTENTS * MAX_CONTENTS)
+        visible = g.files[self.file_offset:self.file_offset + MAX_CONTENTS]
+        for f in visible:
             keep = f["id"] not in targets
             reason = "Kept" if keep else "Will move to Recovery"
             explanation = ("explicit review choice" if g.hash in self.file_removals else
                            g.reasons.get(f["id"], ""))
-            items.append({**f, "caption": f["name"], "sub": str(PurePath(f["rel_path"]).parent),
+            items.append({**f, "caption": f["name"], "sub": self.lib.display_path(f["folder"]) or "(library root)",
                           "badge": "KEEP" if keep else "MOVE",
                           "badge_kind": "keep" if keep else "muted",
                           "tip": f"{f['rel_path']}\n{reason}: {explanation}"})
@@ -476,15 +677,27 @@ class DuplicatesPage(Page):
         note = f"Bulk plan: {len(targets)} to Recovery; {len(g.files) - len(targets)} kept. "
         if len(targets) == len(g.files):
             note += "WARNING: no shown copy will stay in the library. "
-        if duplicates.file_review_key(g) in self.kept:
+        if self._file_keys.get(g.hash) in self.kept:
             note += "This previous keep choice is remembered. "
-        self.group_note.setText(note + "Select a copy for Remove 1. Remove buttons act on this group only; "
-                                "the bottom button applies all marked groups.")
+        self.group_note.setText(note + "Select a copy for Remove 1. Remove all/Keep all cover every copy in this "
+                                "group across pages; the bottom button applies all marked groups.")
         if previous:
-            index = next((i for i, f in enumerate(g.files) if f["id"] == previous[0]["id"]), None)
+            index = next((i for i, f in enumerate(visible) if f["id"] == previous[0]["id"]), None)
             if index is not None:
                 self.grid.setCurrentIndex(self.grid.model_.index(index))
+        end = self.file_offset + len(visible)
+        self.file_scope.setText(f"Copies {self.file_offset + 1:,}–{end:,} of {len(g.files):,}")
+        self.file_previous.setEnabled(self.file_offset > 0)
+        self.file_next.setEnabled(end < len(g.files))
         self._choice_buttons()
+
+    def _file_step(self, delta):
+        group = self._current("file")
+        if group is not None:
+            self.file_offset = max(0, min((len(group.files) - 1) // MAX_CONTENTS * MAX_CONTENTS,
+                                          self.file_offset + delta * MAX_CONTENTS))
+            self.preview.clear()
+            self._show_group(group)
 
     def _file_selected(self, it: dict) -> None:
         self.preview.show_row(it)
@@ -497,7 +710,7 @@ class DuplicatesPage(Page):
         sel = self.grid.selected_items()
         if g is None or not sel:
             return
-        if not self._remember(duplicates.file_review_key(g), False):
+        if not self._remember(self._file_key(g), False):
             return
         self.file_removals.pop(g.hash, None)
         self.included.add(g.hash)
@@ -505,6 +718,9 @@ class DuplicatesPage(Page):
         self._rebuild()
 
     def _review_ready(self):
+        if self._building:
+            self.ctx.toast_requested.emit("Wait for duplicate groups to finish updating.", "")
+            return False
         if self.busy:
             self.ctx.toast_requested.emit("Wait for the current task to finish before changing duplicate choices.", "")
             return False
@@ -545,6 +761,8 @@ class DuplicatesPage(Page):
 
     def _group_finished(self, outcome):
         if self._group_action_running:
+            if outcome == "ok" and self.ctx.runner.title.startswith("Preparing "):
+                return
             if outcome == "failed":
                 self.action_note.setText("Removal did not finish. Review the error details and History.")
             elif outcome == "cancelled":
@@ -590,13 +808,16 @@ class DuplicatesPage(Page):
             self.action_note.setText(("Stopped part-way. " if result.cancelled else "") + result_message(result) +
                                      (" Some items were skipped or failed; review the results."
                                       if result.skipped or result.failed else " Duplicate results are refreshing."))
+        def declined():
+            self._group_action_running = False
+            self.action_note.setText("No files moved. This group's previous choice is unchanged.")
         started = self.apply_actions(
             "duplicates", title, plan, summary=recycle_summary(len(files), sum(a.size for a in files)),
             details=details, confirm_text=f"Move {fmt_n(len(files), 'file')}", note=recovery_note(),
             require_ack=("I understand that no shown copy may remain in the library."
                          if all_selected and not quick else None),
             confirm_action=not quick, before_apply=lambda: duplicates.remember_keep(lib, key, False),
-            done_message=result_message, after=finished)
+            done_message=result_message, after=finished, on_declined=declined)
         if started:
             self._group_action_running = True
             self.action_note.setText("Checking the selected items and moving them to Recovery…")
@@ -612,7 +833,7 @@ class DuplicatesPage(Page):
             self.ctx.toast_requested.emit("Select the duplicate copy you want to remove first.", "")
             return
         if mode == "keep":
-            if not self._remember(duplicates.file_review_key(group), True):
+            if not self._remember(self._file_key(group), True):
                 return
             self.file_removals[group.hash] = set()
             self.included.discard(group.hash)
@@ -684,7 +905,7 @@ class DuplicatesPage(Page):
             self.folder_removals.pop(obj.id, None)
             (self.included_folders.add if on else self.included_folders.discard)(obj.id)
         elif kind == "file":
-            if on and not self._remember(duplicates.file_review_key(obj), False):
+            if on and not self._remember(self._file_key(obj), False):
                 self._rebuild()
                 return
             self.file_removals.pop(obj.hash, None)
@@ -714,18 +935,24 @@ class DuplicatesPage(Page):
 
     def _update_summary(self) -> None:
         folders, groups = self._chosen()
-        n_folders = sum(len(self._folder_targets(m)) for m in folders)
-        folder_size = sum(f.total_bytes for m in folders for f in m.folders if f.path in self._folder_targets(m))
-        file_count = sum(len(self._file_targets(g)) for g in groups)
-        file_size = sum(g.size * len(self._file_targets(g)) for g in groups)
+        n_folders = folder_size = file_count = file_size = 0
+        for match in folders:
+            targets = self._folder_targets(match)
+            n_folders += len(targets)
+            folder_size += sum(folder.total_bytes for folder in match.folders if folder.path in targets)
+        for group in groups:
+            count = len(self._file_targets(group))
+            file_count += count
+            file_size += group.size * count
         parts = []
         if folders:
             parts.append(f"{fmt_n(n_folders, 'folder')} ({fmt_size(folder_size)})")
         if groups:
             parts.append(f"{fmt_n(file_count, 'copy', 'copies')} ({fmt_size(file_size)})")
-        self.summary.setText("Bulk plan: " + " and ".join(parts) if parts else "No groups marked for bulk Apply")
+        self.summary.setText(("Bulk plan: " + " and ".join(parts) if parts else
+                              "No groups marked for bulk Apply") + " · Across all pages")
         self.t_space.set(fmt_size(folder_size + file_size))
-        self.apply_btn.setEnabled(bool(parts) and not self.busy)
+        self.apply_btn.setEnabled(bool(parts) and not self.busy and not self._building)
 
     def _plan(self):
         folders, groups = self._chosen()

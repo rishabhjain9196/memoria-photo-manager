@@ -228,6 +228,7 @@ def test_history_orders_same_timestamp_actions_by_creation_not_random_id(library
 
 
 def test_review_controls_persistence_and_remove_all_acknowledgement(library, tmp_path, monkeypatch):
+    import time
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     os.environ.setdefault("QT_QPA_FONTDIR", r"C:\Windows\Fonts")
     from PySide6.QtCore import Qt
@@ -277,15 +278,24 @@ def test_review_controls_persistence_and_remove_all_acknowledgement(library, tmp
     monkeypatch.setattr(base, "confirm", deny_confirmation)
     failures = []
     monkeypatch.setattr(MessageDialog, "exec", lambda dialog: failures.append(dialog.windowTitle()) or 0)
+    def idle():
+        deadline = time.monotonic() + 10
+        while window.runner.busy and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(.01)
+        app.processEvents()
+        assert not window.runner.busy
     try:
         group = file_group(report)
         select("file", group.hash)
         page.grid.setCurrentIndex(page.grid.model_.index(0))
         page.remove_one.click()
+        idle()
         assert confirmations[-1][1] == [group.files[0]["id"]] and not confirmations[-1][2]
         assert not page._plan()  # cancelling a group action must not stage it for bulk Apply
         assert sum(row["badge"] == "KEEP" for row in page.grid.items()) == 3
         page.remove_all.click()
+        idle()
         assert len(confirmations[-1][1]) == 3 and confirmations[-1][2]
         assert not page._plan()
         assert not actions.batches(library)
@@ -297,6 +307,7 @@ def test_review_controls_persistence_and_remove_all_acknowledgement(library, tmp
         page.show_previous.setChecked(True)
         select("file", group.hash)
         page.remove_all.click()
+        idle()
         assert duplicates.file_review_key(group) in duplicates.kept_choices(library)  # cancel preserves the keep
         page._set_all(True)
         assert group.hash not in page.included  # Include all must not override a remembered keep
@@ -305,6 +316,7 @@ def test_review_controls_persistence_and_remove_all_acknowledgement(library, tmp
         assert duplicates.file_review_key(group) not in duplicates.kept_choices(library)
         assert len(page._file_targets(group)) == 2
         page.remove_all.click()
+        idle()
         page._show(duplicates.find_all(library))
         assert len(page._file_targets(file_group(page.report))) == 2  # rescan never repeats Remove all
 
@@ -312,11 +324,13 @@ def test_review_controls_persistence_and_remove_all_acknowledgement(library, tmp
         match = folder_group(page.report)
         select("folder", match.id)
         page.f_remove_all.click()
+        idle()
         assert len(confirmations[-1][1]) == sum(f.files for f in match.folders) and confirmations[-1][2]
         assert not page._folder_targets(match)
         assert all("✓ Kept" in page.table.topLevelItem(i).text(0) for i in range(page.table.topLevelItemCount()))
         assert window.grab().save(str(tmp_path / "duplicates-folder-choices.png"))
         page.apply()
+        idle()
         assert not actions.batches(library)
         page.f_keep_all.click()
         assert page.report.folder_review_key(match) in duplicates.kept_choices(library)
@@ -437,6 +451,7 @@ def test_group_removal_executes_only_current_group_refreshes_and_undoes(library,
 
         count = len(confirmations)
         page.apply()
+        idle()
         assert len(confirmations) == count + 1 and confirmations[-1][0] == "Move duplicates to Recovery"
         assert len(actions.batches(library)) == 2  # cancelled bulk confirmation touched no other group
 

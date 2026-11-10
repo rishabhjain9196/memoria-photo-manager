@@ -1,7 +1,6 @@
 """Story maker: Instagram stories, carousels and story videos made from library photos."""
 from __future__ import annotations
 
-import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
@@ -14,6 +13,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComb
 
 from ...engine import config, story
 from .. import theme
+from ..tasks import LatestCall
 from ..widgets import (Banner, Card, MessageDialog, PhotoGrid, button, fmt_date, fmt_n, hbox, label, open_path,
                        scroll, show_in_explorer, vbox)
 from .base import Page
@@ -149,50 +149,43 @@ class OutputFolder(QWidget):
 
 
 class _BackgroundRenderer(QObject):
-    """One daemon thread that always renders the most recent request; older requests are dropped."""
+    """Bounded latest-only rendering with an owned, waitable worker lifetime."""
     ready = Signal(int, object, str)  # generation, QImage | None, note-or-error
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._lock = threading.Lock()
-        self._wake = threading.Event()
-        self._job: Optional[tuple[int, Callable]] = None
         self._alive = True
-        threading.Thread(target=self._loop, name="story-preview", daemon=True).start()
+        self._call = LatestCall(self)
+        self._call.result.connect(lambda value: self.ready.emit(*value))
 
     def request(self, generation: int, fn: Callable[[], tuple]) -> None:
-        with self._lock:
-            self._job = (generation, fn)
-        self._wake.set()
+        if not self._alive:
+            return
+        def work():
+            try:
+                img, note = fn()
+                rgb = img.convert("RGB")
+                try:
+                    image = QImage(rgb.tobytes(), rgb.width, rgb.height, rgb.width * 3,
+                                   QImage.Format.Format_RGB888).copy()
+                finally:
+                    rgb.close()
+                    img.close()
+                return generation, image, note
+            except Exception as error:
+                return generation, None, f"Can't preview: {error}"
+        self._call.call(work)
 
     def stop(self) -> None:
         self._alive = False
-        self._wake.set()
+        self._call.wait()
 
-    def _loop(self) -> None:
-        while True:
-            self._wake.wait()
-            with self._lock:
-                job, self._job = self._job, None
-                self._wake.clear()
-            if not self._alive:
-                return
-            if job is None:
-                continue
-            gen, fn = job
-            try:
-                img, note = fn()
-                img = img.convert("RGB")
-                qimg = QImage(img.tobytes(), img.width, img.height, img.width * 3,
-                              QImage.Format.Format_RGB888).copy()
-                result = (gen, qimg, note)
-            except Exception as e:  # shown in the preview box, never raised
-                result = (gen, None, f"Can't preview: {e}")
-            if self._alive:
-                try:
-                    self.ready.emit(*result)
-                except RuntimeError:  # receiver already destroyed at shutdown
-                    return
+    def invalidate(self):
+        self._call.invalidate()
+
+    @property
+    def running(self):
+        return self._call.running
 
 
 def square_icon(pm: Optional[QPixmap], side: int) -> QIcon:
@@ -290,6 +283,12 @@ class StoryPage(Page):
         self._last_outputs: list[Path] = []
         self._generation = 0
         self._syncing = False
+        self._closed = False
+        self._preview_library = None
+        self._picker_offset = 0
+        self.catalogue_bg = LatestCall(self)
+        self.catalogue_bg.result.connect(self._catalogue_loaded)
+        self.catalogue_bg.failed.connect(lambda error: self.picker_count.setText(f"Could not load photos: {error}"))
 
         self.renderer = _BackgroundRenderer(self)
         self.renderer.ready.connect(self._preview_ready)
@@ -302,6 +301,20 @@ class StoryPage(Page):
         self.body.addLayout(hbox(self._build_picker(), self._build_options(), self._build_preview(), spacing=14),
                             1)
         self._mode_changed(0)
+
+    def shutdown(self):
+        self._closed = True
+        self.preview_timer.stop()
+        self.renderer.stop()
+        self.catalogue_bg.wait()
+
+    def _mark_stale(self):
+        self._generation += 1
+        self.renderer.invalidate()
+        self.catalogue_bg.invalidate()
+        self.preview_timer.stop()
+        self.preview.set_message("Library changed. Updating the story…")
+        super()._mark_stale()
 
     # ---------------------------------------------------------------------------- building
     def _build_picker(self) -> QWidget:
@@ -317,12 +330,15 @@ class StoryPage(Page):
         self.grid.activated_item.connect(self._toggle_item)
         self.grid.viewport().installEventFilter(self)
         self.picker_count = label("", "small")
+        self.picker_previous = button("Previous", on_click=lambda: self._picker_step(-1))
+        self.picker_next = button("Next", on_click=lambda: self._picker_step(1))
         self.picker_empty = label("No photos match.", "muted")
         self.picker_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.picker_empty.hide()
         lay = vbox(hbox(label("Photos", "h2"), None, self.picker_count),
                    hbox(self.search, self.month),
-                   self.grid, self.picker_empty, spacing=10)
+                   self.grid, self.picker_empty,
+                   hbox(self.picker_previous, self.picker_next, None), spacing=10)
         lay.setStretchFactor(self.grid, 1)
         card = Card(lay)
         card.setMinimumWidth(300)
@@ -471,29 +487,46 @@ class StoryPage(Page):
     # ---------------------------------------------------------------------------- data
     def refresh(self) -> None:
         lib = self.lib
-        selected = self.selected_ids()
         self.output.check()
         if lib is None:
             self._all, self._by_id = [], {}
-        else:
-            rows = lib.files("kind='image' AND error IS NULL", (),
-                             "COALESCE(taken_at, '') DESC, rel_path")
-            chosen = set(selected) | set(self.ctx.story_selection)
-            self._all = [{
-                "id": r["id"], "caption": r["name"], "rel_path": r["rel_path"], "kind": "image",
-                "folder": r["folder"] or "", "month": (r["taken_at"] or "")[:7],
-                "sub": fmt_date(r["taken_at"]) if r["taken_at"] else "", "checked": r["id"] in chosen,
-                "tip": f"{r['rel_path']}\n{fmt_date(r['taken_at'], True)}" if r["taken_at"] else r["rel_path"],
-            } for r in rows]
-            self._by_id = {it["id"]: it for it in self._all}
+            self._set_strip([])
+            self._apply_filter()
+            return
+        generation = self.ctx.generation
+        self.picker_count.setText("Reading photos…")
+        def work():
+            try:
+                rows = lib.db.execute("SELECT id,name,rel_path,folder,taken_at FROM files "
+                                      "WHERE kind='image' AND error IS NULL "
+                                      "ORDER BY COALESCE(taken_at,'') DESC,rel_path")
+                items = [{
+                    "id": r["id"], "caption": r["name"], "rel_path": r["rel_path"], "kind": "image",
+                    "folder": r["folder"] or "", "month": (r["taken_at"] or "")[:7],
+                    "sub": fmt_date(r["taken_at"]) if r["taken_at"] else "", "checked": False,
+                    "tip": lib.display_path(r["rel_path"]),
+                } for r in rows]
+                return lib, generation, items
+            finally:
+                lib.close_thread()
+        self.catalogue_bg.call(work)
+
+    def _catalogue_loaded(self, result):
+        lib, generation, items = result
+        if self._closed or (lib, generation) != (self.lib, self.ctx.generation):
+            return
+        selected = self.selected_ids()
+        self._all = items
+        self._by_id = {it["id"]: it for it in self._all}
         # rebuild the strip: keep the user's order, drop files that disappeared, then add new picks
         ids = [i for i in selected if i in self._by_id]
         for fid in self.ctx.story_selection:
             if fid in self._by_id and fid not in ids:
                 ids.append(fid)
         self.ctx.story_selection.clear()
+        chosen = set(ids)
         for it in self._all:
-            it["checked"] = it["id"] in ids
+            it["checked"] = it["id"] in chosen
         self._fill_months()
         self._set_strip(ids)
         self._apply_filter()
@@ -516,23 +549,34 @@ class StoryPage(Page):
         self.month.setCurrentIndex(max(0, idx))
         self.month.blockSignals(False)
 
-    def _apply_filter(self) -> None:
+    def _apply_filter(self, reset=True) -> None:
+        if reset is not False:
+            self._picker_offset = 0
         q = self.search.text().strip().lower()
         month = self.month.currentData()
         items = [it for it in self._all
                  if (not q or q in it["caption"].lower() or q in it["folder"].lower())
                  and (month is None or it["month"] == month)]
-        self.grid.set_items(items)
+        self._picker_offset = min(self._picker_offset, max(0, (len(items) - 1) // 500) * 500)
+        visible = items[self._picker_offset:self._picker_offset + 500]
+        self.grid.set_items(visible)
         total = len(self._all)
-        self.picker_count.setText(fmt_n(total, "photo") if len(items) == total
-                                  else f"{len(items):,} of {fmt_n(total, 'photo')}")
+        end = self._picker_offset + len(visible)
+        self.picker_count.setText(f"{self._picker_offset + 1 if visible else 0:,}–{end:,} of "
+                                  f"{len(items):,} matching photos · selections persist across pages")
+        self.picker_previous.setEnabled(self._picker_offset > 0)
+        self.picker_next.setEnabled(end < len(items))
         self.picker_empty.setText("No photos in this library yet." if not total else "No photos match.")
         self.picker_empty.setVisible(not items)
         self.grid.setVisible(bool(items))
 
+    def _picker_step(self, delta):
+        self._picker_offset = max(0, self._picker_offset + delta * 500)
+        self._apply_filter(False)
+
     def showEvent(self, e) -> None:  # noqa: N802
         super().showEvent(e)  # refreshes first if the library changed
-        if self.ctx.story_selection:
+        if self.ctx.story_selection and not self.catalogue_bg.running:
             ids = list(self.ctx.story_selection)
             self.ctx.story_selection.clear()
             self.add_ids(ids)
@@ -549,6 +593,9 @@ class StoryPage(Page):
 
     def add_ids(self, ids: list[int]) -> None:
         """Append library photos to the selection (used by refresh and external callers)."""
+        if self.catalogue_bg.running and not self._by_id:
+            self.ctx.story_selection.extend(i for i in ids if i not in self.ctx.story_selection)
+            return
         current = self.selected_ids()
         new = [i for i in ids if i in self._by_id and i not in current]
         for i in new:
@@ -677,6 +724,8 @@ class StoryPage(Page):
         return story.panorama_slide_count(row["width"], row["height"], self.shape.currentData())
 
     def _options_changed(self, *args) -> None:
+        self._generation += 1
+        self.renderer.invalidate()
         n = self.strip.count()
         mode = self.mode_seg.index()
         self.panorama.setEnabled(n == 1)
@@ -708,6 +757,8 @@ class StoryPage(Page):
 
     # ---------------------------------------------------------------------------- preview
     def _render_preview(self) -> None:
+        if self._closed:
+            return
         paths = self.selected_paths()
         self._generation += 1
         if not paths:
@@ -738,10 +789,25 @@ class StoryPage(Page):
                                      "First frame")
         if not self.preview.has_image():
             self.preview.set_message("Rendering preview…")
-        self.renderer.request(self._generation, fn)
+        lib, generation = self.lib, self.ctx.generation
+        self._preview_library = (lib, generation)
+        inputs = group if mode == 0 else paths[:1]
+        render = fn
+        def guarded_render():
+            try:
+                if lib is not None:
+                    if lib._lock_key is None:
+                        raise RuntimeError("The source library is closed.")
+                    for path in inputs:
+                        lib.check_path(path)
+                return render()
+            finally:
+                if lib is not None:
+                    lib.close_thread()
+        self.renderer.request(self._generation, guarded_render)
 
     def _preview_ready(self, generation: int, qimg, note: str) -> None:
-        if generation != self._generation:
+        if self._closed or generation != self._generation or self._preview_library != (self.lib, self.ctx.generation):
             return
         if qimg is None:
             self.preview.set_message(note)
@@ -759,7 +825,7 @@ class StoryPage(Page):
         if not paths:
             return
         out = self.output.path()
-        if self.lib is not None and _inside(out, config.app_dir(self.lib.root)):
+        if self.lib is not None and self.lib.in_app_storage(out):
             MessageDialog(self, "Choose another folder",
                           "That folder belongs to Memoria's own catalogue. Please pick a normal folder.").exec()
             return
@@ -813,11 +879,22 @@ class StoryPage(Page):
         lib = self.lib
         created = [None]
         export = work
+        inputs = paths + ([self._music] if mode == 2 and self._music is not None else [])
 
         def journaled_work(prog):
-            with actions.created_batch(lib, "story", title) as batch:
-                created[0] = batch
-                return export(prog)
+            try:
+                if lib is not None:
+                    if lib._lock_key is None:
+                        raise RuntimeError("The source library is closed.")
+                    for path in inputs:
+                        lib.check_path(path)
+                    lib.check_path(out)
+                with actions.created_batch(lib, "story", title) as batch:
+                    created[0] = batch
+                    return export(prog)
+            finally:
+                if lib is not None:
+                    lib.close_thread()
 
         if not self.run(title, journaled_work, done, cancelled, notify_success=False):
             self.ctx.toast_requested.emit("Another task is still running. Try again when it has finished.", "")

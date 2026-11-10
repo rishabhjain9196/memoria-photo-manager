@@ -8,7 +8,7 @@ import io
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import QItemSelectionModel, QSize, Qt, QTimer
 from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout,
                                QLabel, QListWidget, QListWidgetItem, QPushButton, QScrollArea, QSlider, QSpinBox,
@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QF
 from ...engine import actions, config
 from .. import theme
 from ..cropcanvas import CropCanvas, flip_crop, rotate_crop
-from ..tasks import BackgroundCall
+from ..tasks import LatestCall
 from ..widgets import (Banner, PhotoGrid, button, fmt_duration, fmt_n, fmt_size, hbox, label, show_in_explorer,
                        vbox)
 from .base import Page
@@ -33,10 +33,10 @@ VIDEO_RES = [("Keep original", None), ("1080p", 1080), ("720p", 720), ("480p", 4
 QUALITY = [("High", "high"), ("Balanced", "balanced"), ("Small", "small")]
 
 
-def _pil_to_pixmap(img) -> QPixmap:
+def _pil_to_image(img) -> QImage:
     img = img.convert("RGB")
     q = QImage(img.tobytes(), img.width, img.height, img.width * 3, QImage.Format.Format_RGB888)
-    return QPixmap.fromImage(q.copy())
+    return q.copy()
 
 
 def _grid2(*widgets) -> QGridLayout:
@@ -97,26 +97,77 @@ class LibraryPicker(QDialog):
         self.kind = QComboBox()
         self.kind.addItems(["Photos and videos", "Photos", "Videos"])
         self.grid = PhotoGrid(ctx.thumbs, cell=130, captions=1)
-        self.rows = [dict(r) for r in ctx.library.files("kind!='other' AND error IS NULL",
-                                                        order="COALESCE(taken_at,'') DESC, rel_path")]
+        self.ctx, self.rows, self._picked = ctx, [], {}
+        self.offset = 0
+        self.query = LatestCall(self)
+        self.query.result.connect(self._loaded)
+        self.query.failed.connect(lambda error: self.scope.setText(f"Could not load files: {error}"))
+        self.scope = label("", "small", wrap=True)
+        self.previous = button("Previous", on_click=lambda: self._step(-1))
+        self.next = button("Next", on_click=lambda: self._step(1))
         ok = button("Add selected", "primary", self.accept)
         self.setLayout(vbox(label("Add from library", "h2"), hbox(self.search, self.kind), self.grid,
+                            hbox(self.scope, None, self.previous, self.next),
                             hbox(label("Ctrl/Shift-click to pick several.", "small"), None,
                                  button("Cancel", on_click=self.reject), ok), spacing=10, margins=(18, 16, 18, 14)))
         self.search.textChanged.connect(self._filter)
         self.kind.currentIndexChanged.connect(self._filter)
+        self.finished.connect(lambda *_: self.query.invalidate())
         self._filter()
 
     def _filter(self) -> None:
-        q = self.search.text().lower()
+        self.offset = 0
+        self._load()
+
+    def _stash(self):
+        for row in self.rows:
+            self._picked.pop(row["id"], None)
+        self._picked.update((row["id"], row) for row in self.grid.selected_items())
+
+    def _step(self, delta):
+        self.offset = max(0, self.offset + delta * 500)
+        self._load()
+
+    def _load(self):
+        from ...engine import catalogue
+        self._stash()
+        self.rows = []
+        self.grid.set_items([])
+        lib, generation, offset = self.ctx.library, self.ctx.generation, self.offset
         k = self.kind.currentIndex()
-        items = [{**r, "caption": r["name"]} for r in self.rows
-                 if (k == 0 or (k == 1 and r["kind"] == "image") or (k == 2 and r["kind"] == "video"))
-                 and (not q or q in r["rel_path"].lower())]
-        self.grid.set_items(items)
+        filters = catalogue.Filters(kind=("media", "image", "video")[k], search=self.search.text())
+        self.scope.setText("Reading catalogue…")
+        self.previous.setEnabled(False)
+        self.next.setEnabled(False)
+        def work():
+            try:
+                return lib, generation, catalogue.page(lib, filters, "newest", offset)
+            finally:
+                lib.close_thread()
+        self.query.call(work)
+
+    def _loaded(self, result):
+        lib, generation, (rows, total, _) = result
+        if (lib, generation) != (self.ctx.library, self.ctx.generation):
+            return
+        self.rows = rows
+        self.grid.set_items([{**row, "caption": row["name"]} for row in rows])
+        for index, row in enumerate(rows):
+            if row["id"] in self._picked:
+                self.grid.selectionModel().select(self.grid.model_.index(index),
+                                                   QItemSelectionModel.SelectionFlag.Select)
+        end = self.offset + len(rows)
+        self.scope.setText(f"Files {self.offset + 1 if rows else 0:,}–{end:,} of {total:,}. "
+                           "Selections persist across pages.")
+        self.previous.setEnabled(self.offset > 0)
+        self.next.setEnabled(end < total)
 
     def selected(self) -> list[dict]:
-        return self.grid.selected_items()
+        self._stash()
+        return list(self._picked.values())
+
+    def shutdown(self):
+        self.query.wait()
 
 
 class EditorPage(Page):
@@ -133,6 +184,8 @@ class EditorPage(Page):
         self._video_info = None
         self._t = 0.0
         self._loading = False
+        self._closed = False
+        self._source_library = self.lib
 
         # ---- files list
         self.files = QListWidget()
@@ -204,11 +257,12 @@ class EditorPage(Page):
         self.body.addLayout(hbox(label("Save to", "muted"), self.dest, 12, self.all_box, None, self.last_btn,
                                  self.reset_btn, self.save_btn))
 
-        self.bg = BackgroundCall(self)
+        self.bg = LatestCall(self)
         self.bg.result.connect(self._preview_ready)
         self.bg.failed.connect(lambda e: self.canvas.set_message(f"Can't show a preview: {e}"))
-        self.est = BackgroundCall(self)
+        self.est = LatestCall(self)
         self.est.result.connect(self._estimate_ready)
+        self.est.failed.connect(lambda error: self.p_estimate.setText(f"Could not estimate size: {error}"))
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
         self._debounce.setInterval(140)
@@ -363,8 +417,26 @@ class EditorPage(Page):
         self._update_buttons()
 
     def shutdown(self) -> None:
+        self._closed = True
+        self._debounce.stop()
         self.bg.wait()
         self.est.wait()
+
+    def _mark_stale(self):
+        self.bg.invalidate()
+        self.est.invalidate()
+        self._debounce.stop()
+        if self._source_library is not self.lib:
+            self._source_library = self.lib
+            self.current = None
+            self.items.clear()
+            self.edits.clear()
+            self.files.clear()
+            self._base_img = self._video_info = None
+            self.canvas.set_message("Library changed. Add files to start editing.")
+        elif self.current is not None and self.isVisible():
+            self._select(self.files.currentRow())
+        super()._mark_stale()
 
     def _take_selection(self) -> None:
         ids = list(getattr(self.ctx, "edit_selection", []))
@@ -384,7 +456,7 @@ class EditorPage(Page):
             if any(it["key"] == key for it in self.items):
                 continue
             self.items.append({"key": key, "path": path, "name": path.name, "kind": r["kind"], "id": r.get("id"),
-                               "size": r.get("size") or (path.stat().st_size if path.exists() else 0),
+                               "size": r.get("size") or 0,
                                "duration": r.get("duration")})
             it = QListWidgetItem(f"{path.name}\n{'Video' if r['kind'] == 'video' else 'Photo'} · "
                                  f"{fmt_size(self.items[-1]['size'])}")
@@ -400,8 +472,11 @@ class EditorPage(Page):
         if self.lib is None:
             return
         dlg = LibraryPicker(self, self.ctx)
-        if dlg.exec():
-            self.add_rows(dlg.selected())
+        try:
+            if dlg.exec():
+                self.add_rows(dlg.selected())
+        finally:
+            dlg.shutdown()
 
     def _add_external(self) -> None:
         exts = " ".join(f"*{e}" for e in sorted(config.IMAGE_EXT | config.VIDEO_EXT))
@@ -411,7 +486,7 @@ class EditorPage(Page):
         for f in files:
             p = Path(f)
             kind = config.kind_for_ext(p.suffix)
-            rows.append({"path": str(p), "kind": kind, "size": p.stat().st_size})
+            rows.append({"path": str(p), "kind": kind})
         self.add_rows(rows)
 
     def _remove_current(self) -> None:
@@ -421,6 +496,9 @@ class EditorPage(Page):
             del self.items[row]
             self.files.takeItem(row)
             if not self.items:
+                self.bg.invalidate()
+                self.est.invalidate()
+                self._debounce.stop()
                 self.current = None
                 self._show_tools(None)
                 self.canvas.set_message("Add photos or videos to start editing.")
@@ -429,25 +507,45 @@ class EditorPage(Page):
     def _select(self, row: int) -> None:
         if not (0 <= row < len(self.items)):
             return
+        self.bg.invalidate()
+        self.est.invalidate()
+        self._debounce.stop()
         self.current = it = self.items[row]
+        lib, generation, path = self.lib, self.ctx.generation, it["path"]
+        request = (lib, generation, it["key"])
         self._show_tools(it["kind"])
         self._base_img = None
         self._video_info = None
         self.canvas.set_message("Loading…")
         if it["kind"] == "image":
-            path = it["path"]
-
             def load():
-                from PIL import Image
-                img = photoedit.load(path, max_side=1600)
-                with Image.open(config.longpath(path)) as im:
-                    size = im.size
-                return img, size
-
-            self.bg.call(lambda: ("load", it["key"], load()))
+                try:
+                    if lib is not None:
+                        if lib._lock_key is None:
+                            raise RuntimeError("The source library is closed.")
+                        lib.check_path(path)
+                    from PIL import Image
+                    img = photoedit.load(path, max_side=1600)
+                    with Image.open(config.longpath(path)) as im:
+                        size = im.size
+                    return "load", request, (img, size, path.stat().st_size)
+                finally:
+                    if lib is not None:
+                        lib.close_thread()
+            self.bg.call(load)
         else:
             from ...engine import ffmpeg
-            self.bg.call(lambda: ("vload", it["key"], ffmpeg.probe(it["path"])))
+            def probe():
+                try:
+                    if lib is not None:
+                        if lib._lock_key is None:
+                            raise RuntimeError("The source library is closed.")
+                        lib.check_path(path)
+                    return "vload", request, ffmpeg.probe(path)
+                finally:
+                    if lib is not None:
+                        lib.close_thread()
+            self.bg.call(probe)
         self._load_controls()
 
     def _show_tools(self, kind: Optional[str]) -> None:
@@ -632,7 +730,8 @@ class EditorPage(Page):
         if it is None:
             return
         crop_view = crop_view or self.canvas.crop_mode
-        key = it["key"]
+        lib = self.lib
+        key = (lib, self.ctx.generation, it["key"])
         if it["kind"] == "image":
             base = self._base_img
             if base is None:
@@ -641,24 +740,46 @@ class EditorPage(Page):
 
             def work():
                 img = photoedit.transform(base, snap) if crop_view else photoedit.apply(base, snap)
-                return ("img", key, img)
+                return ("img", key, _pil_to_image(img))
 
             self.bg.call(work)
             if not crop_view:
                 full, src = self._full_size, it["path"]
-                self.est.call(lambda: (key, photoedit.estimate_bytes(base, snap, full, src=src)))
+                def estimate():
+                    try:
+                        if lib is not None:
+                            if lib._lock_key is None:
+                                raise RuntimeError("The source library is closed.")
+                            lib.check_path(src)
+                        return key, photoedit.estimate_bytes(base, snap, full, src=src)
+                    finally:
+                        if lib is not None:
+                            lib.close_thread()
+                self.est.call(estimate)
         else:
             if self._video_info is None:
                 return
             snap, t, path = e.copy(), self._t, it["path"]
-            self.bg.call(lambda: ("frame", key, videoedit.preview_frame(path, t, snap, 900, crop=not crop_view)))
+            def frame():
+                try:
+                    if lib is not None:
+                        if lib._lock_key is None:
+                            raise RuntimeError("The source library is closed.")
+                        lib.check_path(path)
+                    data = videoedit.preview_frame(path, t, snap, 900, crop=not crop_view)
+                    return "frame", key, QImage.fromData(data, "JPG") if data else QImage()
+                finally:
+                    if lib is not None:
+                        lib.close_thread()
+            self.bg.call(frame)
 
     def _preview_ready(self, result) -> None:
         kind, key, value = result
-        if self.current is None or key != self.current["key"]:
+        if self._closed or self.current is None or key != (self.lib, self.ctx.generation, self.current["key"]):
             return
         if kind == "load":
-            img, size = value
+            img, size, source_size = value
+            self.current["size"] = source_size
             self._base_img, self._full_size = img, size
             self._debounce.start()
         elif kind == "vload":
@@ -666,19 +787,17 @@ class EditorPage(Page):
             self._init_trim()
             self._debounce.start()
         elif kind == "img":
-            self.canvas.set_pixmap(_pil_to_pixmap(value))
+            self.canvas.set_pixmap(QPixmap.fromImage(value))
         elif kind == "frame":
-            if value:
-                pm = QPixmap()
-                pm.loadFromData(value, "JPG")
-                self.canvas.set_pixmap(pm)
+            if not value.isNull():
+                self.canvas.set_pixmap(QPixmap.fromImage(value))
             else:
                 self.canvas.set_message("This frame could not be read.")
         self._update_status()
 
     def _estimate_ready(self, result) -> None:
         key, n = result
-        if self.current is not None and key == self.current["key"]:
+        if not self._closed and self.current is not None and key == (self.lib, self.ctx.generation, self.current["key"]):
             self.p_estimate.setText(f"Estimated size about {fmt_size(n)} (original {fmt_size(self.current['size'])}). "
                                     "Rough guide — the saved file may differ.")
 
@@ -771,24 +890,37 @@ class EditorPage(Page):
         return Path(self._dest_dir) if self._dest_dir else None
 
     # ===================================================================== running work
-    def _run_outputs(self, title: str, fn, sources_for: callable, failures: Optional[list] = None) -> None:
+    def _run_outputs(self, title: str, fn, sources_for: callable, failures: Optional[list] = None,
+                     *, sources=()) -> None:
         """Run ``fn(progress) -> list[Path]`` then journal the new files so History can undo them."""
         lib = self.lib
+        destination = Path(self._dest_dir) if self._dest_dir else None
 
         def work(prog):
-            with actions.created_batch(lib, "edit", title) as batch:
-                outputs = fn(prog.step(0, 2, title))
-            if not isinstance(outputs, (list, tuple)):
-                outputs = [outputs]
-            outputs = [Path(p) for p in outputs if p]
-            if lib is not None and outputs:
-                for p in outputs:
-                    lib.db.execute("UPDATE operations SET src=? WHERE batch_id=? AND dst=?",
-                                   (str(sources_for(p)), batch.batch_id, str(p)))
-                if any(self._inside(lib, p) for p in outputs):
-                    from ...engine import scanner
-                    scanner.index(lib, prog.step(1, 2, "Adding the new files to the library"))
-            return outputs, batch
+            try:
+                if lib is not None:
+                    if lib._lock_key is None:
+                        raise RuntimeError("The source library is closed.")
+                    for path in sources:
+                        lib.check_path(path)
+                    if destination is not None:
+                        lib.check_path(destination)
+                with actions.created_batch(lib, "edit", title) as batch:
+                    outputs = fn(prog.step(0, 2, title))
+                if not isinstance(outputs, (list, tuple)):
+                    outputs = [outputs]
+                outputs = [Path(p) for p in outputs if p]
+                if lib is not None and outputs:
+                    for p in outputs:
+                        lib.db.execute("UPDATE operations SET src=? WHERE batch_id=? AND dst=?",
+                                       (str(sources_for(p)), batch.batch_id, str(p)))
+                    if any(lib.contains(p) for p in outputs):
+                        from ...engine import scanner
+                        scanner.index(lib, prog.step(1, 2, "Adding the new files to the library"))
+                return outputs, batch
+            finally:
+                if lib is not None:
+                    lib.close_thread()
 
         def done(res):
             outputs, batch = res
@@ -813,11 +945,7 @@ class EditorPage(Page):
 
     @staticmethod
     def _inside(lib, p: Path) -> bool:
-        try:
-            p.resolve().relative_to(lib.root)
-            return True
-        except ValueError:
-            return False
+        return lib.contains(p)
 
     def _show_last(self) -> None:
         if self._last_output is not None:
@@ -859,7 +987,7 @@ class EditorPage(Page):
                 return results
 
         title = f"Save {fmt_n(len(targets), 'edited copy', 'edited copies')}"
-        self._run_outputs(title, fn, lambda p: src_of.get(str(p).lower(), it["path"]), failures)
+        self._run_outputs(title, fn, lambda p: src_of.get(str(p).lower(), it["path"]), failures, sources=paths)
 
     # ----------------------------------------------------------------- photo split / join
     def _split_photo(self) -> None:
@@ -873,7 +1001,7 @@ class EditorPage(Page):
         self._run_outputs(f"Split into {rows * cols} pieces",
                           lambda prog: photoedit.split_grid(it["path"], rows, cols, out,
                                                             None if e.is_identity() else e, prog),
-                          lambda p: it["path"])
+                          lambda p: it["path"], sources=[it["path"]])
 
     def _join_photos(self) -> None:
         photos = [i["path"] for i in self.items if i["kind"] == "image"]
@@ -881,7 +1009,8 @@ class EditorPage(Page):
             return
         direction, out = self.p_join_dir.currentData(), self._out_dir(photos[0])
         self._run_outputs(f"Join {len(photos)} photos",
-                          lambda prog: photoedit.join(photos, direction, out, progress=prog), lambda p: photos[0])
+                          lambda prog: photoedit.join(photos, direction, out, progress=prog), lambda p: photos[0],
+                          sources=photos)
 
     # ----------------------------------------------------------------- video split / join / frame
     def _split_here(self) -> None:
@@ -893,7 +1022,7 @@ class EditorPage(Page):
             self.ctx.toast_requested.emit("Move the playhead inside the video to choose where to split.", "")
             return
         self._run_outputs("Split video", lambda prog: videoedit.split(it["path"], [t], out, e, progress=prog),
-                          lambda p: it["path"])
+                          lambda p: it["path"], sources=[it["path"]])
 
     def _split_equal(self) -> None:
         it = self.current
@@ -902,7 +1031,7 @@ class EditorPage(Page):
         n, e, out = self.v_parts.value(), self.edit().copy(), self._out_dir(it["path"])
         self._run_outputs(f"Split into {n} parts",
                           lambda prog: videoedit.split_equal(it["path"], n, out, edit=e, progress=prog),
-                          lambda p: it["path"])
+                          lambda p: it["path"], sources=[it["path"]])
 
     def _split_every(self) -> None:
         it = self.current
@@ -911,7 +1040,7 @@ class EditorPage(Page):
         s, e, out = self.v_every.value(), self.edit().copy(), self._out_dir(it["path"])
         self._run_outputs(f"Split every {s:g} s",
                           lambda prog: videoedit.split_every(it["path"], s, out, edit=e, progress=prog),
-                          lambda p: it["path"])
+                          lambda p: it["path"], sources=[it["path"]])
 
     def _join_videos(self) -> None:
         vids = [i["path"] for i in self.items if i["kind"] == "video"]
@@ -919,7 +1048,7 @@ class EditorPage(Page):
             return
         out = self._out_dir(vids[0])
         self._run_outputs(f"Join {len(vids)} videos", lambda prog: videoedit.join(vids, out, progress=prog),
-                          lambda p: vids[0])
+                          lambda p: vids[0], sources=vids)
 
     def _save_frame(self) -> None:
         it = self.current
@@ -927,4 +1056,4 @@ class EditorPage(Page):
             return
         t, out = self._t, self._out_dir(it["path"])
         self._run_outputs("Save frame", lambda prog: videoedit.extract_frame(it["path"], t, out),
-                          lambda p: it["path"])
+                          lambda p: it["path"], sources=[it["path"]])

@@ -3,7 +3,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from PySide6.QtCore import QDate
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QDoubleSpinBox, QFormLayout,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QDoubleSpinBox, QFormLayout, QLineEdit,
                                QSpinBox, QTabWidget, QWidget)
 
 from ..engine import catalogue
@@ -12,6 +12,7 @@ from .widgets import MessageDialog, button, fmt_date, fmt_duration, fmt_size, hb
 KINDS = [("media", "Photos & videos"), ("image", "Photos"), ("video", "Videos"),
          ("problems", "Problems"), ("other", "Other files"), ("all", "All files")]
 SORTS = [("newest", "Newest first"), ("oldest", "Oldest first"), ("largest", "Largest first"),
+         ("rating_desc", "Rating: highest first"), ("rating_asc", "Rating: lowest first"),
          ("smallest", "Smallest first"), ("name", "Name"), ("format", "File format"),
          ("modified_newest", "Recently modified"), ("modified_oldest", "Least recently modified"),
          ("megapixels_desc", "Resolution: highest first"), ("megapixels_asc", "Resolution: lowest first"),
@@ -36,6 +37,8 @@ RANGES = {
 
 
 def sort_caption(row: dict, key: str) -> str:
+    if key.startswith("rating_"):
+        return "★" * row.get("rating", 0) or "Unrated"
     if key in ("largest", "smallest"):
         return fmt_size(row["size"])
     if key.startswith("modified_"):
@@ -74,6 +77,18 @@ def sort_caption(row: dict, key: str) -> str:
 
 def metadata_filter_notes(filters: catalogue.Filters) -> list[str]:
     notes = []
+    if filters.root_id is not None:
+        notes.append(f"Library folder #{filters.root_id}")
+    if filters.availability != "all":
+        notes.append(f"{filters.availability.capitalize()} folders")
+    if filters.min_rating or filters.max_rating < 5:
+        notes.append(f"Rating: {filters.min_rating}–{filters.max_rating}")
+    if filters.favorite is not None:
+        notes.append("Favourites" if filters.favorite else "Not favourites")
+    if filters.review != "all":
+        notes.append(f"Review: {filters.review}")
+    if filters.tags:
+        notes.append(f"Tags ({filters.tag_mode}): {', '.join(filters.tags)}")
     for key in ("camera", "lens", "video_codec", "audio_codec"):
         value = getattr(filters, key)
         if value is not None:
@@ -99,8 +114,12 @@ class FilterDialog(QDialog):
         self.resize(660, 650)
         form = QFormLayout()
         self.folder = QComboBox()
-        for folder in catalogue.folders(lib):
-            self.folder.addItem(folder or "Library root", folder)
+        self.folder.setEditable(True)
+        folders = {current.folder, ""}
+        folders.update(r[0] for r in lib.db.execute("SELECT DISTINCT folder FROM files ORDER BY folder LIMIT 1000"))
+        for folder in sorted(folders, key=str.casefold):
+            self.folder.addItem(lib.display_path(folder) if folder else "Library root", folder)
+        self.folder.setToolTip("First 1,000 folders; you can also type a relative folder path.")
         self.folder.setCurrentIndex(max(0, self.folder.findData(current.folder)))
         self.recursive = QCheckBox("Include subfolders")
         self.recursive.setChecked(current.recursive)
@@ -115,6 +134,8 @@ class FilterDialog(QDialog):
         self.ext.setCurrentIndex(max(0, self.ext.findData(current.extension)))
         self.use_dates = QCheckBox("Limit capture dates (inclusive)")
         self.use_dates.setChecked(bool(current.start or current.end))
+        self.undated = QCheckBox("Undated files only")
+        self.undated.setChecked(current.undated)
         self.start, self.end = QDateEdit(), QDateEdit()
         for widget in (self.start, self.end):
             widget.setCalendarPopup(True)
@@ -150,7 +171,7 @@ class FilterDialog(QDialog):
             self.person.addItem(row["name"], row["id"])
         self.person.setCurrentIndex(max(0, self.person.findData(current.person)))
         for title, widget in (("Folder", self.folder), ("", self.recursive), ("Type", self.kind),
-                              ("Format", self.ext), ("", self.use_dates), ("From", self.start), ("Through", self.end),
+                              ("Format", self.ext), ("", self.undated), ("", self.use_dates), ("From", self.start), ("Through", self.end),
                               ("Minimum size", self.minimum), ("Maximum size", self.maximum),
                               ("Location", self.location), ("", self.keep_area), ("Faces", self.faces),
                               ("Person", self.person)):
@@ -159,6 +180,42 @@ class FilterDialog(QDialog):
         general = QWidget()
         general.setLayout(form)
         self.tabs.addTab(scroll(general), "Files && dates")
+        organisation_form = QFormLayout()
+        self.root = QComboBox()
+        self.root.addItem("All library folders", None)
+        for root in lib.roots():
+            self.root.addItem(root["label"] + ("" if root["online"] else " (offline)"), root["id"])
+        self.root.setCurrentIndex(max(0, self.root.findData(current.root_id)))
+        self.availability = QComboBox()
+        for key in ("all", "online", "offline"):
+            self.availability.addItem(key.capitalize(), key)
+        self.availability.setCurrentIndex(self.availability.findData(current.availability))
+        self.min_rating, self.max_rating = QSpinBox(), QSpinBox()
+        for box, value in ((self.min_rating, current.min_rating), (self.max_rating, current.max_rating)):
+            box.setRange(0, 5)
+            box.setValue(value)
+        self.favorite = QComboBox()
+        for title, value in (("Any", None), ("Favourites only", True), ("Not favourites", False)):
+            self.favorite.addItem(title, value)
+        self.favorite.setCurrentIndex(self.favorite.findData(current.favorite))
+        self.review = QComboBox()
+        for key in ("all", "unreviewed", "pick", "reject"):
+            self.review.addItem(key.capitalize(), key)
+        self.review.setCurrentIndex(self.review.findData(current.review))
+        self.tags = QLineEdit(", ".join(current.tags))
+        self.tags.setPlaceholderText("Tag names, separated by commas")
+        self.tag_mode = QComboBox()
+        for key in ("all", "any"):
+            self.tag_mode.addItem("Match " + key + " tags", key)
+        self.tag_mode.setCurrentIndex(self.tag_mode.findData(current.tag_mode))
+        for title, widget in (("Library folder", self.root), ("Availability", self.availability),
+                              ("Minimum rating (0 = unrated)", self.min_rating), ("Maximum rating", self.max_rating),
+                              ("Favourites", self.favorite), ("Review mark", self.review),
+                              ("Tags", self.tags), ("Match", self.tag_mode)):
+            organisation_form.addRow(title, widget)
+        panel = QWidget()
+        panel.setLayout(organisation_form)
+        organisation_panel = panel
         self.metadata_text = {}
         self.ranges = {}
         dimensions_form, camera_form = QFormLayout(), QFormLayout()
@@ -204,6 +261,7 @@ class FilterDialog(QDialog):
             panel = QWidget()
             panel.setLayout(layout)
             self.tabs.addTab(scroll(panel), title)
+        self.tabs.addTab(scroll(organisation_panel), "Organisation")
         outer = vbox(self.tabs, label("Missing metadata is excluded only when that field is filtered. Video ranges "
                                        "match videos; EXIF ranges match photos. Bitrate includes audio/container overhead "
                                        "and is not a quality score. Dates may be filename/modified-date fallbacks; "
@@ -218,8 +276,11 @@ class FilterDialog(QDialog):
         technical = {key: box.currentData() for key, box in self.metadata_text.items()}
         technical.update({f"{side}_{key}": box.value() or None for key, boxes in self.ranges.items()
                           for side, box in zip(("min", "max"), boxes)})
-        return replace(self.current, folder=self.folder.currentData(), recursive=self.recursive.isChecked(),
-                       kind=self.kind.currentData(), extension=self.ext.currentData(), undated=False,
+        folder = self.folder.currentData()
+        if self.folder.currentText() != self.folder.itemText(self.folder.currentIndex()):
+            folder = self.folder.currentText().strip()
+        return replace(self.current, folder=folder or "", recursive=self.recursive.isChecked(),
+                       kind=self.kind.currentData(), extension=self.ext.currentData(), undated=self.undated.isChecked(),
                        start=self.start.date().toString("yyyy-MM-dd") if self.use_dates.isChecked() else None,
                        end=self.end.date().addDays(1).toString("yyyy-MM-dd") if self.use_dates.isChecked() else None,
                        min_bytes=int(self.minimum.value() * 1024**2),
@@ -228,7 +289,11 @@ class FilterDialog(QDialog):
                        bbox=self.current.bbox if self.keep_area.isChecked() else None,
                        faces=self.faces.currentData(), person=self.person.currentData(),
                        orientation=self.orientation.currentData(), min_width=self.min_width.value(),
-                       min_height=self.min_height.value(), **technical)
+                       min_height=self.min_height.value(), root_id=self.root.currentData(),
+                       availability=self.availability.currentData(), min_rating=self.min_rating.value(),
+                       max_rating=self.max_rating.value(), favorite=self.favorite.currentData(),
+                       review=self.review.currentData(), tags=tuple(t.strip() for t in self.tags.text().split(",") if t.strip()),
+                       tag_mode=self.tag_mode.currentData(), **technical)
 
     def _accept(self):
         try:

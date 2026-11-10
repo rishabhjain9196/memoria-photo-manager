@@ -48,6 +48,16 @@ AREAS = {
     "test_diagnostics": "Aggregate diagnostic privacy, cached reports, opt-in and publication",
     "test_live_index": "Live browsing during indexing and utility safety",
     "test_notifications": "Key-event notification routing, privacy, preferences and shutdown",
+    "test_library_roots": "Multi-folder identities, offline retention, migration and reconnect-safe Undo",
+    "test_library_views": "Bounded History, Health and Compare views and folder management",
+    "test_assets": "Linked-component discovery and mandatory review",
+    "test_companion_actions": "Compound file operations, rollback, cancellation and recovery",
+    "test_metadata_history": "Duplicate organisation merge, conflict-aware Undo and reset safety",
+    "test_organisation": "Tags, ratings, favourites and Pick/Reject states",
+    "test_smart_albums": "Dynamic saved rules and bounded album browsing",
+    "test_responsive_views": "100k-entry responsiveness, asynchronous previews and lifecycle guards",
+    "test_duplicate_paging": "Bounded duplicate-group and member review",
+    "test_media_source_ui": "Guarded asynchronous editor, story and video sources",
 }
 
 
@@ -141,7 +151,7 @@ def refresh_images(tmp: Path) -> None:
         "toast": "20-after-apply-toast",
     }
     for name in ("dark-overview", "dark-photos", "dark-similar", "insights-storage", "insights-timeline",
-                 "insights-india", "insights-world", "dark-insights", "photos-largest", "library-filters",
+                 "insights-india", "insights-world", "insights-files", "dark-insights", "photos-largest", "library-filters",
                  "storage-reset", "storage-reset-hard"):
         names[name] = name
     for name in ("library-filters-video", "library-filters-camera", "photos-video-metadata"):

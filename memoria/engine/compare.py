@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from . import config
+from . import config, roots
 from .actions import Action
 from .db import Library, LibraryUnavailable
 from .hashing import full_hash
@@ -42,8 +42,11 @@ def compare(lib: Library, other: str | Path, progress: Optional[Progress] = None
             media_only: bool = True) -> CompareResult:
     progress = progress or Progress()
     other = Path(other).resolve()
-    if other == lib.root or lib.root in other.parents or other in lib.root.parents:
-        raise ValueError("Choose a folder outside this library (and not containing it).")
+    for source in lib.roots():
+        root = Path(source["path"])
+        if other == root or root in other.parents or other in root.parents:
+            raise ValueError("Choose a folder outside all this library's media folders (and not containing them).")
+        roots.check(lib, source["id"])
     progress.update(0, 0, "Listing files in the other folder…")
     theirs: list[OtherFile] = []
     cut = len(str(other).rstrip(os.sep)) + 1
@@ -131,7 +134,7 @@ def plan_sync(lib: Library, result: CompareResult, to_other: list[dict], to_libr
     actions = []
     for r in to_other:
         actions.append(Action(op="copy", src=str(lib.abspath(r["rel_path"])),
-                              dst=str(result.other / r["rel_path"]), size=r["size"],
+                              dst=str(result.other / lib.export_rel(r["rel_path"])), size=r["size"],
                               mtime=r["mtime"], hash=r.get("chash"), reason=f"Copy to {result.other}"))
     for t in to_library:
         actions.append(Action(op="copy", src=str(result.other / t.rel_path), dst=str(lib.abspath(t.rel_path)),

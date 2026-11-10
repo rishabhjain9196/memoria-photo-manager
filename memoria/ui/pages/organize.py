@@ -10,6 +10,8 @@ from PySide6.QtWidgets import QCheckBox, QComboBox, QHeaderView, QStackedWidget,
 from ...engine import organize
 from ...engine.actions import Action
 from .. import theme
+from ..review_pages import ReviewGroup, ReviewPages
+from ..tasks import LatestCall
 from ..widgets import Banner, Card, EmptyState, Tile, button, fmt_date, fmt_n, hbox, label, vbox
 from .base import Page
 
@@ -43,13 +45,14 @@ class OrganizePage(Page):
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.tree.itemChanged.connect(lambda *_: self._update())
+        self.pages = ReviewPages(self.tree, self._render_item)
+        self.pages.changed.connect(self._update)
         self.summary = label("")
         self.apply_btn = button("Move files", "primary", self.apply)
         res = vbox(hbox(self.t_move, self.t_place, self.t_skip, spacing=12),
                    Banner("Files are only renamed if a file with the same name already exists in the new folder "
                           "(e.g. “IMG_1234 (2).jpg”). Nothing is overwritten, and you can undo the whole move.", "trust"),
-                   self.tree, hbox(self.summary, None, self.apply_btn), spacing=10)
+                   self.tree, self.pages.controls, hbox(self.summary, None, self.apply_btn), spacing=10)
         from PySide6.QtWidgets import QWidget
         w = QWidget()
         w.setLayout(res)
@@ -57,10 +60,15 @@ class OrganizePage(Page):
         self.stack.addWidget(w)
         self.body.addWidget(self.stack, 1)
         self.plan: organize.OrganizePlan | None = None
+        self.plan_bg = LatestCall(self)
+        self.plan_bg.result.connect(self._apply_ready)
+        self.plan_bg.failed.connect(self._plan_failed)
+        ctx.library_opened.connect(self.plan_bg.invalidate)
+        ctx.library_modified.connect(self.plan_bg.invalidate)
 
     def on_busy_changed(self, busy: bool) -> None:
         self.preview_btn.setEnabled(not busy)
-        self.apply_btn.setEnabled(not busy and bool(self._chosen()))
+        self.apply_btn.setEnabled(not busy and bool(self.pages.selected_count))
 
     def refresh(self) -> None:
         cached = self.ctx.cached("organize")
@@ -71,8 +79,17 @@ class OrganizePage(Page):
 
     def build_plan(self) -> None:
         lib, pattern, uncertain = self.lib, self.pattern.currentData(), self.uncertain.isChecked()
+        generation = self.ctx.generation
+        def work(progress):
+            try:
+                return organize.plan_organize(lib, pattern, uncertain, progress=progress)
+            finally:
+                lib.close_thread()
+        def done(plan):
+            if (lib, generation) == (self.lib, self.ctx.generation):
+                self._show(plan)
         self.run("Planning date folders",
-                 lambda p: organize.plan_organize(lib, pattern, uncertain, progress=p), self._show)
+                 work, done)
 
     def _show(self, plan) -> None:
         self.plan = plan
@@ -81,55 +98,63 @@ class OrganizePage(Page):
         self.t_move.set(f"{len(p.items):,}")
         self.t_place.set(f"{p.already_in_place:,}")
         self.t_skip.set(f"{p.skipped_uncertain:,}", color=theme.WARN if p.skipped_uncertain else None)
-        self.tree.blockSignals(True)
-        self.tree.clear()
         by_folder: dict[str, list] = {}
         for it in p.items:
             by_folder.setdefault(os.path.dirname(it.dst_rel), []).append(it)
-        for folder in sorted(by_folder):
-            items = by_folder[folder]
-            top = QTreeWidgetItem([f"{folder}   ({len(items)})", "", ""])
-            top.setFlags(top.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
-            f = top.font(0)
-            f.setBold(True)
-            top.setFont(0, f)
-            for it in items:
-                src = organize.SOURCE_LABEL.get(it.source, it.source)
-                c = QTreeWidgetItem([os.path.basename(it.dst_rel), it.row["folder"] or "(library root)",
-                                     f"{it.taken_at:%d %b %Y} · {src}"])
-                c.setFlags(c.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                c.setCheckState(0, Qt.CheckState.Checked)
-                c.setData(0, Qt.ItemDataRole.UserRole, it)
-                c.setToolTip(0, f"{it.src_rel}  →  {it.dst_rel}")
-                if it.source == "modified":
-                    c.setForeground(2, QColor(theme.WARN))
-                top.addChild(c)
-            self.tree.addTopLevelItem(top)
-        self.tree.blockSignals(False)
+        self.pages.set_groups([ReviewGroup(folder, folder, by_folder[folder]) for folder in sorted(by_folder)])
         self.stack.setCurrentWidget(self.results)
         self._update()
 
     def _chosen(self) -> list:
-        out = []
-        for i in range(self.tree.topLevelItemCount()):
-            top = self.tree.topLevelItem(i)
-            for j in range(top.childCount()):
-                c = top.child(j)
-                if c.checkState(0) == Qt.CheckState.Checked:
-                    out.append(c.data(0, Qt.ItemDataRole.UserRole))
-        return out
+        return [item for items in self.pages.selected().values() for item in items]
+
+    def _render_item(self, folder, it):
+        src = organize.SOURCE_LABEL.get(it.source, it.source)
+        child = QTreeWidgetItem([os.path.basename(it.dst_rel), it.row["folder"] or "(library root)",
+                                f"{it.taken_at:%d %b %Y} · {src}"])
+        child.setData(0, Qt.ItemDataRole.UserRole, it)
+        child.setToolTip(0, f"{it.src_rel}  →  {it.dst_rel}")
+        if it.source == "modified":
+            child.setForeground(2, QColor(theme.WARN))
+        return child
 
     def _update(self) -> None:
-        chosen = self._chosen()
-        folders = len({os.path.dirname(it.dst_rel) for it in chosen})
-        self.summary.setText(f"{fmt_n(len(chosen), 'file')} will move into {fmt_n(folders, 'folder')}"
-                             if chosen else "Nothing selected")
-        self.apply_btn.setEnabled(bool(chosen) and not self.busy)
+        count = self.pages.selected_count
+        folders = self.pages.selected_groups
+        self.summary.setText((f"{fmt_n(count, 'file')} will move into {fmt_n(folders, 'folder')}"
+                              if count else "Nothing selected") + " · Across all pages")
+        self.apply_btn.setEnabled(bool(count) and not self.busy)
 
     def apply(self) -> None:
+        if self.busy or self.plan_bg.running:
+            return
         chosen = self._chosen()
-        acts = organize.plan_actions(self.lib, chosen)
-        empties = organize.empty_folders_after(self.lib, chosen) if self.cleanup.isChecked() else []
+        lib, generation, cleanup = self.lib, self.ctx.generation, self.cleanup.isChecked()
+        self.tree.setEnabled(False)
+        self.apply_btn.setEnabled(False)
+        self.summary.setText("Preparing the full selection across all pages…")
+        def work():
+            try:
+                acts = organize.plan_actions(lib, chosen)
+                empties = organize.empty_folders_after(lib, chosen) if cleanup else []
+                return lib, generation, chosen, acts, empties
+            finally:
+                lib.close_thread()
+        self.plan_bg.call(work)
+
+    def _plan_failed(self, error):
+        from ..widgets import MessageDialog
+        self.tree.setEnabled(True)
+        self._update()
+        MessageDialog(self, "Could not prepare date folders", str(error)).exec()
+
+    def _apply_ready(self, result):
+        lib, generation, chosen, acts, empties = result
+        self.tree.setEnabled(True)
+        self._update()
+        if (lib, generation) != (self.lib, self.ctx.generation) or self.busy:
+            self.ctx.toast_requested.emit("The library changed. Review the refreshed plan before moving files.", "")
+            return
         for rel in sorted(empties, key=lambda r: -r.count(os.sep)):
             acts.append(Action(op="rmdir", src=str(self.lib.abspath(rel)), reason="Left empty after organising"))
         folders = len({os.path.dirname(it.dst_rel) for it in chosen})
@@ -143,3 +168,6 @@ class OrganizePage(Page):
             details=details, confirm_text=f"Move {fmt_n(len(chosen), 'file')}",
             note="Every move is recorded. Undo puts each file back exactly where it was.",
             done_message=lambda r: f"Organised {fmt_n(r.done, 'item')}.")
+
+    def shutdown(self):
+        self.plan_bg.wait()

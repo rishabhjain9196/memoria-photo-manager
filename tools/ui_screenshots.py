@@ -29,12 +29,13 @@ def _hook(t, v, tb):
 
 def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
     sys.excepthook = _hook
-    from PySide6.QtCore import QTimer
+    from PySide6.QtCore import QObject, QTimer
     from PySide6.QtWidgets import QApplication, QDialog
 
     from memoria.ui import theme
     from memoria.ui.main_window import MainWindow
     from memoria.ui import widgets
+    from memoria.ui.tasks import BackgroundCall, LatestCall
 
     app = QApplication.instance() or QApplication([])
     app.setStyle("Fusion")
@@ -64,14 +65,21 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
             time.sleep(0.01)
 
     def idle(timeout=300):
-        end = time.time() + timeout
-        pump(0.05)
-        while win.runner.busy and time.time() < end:
+        end = time.monotonic() + timeout
+        quiet_since = None
+        while time.monotonic() < end:
             app.processEvents()
-            time.sleep(0.02)
-        pump(0.3)
-        if win.runner.busy:
-            raise RuntimeError(f"Task did not finish: {win.runner.title}")
+            busy = win.runner.busy or any(
+                worker.running for worker in win.findChildren(QObject)
+                if isinstance(worker, (BackgroundCall, LatestCall)))
+            if busy:
+                quiet_since = None
+            elif quiet_since is None:
+                quiet_since = time.monotonic()
+            elif time.monotonic() - quiet_since >= .35:
+                return
+            time.sleep(.01)
+        raise RuntimeError(f"UI work did not finish: {win.runner.title}")
 
     def click_task(control):
         if not control.isVisible() or not control.isEnabled():
@@ -228,12 +236,12 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                 pump(0.5)
                 shot(name=f"{i:02d}-{key}-make")
                 page.save_btn.click()
-                pump()
+                idle()
                 page.tabs.setCurrentIndex(1)
                 page.mode.setCurrentIndex(2)
                 click_task(page.suggest_btn)
                 page.save_btn.click()
-                pump()
+                idle()
                 page.tabs.setCurrentIndex(0)
                 pump()
                 row = next((r for r, a in enumerate(page.saved) if "–" in a["name"] and "·" in a["name"]), 0)
@@ -269,6 +277,9 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                 from memoria.ui.storage_dialog import StorageDialog
                 insights_idle(page)
                 shot(name="insights-storage")
+                page.tabs.setCurrentIndex(3)
+                idle()
+                shot(name="insights-files")
                 page.tabs.setCurrentIndex(1)
                 page._period("2023")
                 insights_idle(page)
