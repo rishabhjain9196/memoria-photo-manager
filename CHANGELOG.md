@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Whole-group primary duplicate action
+- In a folder collection, the main button now reads Move folder group to Recovery and handles every eligible
+  set/page with one combined confirmation, rather than only the highlighted set. Verified keepers and saved/user
+  keep choices remain protected; Quick remove cannot bypass the group confirmation.
+- Added an explicitly labelled Move this set only alternative. Per-set size text and Keep this set labels clarify
+  the smaller scope. Unchecking the displayed set does not disable cleanup of other eligible sets in the group.
+- Reproduced the reported wrong-scope click, then passed 31 duplicate, paging and end-to-end UI regressions,
+  including actual group/set-only moves, one-batch confirmation, protected sets and exact Undo restoration.
+- No engine/schema changes, cache reset or media re-analysis required.
+
 ### Exact folder collections and keep-one cleanup
 - Grouped remaining exact duplicate sets by their containing folders, including repeated copies within one folder
   and shared files between otherwise different folders. Bounded nested set lists preserve individual comparison;

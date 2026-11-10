@@ -68,8 +68,10 @@ the rendered page).
   table for larger groups. Checked means move, unchecked means keep. Recommendations can be overridden.
   Exact file sets are grouped by their containing folders by default, including repeats within one folder and
   shared files between folders that also contain unique files. **Individual duplicate sets** remains available.
-  **Move selected to Recovery** acts on the displayed comparison only. **Clean this folder group...** or
-  **Clean all exact groups...** prepares a separate, always-confirmed keep-one cleanup across the selected scope.
+  In a folder collection, the main **Move folder group to Recovery...** button handles every eligible set/page
+  in that group with one confirmation. **Move this set only...** is the explicit single-set alternative.
+  Outside a collection, **Move selected to Recovery** handles the displayed comparison.
+  **Clean all exact groups...** covers all groups; folder/all-group cleanup always keeps verified copies.
   In a **subset** comparison the smaller folder is selected by default. Checking the larger folder removes only
   verified common files; its unique contents and folder stay. Checking both removes common copies on both sides.
   Shared files linked to unique/unreviewed parts are retained rather than splitting those assets.
@@ -77,7 +79,7 @@ the rendered page).
   Removing duplicates merges tags,
   static album membership and favourites into surviving copies; unset ratings/review states are filled and the
   keeper wins conflicts. Organisation Undo does not overwrite later manual edits.
-  **Keep these copies** remembers unchanged groups; **Show kept groups** reveals them unchecked.
+  **Keep these copies** (or **Keep this set** inside a collection) remembers unchanged sets; **Show kept groups** reveals them unchecked.
   Removal choices are never replayed automatically.
   Multi-group cleanup protects saved Keep choices and unchecked copies you reviewed. It retains a verified copy
   per content set even if every copy was checked individually. Unique linked components are not bulk-removed;
@@ -285,7 +287,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 489 tests; see docs/technical.html
+.\.venv\Scripts\python -m pytest -q                       # 491 tests; see docs/technical.html
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 .\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + documentation screenshots
@@ -308,7 +310,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_storage.py` | 14 | Safe/custom/hard reset, retained media/Undo and duplicate choices, rollback, interruption, cancellation/retry and low-space compaction. |
 | `tests/test_duplicate_choices.py` | 16 | Adaptive pane/table selections, current-group-only removal, subset shared-only behavior, actual refresh/Undo, quick consent, changed-file protection, remembered choices and migration. |
 | `tests/test_duplicate_cleanup.py` | 33 | Same-folder/partial-overlap collections, 100k grouping, keep-one plans, saved/user protections, linked-equivalence/unique-part safety, scoped roots, source/keeper checks and exact Undo. |
-| `tests/test_duplicate_bulk_ui.py` | 3 | Folder-only and all-group confirmation, protected choices/keeper overrides, hidden-copy scope, preview layout and actual filesystem/Undo results. |
+| `tests/test_duplicate_bulk_ui.py` | 5 | Primary whole-folder-group action, explicit single-set alternative, unchecked-set protection, all-group confirmation, keeper overrides, hidden-copy scope, layout and actual filesystem/Undo results. |
 | `tests/test_folder_comparison.py` | 6 | Either/both subset sides, preserved unique content and linked parts, snapshot-only selection, changed-file guards and Undo. |
 | `tests/test_recovery_accounting.py` | 20 | Prior plus latest logical sizes, tracked/untracked/changed/missing entries, roots and remapping, unreadable/offline storage, no-follow links, scan safety and UI emptying gates. |
 | `tests/test_recovery_restore.py` | 54 | Current and legacy session layouts, logged/unlogged restoration, manual mapping, inferred provenance, filtered Undo, no overwrites, linked names, interruption/cancellation and unsafe-path rejection. |

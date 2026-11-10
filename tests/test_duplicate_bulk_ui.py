@@ -92,17 +92,21 @@ def test_folder_cleanup_confirms_only_its_collection_and_undoes(library, tmp_pat
         _idle(app, window)
         assert page._current_collection.folders == ("Downloads",)
         assert page.sets.topLevelItemCount() == 2
+        assert page.move_btn.text() == "Move folder group to Recovery..."
+        assert page.single_set_btn.isVisible()
+        assert "This set only:" in page.selection_note.text()
         for pane in page.panes[:2]:
             assert pane.preview.width() <= pane.preview_scroll.viewport().width()
             assert pane.preview.image.geometry().bottom() < pane.preview.open_btn.mapTo(
                 pane.preview, pane.preview.open_btn.rect().topLeft()).y()
         window.lib_label.setText("<b>Sample library</b><br>Generated test media")
         assert window.grab().save(str(tmp_path / "duplicates-folder-grouping.png"))
-        page.clean_folder_btn.click()
+        page.move_btn.click()
         _idle(app, window)
         assert not errors and len(confirmations) == 1, errors
         assert confirmations[0][0] == "Clean this exact folder group"
         assert len(confirmations[0][1]) == 2
+        assert len(actions.batches(library)) == 1
         remaining = _snapshot(library)
         assert len(before) - len(remaining) == 2
         assert {path: data for path, data in before.items() if not path.startswith("Downloads\\")} == {
@@ -208,13 +212,58 @@ def test_folder_collection_does_not_remove_copies_hidden_by_another_folder_match
         hidden_paths = {row["rel_path"] for group in page.report.groups if group.hash in hashes
                         for row in group.files} - displayed_paths
         assert hidden_paths
-        page.clean_folder_btn.click()
+        page.move_btn.click()
         _idle(app, window)
         assert not errors, errors
         after = _snapshot(library)
         assert hidden_paths <= after.keys()
         assert set(before) - set(after) <= displayed_paths
         assert len(before) - len(after) == 2
+        window.undo_batch(window.toast.batch_id)
+        _idle(app, window)
+        assert not errors and _snapshot(library) == before
+    finally:
+        window.close()
+        window.deleteLater()
+        app.processEvents()
+
+
+@pytest.mark.parametrize("single_set", [False, True])
+def test_group_and_explicit_set_actions_have_distinct_scopes(library, monkeypatch, single_set):
+    from memoria.ui.pages import base
+    app, window, page = _window(library)
+    before = _snapshot(library)
+    errors, confirmations = [], []
+    window.runner.error.connect(lambda *args: errors.append(args))
+    monkeypatch.setattr(base, "confirm",
+                        lambda parent, title, *args, **kwargs: confirmations.append(title) or True)
+    try:
+        page.list.setCurrentRow(next(i for i, (_, collection) in enumerate(page.entries)
+                                     if len(collection.folders) == 1))
+        _idle(app, window)
+        current_paths = {row["rel_path"] for row in page._current_group[1].files}
+        if single_set:
+            page.single_set_btn.click()
+        else:
+            for pane in page.panes:
+                if pane.key is not None and pane.isVisible():
+                    pane.remove_check.setChecked(False)
+            _idle(app, window)
+            assert page.move_btn.isEnabled() and not page.single_set_btn.isEnabled()
+            assert "other sets" in page.selection_note.text()
+            page.move_btn.click()
+        _idle(app, window)
+        assert not errors and len(confirmations) == 1, errors
+        assert confirmations[0] == ("Move selected duplicate content to Recovery" if single_set else
+                                    "Clean this exact folder group")
+        after = _snapshot(library)
+        removed = set(before) - set(after)
+        assert len(removed) == 1 and len(actions.batches(library)) == 1
+        if single_set:
+            assert removed <= current_paths
+        else:
+            assert not removed.intersection(current_paths)
+            assert all(path.startswith("Downloads\\") for path in removed)
         window.undo_batch(window.toast.batch_id)
         _idle(app, window)
         assert not errors and _snapshot(library) == before

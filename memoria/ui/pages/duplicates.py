@@ -193,16 +193,20 @@ class DuplicatesPage(Page):
         self.sets.currentItemChanged.connect(self._select_set)
         self.set_previous = button("Previous sets", on_click=lambda: self._set_step(-1))
         self.set_next = button("Next sets", on_click=lambda: self._set_step(1))
-        self.clean_folder_btn = button("Clean this folder group...", on_click=self.clean_folder_group)
         self.collection_panel = QWidget()
-        collection_header = hbox(self.collection_title, None, self.clean_folder_btn)
+        collection_header = hbox(self.collection_title, None)
         collection_header.setStretch(0, 1)
         collection_footer = hbox(self.collection_scope, None, self.set_previous, self.set_next)
         collection_footer.setStretch(0, 1)
         self.collection_panel.setLayout(vbox(collection_header, self.sets, collection_footer, spacing=4))
         self.collection_panel.hide()
+        self.single_set_btn = button("Move this set only...", on_click=self._apply_current_set,
+                                     tip="Move checked copies from only the highlighted set, not the other sets in this folder group.")
+        self.single_set_btn.hide()
+        comparison_header = hbox(self.case_title, None, self.single_set_btn)
+        comparison_header.setStretch(0, 1)
         right = QWidget()
-        right.setLayout(vbox(self.collection_panel, self.case_title, self.case_note, self.detail, spacing=6))
+        right.setLayout(vbox(self.collection_panel, comparison_header, self.case_note, self.detail, spacing=6))
         split = QSplitter()
         split.addWidget(left)
         split.addWidget(right)
@@ -276,11 +280,20 @@ class DuplicatesPage(Page):
                                    self.group_offset + GROUP_PAGE < len(self.groups))
         self.detail.setEnabled(not busy and not self._loading)
         self.collection_panel.setEnabled(not busy and not self._loading)
-        self.clean_folder_btn.setEnabled(not busy and not self._loading and self._current_collection is not None)
+        collection = self._current_collection is not None
+        current_ready = self._selection_plan is not None and self._selection_plan["files"] > 0
+        self.single_set_btn.setVisible(collection)
+        self.single_set_btn.setEnabled(not busy and not self._loading and current_ready)
         self.clean_all_btn.setEnabled(not busy and not self._loading and self.report is not None
                                       and bool(self.report.groups))
         self.keep_all.setEnabled(not busy and self._current_group is not None and not self._loading)
-        self.move_btn.setEnabled(not busy and self._selection_plan is not None and self._selection_plan["files"] > 0)
+        self.keep_all.setText("Keep this set" if collection else "Keep these copies")
+        self.move_btn.setText("Move folder group to Recovery..." if collection else "Move selected to Recovery")
+        self.move_btn.setToolTip(
+            "Review redundant copies across every set/page in this folder group. Keeps verified survivors; "
+            "saved keeps and unchecked copies are protected. Always confirms the combined total."
+            if collection else "Move only the checked copies in the comparison shown.")
+        self.move_btn.setEnabled(not busy and not self._loading and (collection or current_ready))
 
     @staticmethod
     def _group_key(kind, group):
@@ -410,7 +423,7 @@ class DuplicatesPage(Page):
         self.sets.blockSignals(False)
         self.collection_scope.setText(
             f"{self.set_offset + 1}-{self.set_offset + len(shown)} of {len(collection.groups):,} exact sets. "
-            "Group cleanup spans all sets; individual removal below affects this set only.")
+            "The main action cleans this whole folder group, across all pages, keeping verified copies.")
         self.set_previous.setEnabled(self.set_offset > 0)
         self.set_next.setEnabled(self.set_offset + GROUP_PAGE < len(collection.groups))
         if shown:
@@ -575,13 +588,18 @@ class DuplicatesPage(Page):
         self._token += 1
         token, generation = self._token, self.ctx.generation
         self._selection_plan = None
-        self.move_btn.setEnabled(False)
+        self.on_busy_changed(self.busy)
         if self._current_group is None or not self.selected:
-            self.selection_note.setText("Nothing selected. No files will move.")
+            self.selection_note.setText(
+                "This set: nothing selected. The folder-group action can still clean other sets; "
+                "its combined total is confirmed first." if self._current_collection is not None else
+                "Nothing selected. No files will move.")
             return
         kind, group = self._current_group
         chosen, lib, report = set(self.selected), self.lib, self.report
-        self.selection_note.setText("Calculating the complete move, including linked components...")
+        self.selection_note.setText("Calculating this set's preview, including linked components..." if
+                                    self._current_collection is not None else
+                                    "Calculating the complete move, including linked components...")
         def work():
             try:
                 if kind == "file":
@@ -601,13 +619,16 @@ class DuplicatesPage(Page):
         if self._closed or plan["token"] != self._token or plan["generation"] != self.ctx.generation:
             return
         self._selection_plan = plan
-        text = f"Planned move: {fmt_n(plan['files'], 'file')} ({fmt_size(plan['bytes'])}) to Recovery."
+        text = ("This set only: " if self._current_collection is not None else "Planned move: ") + \
+            f"{fmt_n(plan['files'], 'file')} ({fmt_size(plan['bytes'])}) to Recovery."
         if plan["extra"]:
             text += f" Includes {plan['extra']} linked component(s), not just the displayed photos."
         if plan["unique"]:
             text += f" {plan['unique']} unique/unmatched file(s) in the larger folder stay untouched."
         if plan["retained"]:
             text += f" {plan['retained']} shared file(s) are kept with unique or unreviewed linked parts."
+        if self._current_collection is not None:
+            text += " The main action reviews the combined total for every set in this folder group."
         self.selection_note.setText(text)
         self.on_busy_changed(self.busy)
 
@@ -619,6 +640,12 @@ class DuplicatesPage(Page):
             self.on_busy_changed(self.busy)
 
     def apply(self):
+        if self._current_collection is not None:
+            self.clean_folder_group()
+        else:
+            self._apply_current_set()
+
+    def _apply_current_set(self):
         if self.busy or self._selection_plan is None or not self._selection_plan["files"]:
             return
         kind, group = self._current_group

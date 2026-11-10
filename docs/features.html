@@ -310,15 +310,21 @@ reorganising.</p>
       its unique/unmatched contents and containing folder stay. Selecting both removes shared copies on both sides.
       Shared files tied to unique or unreviewed linked parts are retained, and the planned total explains this.</li>
   <li>Read <b>Planned move</b>: it includes linked components, not just displayed photo sizes. Click
-      <b>Move selected to Recovery</b> to act only on the comparison shown. Multi-group cleanup is a separate
-      explicitly named action, not silently included in this button.</li>
+      <b>Move selected to Recovery</b> outside a folder collection to act only on the comparison shown.
+      Inside a collection, the main button is <b>Move folder group to Recovery...</b> and processes every
+      eligible set/page in that folder group after one combined confirmation. <b>Move this set only...</b>
+      beside the comparison is the explicit single-set alternative.</li>
   <li><b>Keep these copies</b> remembers this unchanged group without moving anything. <b>Show kept groups</b> reveals
-      remembered groups with nothing checked. A cancelled removal does not replace that decision.</li>
+      remembered groups with nothing checked. Inside a collection it is labelled <b>Keep this set</b>.
+      A cancelled removal does not replace that decision.</li>
 </ol>
 <h3>Clean a folder group or every exact group</h3>
-<p><b>Clean this folder group...</b> reviews redundant copies across every set/page of the selected folder collection.
+<p>The main <b>Move folder group to Recovery...</b> button reviews redundant copies across every set/page of the selected folder collection.
 <b>Clean all exact groups...</b> covers all exact media groups in the current scan, including those represented by
 whole-folder comparisons. Both show a combined count/size confirmation, even when Quick remove is enabled.</p>
+<p>The per-set size beneath the comparison is labelled <b>This set only</b>, not the whole group's total.
+Unticking every copy in one set protects that set; the main group action can still clean other eligible sets.
+Files are processed individually underneath, but the folder group uses one confirmed operation, not repeated clicks.</p>
 <p>These actions <b>keep at least one freshly verified copy per content set</b>. Saved Keep groups and unchecked
 copies you reviewed are protected. Keep-one safety wins if every copy was checked in an individual comparison.
 Only complete, equivalent linked assets can be removed together; assets with unique/unmatched parts are retained
