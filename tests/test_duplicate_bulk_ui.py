@@ -271,3 +271,117 @@ def test_group_and_explicit_set_actions_have_distinct_scopes(library, monkeypatc
         window.close()
         window.deleteLater()
         app.processEvents()
+
+
+def _add_different_edit_sidecars(lib):
+    for folder in ("Camera", "Backup", "Downloads"):
+        for photo in (lib.root / folder).glob("*.jpg"):
+            if not photo.name.startswith("unique"):
+                photo.with_suffix(".AAE").write_bytes(("unique edit " + str(photo.relative_to(lib.root))).encode())
+    scanner.index(lib)
+
+
+@pytest.mark.parametrize("all_groups", [False, True])
+def test_linked_bulk_review_handles_the_entire_scope_in_one_batch(library, tmp_path, monkeypatch, all_groups):
+    from memoria.ui import duplicate_cleanup_review as review_ui
+    from memoria.ui.pages import base
+    _add_different_edit_sidecars(library)
+    before = _snapshot(library)
+    app, window, page = _window(library)
+    errors, reviews, confirmations = [], [], []
+    window.runner.error.connect(lambda *args: errors.append(args))
+    class Review(review_ui.CleanupReviewDialog):
+        def exec(self):
+            self.show()
+            app.processEvents()
+            assert not self.plan.actions and self.plan.linked_skipped > 0
+            assert not self.go_btn.isEnabled()
+            self.include_linked.setChecked(True)
+            _idle(app, window)
+            assert self._valid and not self._loading, self.status.text()
+            assert len(self.plan.actions) == (8 if all_groups else 4)
+            unmatched = [part for part in self.plan.review_parts if part["unmatched"]]
+            assert len(unmatched) == (4 if all_groups else 2)
+            assert not self.go_btn.isEnabled() and self.ack.isVisible()
+            with pytest.raises(ValueError, match="Acknowledge"):
+                self.selected_plan()
+            reviews.append(len(self.plan.actions))
+            self.ack.setChecked(True)
+            assert self.go_btn.isEnabled()
+            assert self.grab().save(str(tmp_path / "duplicate-linked-bulk-review.png"))
+            self.go_btn.click()
+            return self.result()
+    monkeypatch.setattr(review_ui, "CleanupReviewDialog", Review)
+    monkeypatch.setattr(base, "confirm", lambda *args, **kwargs: confirmations.append(kwargs) or True)
+    try:
+        page.list.setCurrentRow(next(i for i, (_, collection) in enumerate(page.entries)
+                                     if len(collection.folders) == 1))
+        _idle(app, window)
+        (page.clean_all_btn if all_groups else page.move_btn).click()
+        _idle(app, window)
+        assert not errors, errors
+        assert reviews == [8 if all_groups else 4]
+        assert len(confirmations) == 1 and confirmations[0]["require_ack"]
+        assert len(actions.batches(library)) == 1
+        remaining = _snapshot(library)
+        assert len(before) - len(remaining) == (8 if all_groups else 4)
+        if not all_groups:
+            assert all(path.startswith("Downloads\\") for path in set(before) - set(remaining))
+        for path, data in before.items():
+            if "unique-" in path:
+                assert remaining[path] == data
+        window.undo_batch(window.toast.batch_id)
+        _idle(app, window)
+        assert not errors and _snapshot(library) == before
+    finally:
+        window.close()
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_empty_bulk_plan_explains_protected_sets_instead_of_silently_returning(library, monkeypatch):
+    from memoria.ui.widgets import MessageDialog
+    app, window, page = _window(library)
+    notices = []
+    monkeypatch.setattr(MessageDialog, "exec", lambda self: notices.append(self.windowTitle()) or self.DialogCode.Accepted)
+    try:
+        for group in page.report.groups:
+            duplicates.remember_keep(library, duplicates.file_review_key(group), True)
+        before = _snapshot(library)
+        page.clean_all_btn.click()
+        _idle(app, window)
+        assert notices == ["No copies are eligible for this cleanup"]
+        assert "Nothing moved" in page.action_note.text()
+        assert not actions.batches(library) and _snapshot(library) == before
+    finally:
+        window.close()
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_cancelling_combined_linked_review_moves_nothing(library, monkeypatch):
+    from memoria.ui import duplicate_cleanup_review as review_ui
+    from memoria.ui.pages import base
+    _add_different_edit_sidecars(library)
+    before = _snapshot(library)
+    app, window, page = _window(library)
+    class CancelReview(review_ui.CleanupReviewDialog):
+        def exec(self):
+            self.show()
+            self.include_linked.setChecked(True)
+            _idle(app, window)
+            assert self.plan.actions and not self.go_btn.isEnabled()
+            with pytest.raises(ValueError, match="Acknowledge"):
+                self.selected_plan()
+            return self.DialogCode.Rejected
+    monkeypatch.setattr(review_ui, "CleanupReviewDialog", CancelReview)
+    monkeypatch.setattr(base, "confirm", lambda *args, **kwargs: pytest.fail("Cancelled review cannot execute"))
+    try:
+        page.clean_all_btn.click()
+        _idle(app, window)
+        assert _snapshot(library) == before and not actions.batches(library)
+        assert "cancelled" in page.action_note.text()
+    finally:
+        window.close()
+        window.deleteLater()
+        app.processEvents()

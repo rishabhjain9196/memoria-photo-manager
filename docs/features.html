@@ -75,6 +75,19 @@
 before you choose a folder.</figcaption></figure>
 <p>Memoria remembers the last library and page and reopens them next time. Recent libraries are listed on the welcome
 screen; use <b>Change library…</b> in the sidebar to switch.</p>
+<h3>Check, pull and restart</h3>
+<p>Open <b>Updates...</b> from the sidebar. <b>Check for updates</b> checks the configured Git upstream without
+changing application files. The optional <b>Automatically check for updates when Memoria opens</b> setting
+defaults off and only checks; it never installs without your action.</p>
+<p>When an update is available, finish/cancel active library work, choose <b>Pull and restart</b>, and confirm.
+Memoria closes cleanly before a separate update window fast-forwards the checkout, installs changed dependencies
+in the managed virtual environment and restarts the app with its saved library/page settings. Keep the update
+window open; it displays progress and any failure rather than silently leaving you with an assumed success.</p>
+<p>Git source checkouts and their managed <code>.venv</code> are required. Packaged apps require a new build.
+Local changes (including untracked diagnostic reports), detached/no-upstream branches and divergent history must
+be resolved manually; the updater does not discard or stash anything. Update checks and dependency downloads
+need network access, but do not upload photos or library metadata and do not reset your catalogue.</p>
+<figure><img src="images/application-updates.png" alt="Application updates with opt-in startup checks and pull/restart"><figcaption>Manual or opt-in startup checks; installation is a separate confirmed action and waits for active work.</figcaption></figure>
 <h3>One library, multiple folders</h3>
 <p>Use <b>Library folders...</b> to add other media folders or drives without copying their originals.
 The current folder remains the catalogue home and must stay connected. Added folders can be offline: cached
@@ -107,7 +120,8 @@ copy; clearing albums, people or health baselines is not undoable. Keep a separa
   <li><b>Undo keeps everything.</b> Undoing a change restores files together with their thumbnails, dates and health
       fingerprints, except metadata you deliberately cleared using Storage &amp; reset.</li>
   <li><b>Verified Undo:</b> edited copies and legacy copies without a recorded fingerprint are left in place for manual review.</li>
-  <li><b>Nothing leaves your PC.</b> No account, no upload, no tracking.</li>
+  <li><b>Your media stays on your PC.</b> No account, media upload or tracking. Optional update checks contact
+      the configured Git upstream; setup/dependency installation can download packages.</li>
 </ul>
 </section>
 
@@ -327,9 +341,17 @@ Unticking every copy in one set protects that set; the main group action can sti
 Files are processed individually underneath, but the folder group uses one confirmed operation, not repeated clicks.</p>
 <p>These actions <b>keep at least one freshly verified copy per content set</b>. Saved Keep groups and unchecked
 copies you reviewed are protected. Keep-one safety wins if every copy was checked in an individual comparison.
-Only complete, equivalent linked assets can be removed together; assets with unique/unmatched parts are retained
-and reported for individual review. System leftovers, unique files and empty folders are not removed by these
-multi-group actions. Visual similarity remains a separate tool.</p>
+Strict cleanup only removes complete, equivalent linked assets; differing/unique linked parts are protected.
+If this excludes assets, one combined review explains why and offers <b>Include linked parts that may be unique</b>.
+Enabling it shows the proposed files for the entire folder group or all-groups scope, not a popup per set.
+Linked parts without proven identical survivors are clearly flagged and require acknowledgement before the final
+combined confirmation. Saved/unchecked choices and verified survivors of every matched exact content set still
+remain protected. Unrelated unique files, system leftovers and empty folders are not bulk-removed.
+Visual similarity remains a separate tool.</p>
+<p>If no copies are eligible, a visible explanation shows the protected/excluded counts. A brief planning bar
+does not mean files moved. Unique linked video/edit data can be included only through the explicit combined review;
+do not approve it merely to make a warning disappear.</p>
+<figure><img src="images/duplicate-linked-bulk-review.png" alt="Combined linked-part review for grouped duplicate cleanup"><figcaption>Review all linked parts in the selected scope once. Potentially unique parts require explicit acknowledgement.</figcaption></figure>
 <p>Changes are journaled for Undo and moved to Recovery, not permanently deleted. Moving them alone does not
 reclaim disk space. Folder grouping and review choices do not weaken source-change or surviving-copy checks.</p>
 <figure><img src="images/duplicates-folder-grouping.png" alt="Exact duplicate sets grouped within a folder"><figcaption>A folder collection reduces repeated single-file comparisons; each set remains inspectable.</figcaption></figure>
@@ -834,7 +856,8 @@ places — designed so that every tool has something to find:</p>
 <h2>FAQ</h2>
 <h4>Does Memoria upload anything?</h4>
 <p>No. It has no account, no cloud features and no telemetry. FFmpeg, face recognition, place names and all analysis run
-locally.</p>
+locally. Optional application-update checks contact your configured Git remote, and dependency setup may download
+packages; neither sends your photos or catalogue.</p>
 <h4>Where is face data kept, and how do I remove it?</h4>
 <p>In the library's own catalogue (<code>.memoria</code>), next to your photos. People → More → <b>Forget all face data…</b>
 deletes every face, name and correction; your photos are not touched.</p>

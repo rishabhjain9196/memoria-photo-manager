@@ -359,6 +359,12 @@ equivalent surviving assets; unique parts cannot be silently expanded into bulk 
 has reviewed size/mtime/hash and a guard/metadata-merge target outside the final removal set. Scoped collection
 choices additionally protect copies excluded from its displayed loose groups. Multi-group actions always confirm,
 never replay explicit remove-all choices, and leave directories/system leftovers untouched.</p>
+<p>The default planner remains strict. An explicit <code>include_linked</code> review mode can include linked parts
+without proven identical survivors, reporting them in <code>CleanupPlan.review_parts</code> as unmatched rather
+than asserting they are duplicates. A paged scope-wide dialog flags those parts and requires acknowledgement.
+All saved/unchecked protections and exact-content survivor guards still apply; conflicting linked units are
+retained, not allowed to delete the final exact copy. Empty plans produce visible feedback instead of a silent
+return. Planning supports cooperative cancellation, and no files move while the review is calculated.</p>
 <p>The primary duplicate button dispatches to collection cleanup whenever a folder collection is active.
 An explicitly labelled set-only button retains the current-comparison path. Group readiness is independent of
 whether the currently displayed set has checked copies; unchecked sets remain protected by the combined planner.
@@ -690,6 +696,15 @@ selections are discarded. Reset does not delete <code>.memoria</code> or recover
 
 <section id="ui">
 <h2>UI architecture</h2>
+<p><b>Application updates:</b> the sidebar's Updates dialog uses a background check against the configured Git
+upstream. A per-device setting enables startup checking; the entry point schedules it once per launch, not on
+every theme/window rebuild. Checks do not modify the working tree. Installation is blocked during library work
+and requires explicit confirmation, a managed source environment and a clean fast-forwardable branch.</p>
+<p>The standalone update helper is snapshotted outside the checkout, waits for the old process to exit and
+revalidates the checked branch/head/upstream before changing source. Changed dependency manifests trigger
+managed-environment setup; restart readiness is acknowledged through a private local marker. Failures retain
+explicit status/logs rather than falling back to destructive reset or pretending the app restarted. The helper
+uses only the standard library while dependencies may be replaced.</p>
 <ul>
   <li><b>Page lifecycle:</b> pages listen to <code>library_opened</code>/<code>library_modified</code>, mark themselves stale and
       normally refresh when visible and the runner is idle. Photos also refreshes committed rows during read-only
@@ -841,10 +856,8 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>491 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
+<p><b>579 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
 <a href="report.html">quality report</a> records the test inventory and last full regression run.
-That snapshot has 489 passing tests; the subsequent primary group-action fix passed 31 targeted
-duplicate/UI/paging/end-to-end regressions.
 Focused suites now include synthetic 100,000-entry catalogues, root reconnection, compound operations, metadata
 Undo and smart albums. Fake-tray/offscreen tests do not verify
 actual Windows popup appearance or OS delivery policy.</p>
@@ -879,8 +892,10 @@ actual Windows popup appearance or OS delivery policy.</p>
     and list refresh, adaptive pane/table controls, subset shared-only selection, quick-mode consent/reset, same-size/mtime changed-file protection
     and same-timestamp History ordering.</td></tr>
   <tr><td><code>test_folder_comparison.py</code></td><td>6</td><td>Either/both subset sides, unique linked assets, immutable review snapshots, changed-source guards and Undo.</td></tr>
-  <tr><td><code>test_duplicate_cleanup.py</code></td><td>33</td><td>Exact containing-folder collections, 100k grouping, surviving copies/metadata targets outside removal, scoped and protected choices, linked-asset equivalence, offline/stale input and Undo.</td></tr>
-  <tr><td><code>test_duplicate_bulk_ui.py</code></td><td>5</td><td>Primary whole-group versus explicit set-only actions, unchecked-set protection, folder/all-group confirmations, keeper overrides, saved keeps, hidden-copy exclusion, layout and actual moves with Undo.</td></tr>
+  <tr><td><code>test_duplicate_cleanup.py</code></td><td>57</td><td>Exact folder collections, 100k grouping, strict/explicit linked modes, global exact survivors, protected choices, unmatched-part reporting, cancellation, stale/offline source checks and Undo.</td></tr>
+  <tr><td><code>test_duplicate_bulk_ui.py</code></td><td>9</td><td>Group versus set-only scope, combined linked-part consent/cancellation, visible no-op results, saved keeps, hidden-copy exclusion, layout and actual moves with Undo.</td></tr>
+  <tr><td><code>test_app_updates.py</code></td><td>52</td><td>Local disposable Git fixtures, clean fast-forward and target/race guards, managed dependencies/failures, parent-process identity/exit and restarted-app readiness.</td></tr>
+  <tr><td><code>test_updates_ui.py</code></td><td>8</td><td>Opt-in startup/manual checks, busy/rebuild installation guards, confirmed helper handoff, failure/cancellation and no premature app close.</td></tr>
   <tr><td><code>test_recovery_accounting.py</code></td><td>20</td><td>Older plus latest logical sizes, per-root/per-change attribution, untracked/changed/missing entries, offline/unreadable paths, no-follow links, scan safety and guarded inspection UI.</td></tr>
   <tr><td><code>test_recovery_restore.py</code></td><td>54</td><td>Current/legacy session layouts, invalid timestamps, nested paths and root identities; logged/imported restoration, filtered Undo, linked conflicts, interruption handling, retained originals and path safety.</td></tr>
   <tr><td><code>test_recovery_restore_ui.py</code></td><td>8</td><td>Current/legacy inferred-path acknowledgement, manual mapping, real History restoration, exact-folder/all-remaining conflict scopes, GUI cancellation/errors and 100k-preview bounds.</td></tr>
@@ -921,6 +936,7 @@ handle, recording expectations in <code>expected.json</code> (<code>duplicate_gr
 <table>
   <tr><th>Task</th><th>Command</th></tr>
   <tr><td>First run / start</td><td><code>.\run.ps1</code> (creates <code>.venv</code>, installs <code>requirements.txt</code>, starts with <code>pythonw</code>)</td></tr>
+  <tr><td>Check / update source checkout</td><td>Sidebar Updates; optional startup check, then confirmed Pull and restart. Requires clean Git checkout/upstream and managed <code>.venv</code>; no automatic stash/reset.</td></tr>
   <tr><td>Open a library directly</td><td><code>.\run.ps1 "D:\Photos"</code> or <code>python -m memoria "D:\Photos"</code></td></tr>
   <tr><td>Standalone app</td><td><code>.\build.ps1</code> → <code>dist\Memoria\Memoria.exe</code> (PyInstaller one-folder, windowed, ≈340 MB incl. 39 MB of face models)</td></tr>
   <tr><td>Verify the build</td><td><code>.\tools\verify_build.ps1</code> — runs the real exe on a generated library and checks the catalogue it produced</td></tr>
@@ -961,7 +977,8 @@ plugin was also checked to start.</p>
   <li>Never call <code>os.remove</code>, <code>shutil.rmtree</code> or <code>os.replace</code> on user files outside
       <code>actions.py</code>.</li>
   <li>Engine modules must not import Qt.</li>
-  <li>Every subprocess uses <code>CREATE_NO_WINDOW</code>; every long loop calls <code>progress.update</code>.</li>
+  <li>Media/background subprocesses use <code>CREATE_NO_WINDOW</code>. The explicitly launched application-update
+      helper instead opens a progress/error console. Long media loops call <code>progress.update</code>.</li>
   <li>New user-facing strings follow the writing guidelines in the <a href="design.html#copy">design document</a>.</li>
 </ul>
 </section>

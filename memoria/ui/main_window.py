@@ -144,6 +144,10 @@ class MainWindow(QMainWindow):
         self._index_refresh.setInterval(2000)
         self._index_refresh.timeout.connect(self._publish_index_progress)
         self._build()
+        from .updates import UpdateController
+        self.updates = UpdateController(self)
+        self.updates.changed.connect(self._updates_changed)
+        self._updates_dialog = None
         from .notifications import NotificationManager
         self.notifications = NotificationManager(self, self.settings)
         self._notification_dialog = None
@@ -206,6 +210,8 @@ class MainWindow(QMainWindow):
         sl.addLayout(hbox(8, self.diagnostics_btn, None))
         self.notifications_btn = button("Notifications…", "link", self.manage_notifications)
         sl.addLayout(hbox(8, self.notifications_btn, None))
+        self.updates_btn = button("Updates...", "link", self.manage_updates)
+        sl.addLayout(hbox(8, self.updates_btn, None))
         sl.addSpacing(6)
         group = QButtonGroup(self)
         group.setExclusive(True)
@@ -488,6 +494,25 @@ class MainWindow(QMainWindow):
         count = self.notifications.unread
         self.notifications_btn.setText(f"Notifications ({count})" if count else "Notifications…")
 
+    def _updates_changed(self):
+        info = self.updates.info
+        self.updates_btn.setText("Updates (available)" if info and info.behind else
+                                 "Updates (checking...)" if self.updates.working else "Updates...")
+
+    def manage_updates(self):
+        if self._updates_dialog is not None:
+            self._updates_dialog.raise_()
+            self._updates_dialog.activateWindow()
+            return
+        from .updates import UpdatesDialog
+        dialog = UpdatesDialog(self, self.updates)
+        self._updates_dialog = dialog
+        try:
+            dialog.exec()
+        finally:
+            self._updates_dialog = None
+            dialog.deleteLater()
+
     def _restore_from_notification(self):
         if self._closing:
             return
@@ -765,6 +790,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e) -> None:
         self._closing = True
+        self.updates.shutdown()
         self.notifications.close()
         self._index_refresh.stop()
         self.ctx.indexing = False
@@ -783,4 +809,5 @@ class MainWindow(QMainWindow):
         if self.ctx.library:
             self.ctx.library.close()
             self.ctx.library = None
+        self.settings.sync()
         super().closeEvent(e)

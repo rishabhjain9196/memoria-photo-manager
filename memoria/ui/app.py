@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def change_theme(mode: str) -> None:
         old: MainWindow = state["win"]
-        if old is None or old.runner.busy:
+        if old is None or old.runner.busy or old.updates.pending:
             return
         settings.setValue("theme", mode)
         lib = str(old.ctx.library.root) if old.ctx.library else None
@@ -93,6 +93,16 @@ def main(argv: list[str] | None = None) -> int:
         win.open_library(args[0])
     else:
         win.restore_last()
+    def startup_updates():
+        from ..engine import app_updates
+        from .widgets import MessageDialog
+        try:
+            app_updates.mark_restart_ready()
+        except app_updates.UpdateError as error:
+            MessageDialog(state["win"], "Update restart status could not be recorded", str(error)).exec()
+        if state["win"] is not None and not state["win"]._closing:
+            state["win"].updates.startup_check()
+    QTimer.singleShot(0, startup_updates)
     return app.exec()
 
 

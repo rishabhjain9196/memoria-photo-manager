@@ -30,6 +30,7 @@ the rendered page).
 
 - [Highlights](#highlights)
 - [Quick start](#quick-start)
+- [Application updates](#application-updates)
 - [The tools](#the-tools)
 - [Why you can trust it](#why-you-can-trust-it)
 - [Screenshots](#screenshots)
@@ -49,6 +50,9 @@ the rendered page).
 
 - **15 focused pages** replace the 20 commands of the old command-line tool, plus **Check everything**: one read-only
   pass that runs every finder and puts count badges in the sidebar.
+- **Updates**: opt into an upstream check when the app opens, or check manually. Source checkouts can pull a
+  reviewed fast-forward update and restart from the application; changed dependencies are installed into the
+  managed virtual environment. Startup checks never install automatically.
 - **Find → Review → Confirm → Apply → Undo** for file clean-up, with plain-language reasons for suggestions.
   Irreversible personal catalogue clearing has a separate acknowledgement.
 - **iPhone imports**: HEIC/HEIF photos and MOV videos are supported. Apple `.AAE` edit sidecars are protected from
@@ -82,8 +86,10 @@ the rendered page).
   **Keep these copies** (or **Keep this set** inside a collection) remembers unchanged sets; **Show kept groups** reveals them unchecked.
   Removal choices are never replayed automatically.
   Multi-group cleanup protects saved Keep choices and unchecked copies you reviewed. It retains a verified copy
-  per content set even if every copy was checked individually. Unique linked components are not bulk-removed;
-  only complete equivalent linked assets can be removed together. System leftovers and folders are left alone.
+  per content set even if every copy was checked individually. Strict cleanup keeps unique/unmatched linked parts.
+  If they block cleanup, a combined review lets you explicitly include linked parts that may be unique for the
+  entire folder/all-group scope, with a paged file list and mandatory acknowledgement. System leftovers and
+  folders are left alone. A fully excluded plan is explained visibly, not just a disappearing progress bar.
 - **Recovery accounting**: cumulative measured storage is separated from the latest cleanup, older retained
   cleanups and untracked contents. Per-root/per-change details, unreadable/offline warnings and **Inspect accounting**
   explain unexpected totals without deleting anything. Links/junctions are not followed.
@@ -154,6 +160,29 @@ pip install -e .[dev]; memoria                   # installs the 'memoria' GUI co
 No library handy? On the welcome screen choose **Try it on a sample library**. It generates a realistic library in
 `%LOCALAPPDATA%\Memoria\Sample Library` with duplicates, bursts, junk, a damaged file and videos.
 
+## Application updates
+
+Open **Updates...** in the sidebar:
+
+1. **Check for updates** fetches the configured Git upstream and compares commits without changing your checkout.
+2. Optionally enable **Automatically check for updates when Memoria opens**. This per-device setting defaults off.
+   The app reports an available update; it does not install it without your action.
+3. Finish or cancel indexing, exports or other library work, then choose **Pull and restart** and confirm.
+   A separate update window takes over after Memoria closes cleanly, applies a fast-forward-only update, installs
+   changed Python dependencies when needed, and reopens the app using your saved library/page settings.
+
+This is for a **Git source checkout running in its managed `.venv`**, with Git installed and an upstream configured.
+Packaged executables need a separately updated build. Local edits/untracked files, detached HEAD, diverged history
+or a changed upstream/checkout prevent automatic installation; nothing is reset, overwritten or stashed.
+Repository-local diagnostic reports can count as local changes: review/commit them or resolve them manually first.
+
+Update checks contact your configured Git remote. Dependency installation may contact package sources.
+Your photos, videos and catalogue are not uploaded or reset; media tools still work offline.
+Keep the update window open until it finishes. Pull/setup/startup failures are shown there with a local log;
+failed dependency setup is not reported as a successful restart. No catalogue/cache reset is required.
+Update progress and failure logs are retained under `%LOCALAPPDATA%\Memoria\updates`.
+Existing installations need one manual pull/restart to receive the new Updates screen.
+
 ## The tools
 
 | Page | What it does | What it changes |
@@ -192,7 +221,7 @@ These documents describe unreleased source updates after 1.4; an existing packag
 | Unreadable is not deleted | A scan aborts on an inaccessible root; unreadable files/folders retain entries. For interrupted operations, check History for completed steps. |
 | Undo retains catalogue knowledge | Recycled rows are retained and restored, except metadata you deliberately clear with reset. IDs are not reused for new imports. |
 | Interrupted work is reconciled | Pending operations and reset phases are checked on reopening. This is not repair for arbitrary database or drive corruption. |
-| Private | No account, no network calls, no telemetry. |
+| Private | No media uploads, account or telemetry. Media tools work offline; optional update checks contact the configured Git remote, and setup may download dependencies. |
 
 ## Screenshots
 
@@ -287,7 +316,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 491 tests; see docs/technical.html
+.\.venv\Scripts\python -m pytest -q                       # 579 tests; see docs/technical.html
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 .\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + documentation screenshots
@@ -309,8 +338,10 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_ui_smoke.py` | 5 | Drives every page in both themes; clicks primary task buttons and checks work starts/finishes; verifies Undo, thumbnails, opt-in cleanup, protected Apple sidecars, visible analysis-error details, reset confirmations and the resumable reset UI. |
 | `tests/test_storage.py` | 14 | Safe/custom/hard reset, retained media/Undo and duplicate choices, rollback, interruption, cancellation/retry and low-space compaction. |
 | `tests/test_duplicate_choices.py` | 16 | Adaptive pane/table selections, current-group-only removal, subset shared-only behavior, actual refresh/Undo, quick consent, changed-file protection, remembered choices and migration. |
-| `tests/test_duplicate_cleanup.py` | 33 | Same-folder/partial-overlap collections, 100k grouping, keep-one plans, saved/user protections, linked-equivalence/unique-part safety, scoped roots, source/keeper checks and exact Undo. |
-| `tests/test_duplicate_bulk_ui.py` | 5 | Primary whole-folder-group action, explicit single-set alternative, unchecked-set protection, all-group confirmation, keeper overrides, hidden-copy scope, layout and actual filesystem/Undo results. |
+| `tests/test_duplicate_cleanup.py` | 57 | Same-folder/partial-overlap collections, 100k grouping, strict/explicit linked review, global keep-one and saved/user protections, source/keeper checks, cancellation and exact Undo. |
+| `tests/test_duplicate_bulk_ui.py` | 9 | Whole-group versus set-only actions, combined linked-part acknowledgement/cancellation, visible no-op explanation, protected/hidden-copy scope and actual filesystem/Undo results. |
+| `tests/test_app_updates.py` | 52 | Disposable local Git repositories: upstream checks, fast-forward and race guards, dirty/ahead/diverged refusals, dependency setup/failures, exact-parent exit waiting and restart readiness. |
+| `tests/test_updates_ui.py` | 8 | Opt-in startup/manual checking, active-work gates, explicit restart consent, helper-ready-before-close and visible failure/cancellation handling. |
 | `tests/test_folder_comparison.py` | 6 | Either/both subset sides, preserved unique content and linked parts, snapshot-only selection, changed-file guards and Undo. |
 | `tests/test_recovery_accounting.py` | 20 | Prior plus latest logical sizes, tracked/untracked/changed/missing entries, roots and remapping, unreadable/offline storage, no-follow links, scan safety and UI emptying gates. |
 | `tests/test_recovery_restore.py` | 54 | Current and legacy session layouts, logged/unlogged restoration, manual mapping, inferred provenance, filtered Undo, no overwrites, linked names, interruption/cancellation and unsafe-path rejection. |
@@ -487,8 +518,8 @@ loads the latest results, clears selection and returns to page 1. Search/sort/pa
 Cleanup, moving/copying, editing, album changes and other utilities remain disabled during active indexing.
 After a normal cancel, committed results are kept; F5 resumes unfinished work. Progress is based on file count,
 not equal work per file, so a later video-heavy portion can take longer than the earlier photo portion.
-To update a running installation, let indexing finish or cancel normally, close the app, pull the update and
-restart. Do not reset/delete the catalogue to install this change.
+To update, let indexing finish or cancel normally, then use **Updates → Check for updates → Pull and restart**.
+You can still close the app, pull manually and restart. Do not reset/delete the catalogue to install an update.
 
 ### Safety and review
 

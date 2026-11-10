@@ -64,6 +64,8 @@ AREAS = {
     "test_recovery_accounting": "Read-only cumulative Recovery accounting and inspection",
     "test_recovery_restore": "Reviewed logged/unlogged Recovery restoration and conflict safety",
     "test_recovery_restore_ui": "Restoration preview, scoped conflict popups and bounded UI",
+    "test_app_updates": "Safe Git checks, post-exit updates, dependency setup and restart readiness",
+    "test_updates_ui": "Opt-in startup checking, update confirmation and clean restart handoff",
 }
 
 
@@ -173,8 +175,10 @@ def refresh_images(tmp: Path) -> None:
                          ("duplicates-many", "duplicates-many"),
                          ("duplicates-folder-grouping", "duplicates-folder-grouping"),
                          ("duplicates-clean-all-confirm", "duplicates-clean-all-confirm"),
+                         ("duplicate-linked-bulk-review", "duplicate-linked-bulk-review"),
                          ("recovery-restore-preview", "recovery-restore-preview"),
                          ("recovery-restore-conflict", "recovery-restore-conflict"),
+                         ("application-updates", "application-updates"),
                          ("tidy-sidecars", "tidy-sidecars")):
         sources[dest] = next(tmp.rglob(f"{source}.png"))
     for path in sources.values():

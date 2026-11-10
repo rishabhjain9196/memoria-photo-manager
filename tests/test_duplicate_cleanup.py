@@ -10,6 +10,7 @@ from memoria.engine import actions, albums, assets, duplicates, organisation, ro
 from memoria.engine import duplicate_cleanup as cleanup
 from memoria.engine.db import Library, LibraryUnavailable
 from memoria.engine.hashing import full_hash
+from memoria.engine.progress import Cancelled, Progress
 
 
 @pytest.fixture
@@ -424,3 +425,256 @@ def test_root_goes_offline_after_plan_cannot_be_a_survivor(make_library, tmp_pat
     result = execute(lib, plan)
     assert result.done == 0 and result.skipped == 1
     assert (lib.root / "a copy.jpg").exists()
+
+
+@pytest.mark.parametrize("suffix", [".aae", ".mov", ".dng"])
+def test_combined_linked_review_includes_flagged_parts_and_undoes_one_scope(make_library, suffix):
+    files = asset_files(different=("Backup", suffix))
+    if suffix == ".dng":
+        files[r"Backup\IMG.dng"] = b"unique raw"
+    lib = make_library(files)
+    report = duplicates.find_all(lib)
+    photo = find_group(report, r"Original\IMG.jpg")
+    source = lib.file_by_rel(r"Backup\IMG.jpg")["id"]
+    choices = {photo.hash: {source}}
+    strict = cleanup.plan_cleanup(lib, report, hashes={photo.hash}, file_choices=choices)
+    assert not strict.actions and strict.linked_skipped and not strict.review_parts
+    organisation.edit(lib, [source], favorite=True, add_tags=["Reviewed copy"])
+    albums.create(lib, "Source album", [source])
+    before, catalogued = snapshot(lib), [dict(row) for row in lib.files()]
+    states = {row["id"]: organisation.state(lib, row["id"]) for row in catalogued}
+
+    plan = cleanup.plan_cleanup(lib, report, hashes={photo.hash}, file_choices=choices, include_linked=True)
+    assert len(plan.actions) == (4 if suffix == ".dng" else 3) and not plan.linked_skipped
+    assert_safe(plan)
+    assert {part["id"] for part in plan.review_parts} == {action.file_id for action in plan.actions}
+    assert sum(part["size"] for part in plan.review_parts) == sum(action.size for action in plan.actions)
+    unmatched = [part for part in plan.review_parts if part["unmatched"]]
+    assert len(unmatched) == 1 and unmatched[0]["rel_path"] == f"Backup\\IMG{suffix}"
+    assert "not proven duplicate / may be unique" in unmatched[0]["reason"]
+    extra = next(action for action in plan.actions if action.file_id == unmatched[0]["id"])
+    assert extra.merge_into is None and extra.hash == full_hash(extra.src)
+    with pytest.raises(ValueError, match="review"):
+        actions.apply(lib, "duplicates", "Not acknowledged", plan.actions)
+    result = execute(lib, plan)
+    assert result.done == len(plan.actions) and not result.skipped and not result.failed
+    assert result.bytes == sum(part["size"] for part in plan.review_parts)
+    keeper = next(action.merge_into for action in plan.actions if action.file_id == source)
+    assert organisation.state(lib, keeper)["tags"] == ["Reviewed copy"]
+    for group in report.groups:
+        assert any(lib.abspath(row["rel_path"]).exists() for row in group.files)
+    undone = actions.undo(lib, result.batch_id)
+    assert undone.done == len(plan.actions) and not undone.failed
+    assert snapshot(lib) == before and [dict(row) for row in lib.files()] == catalogued
+    assert {fid: organisation.state(lib, fid) for fid in states} == states
+
+
+def test_combined_review_retains_whole_unit_for_overlapping_out_of_scope_hash(make_library):
+    lib = make_library({
+        r"KeepA\a.jpg": b"first photo", r"CopyB\b.jpg": b"first photo", r"CopyB\b.mov": b"shared motion",
+        r"CopyC\c.jpg": b"second photo", r"CopyC\c.mov": b"shared motion", r"KeepD\d.jpg": b"second photo",
+    })
+    report = duplicates.find_all(lib)
+    first, second = find_group(report, r"CopyB\b.jpg"), find_group(report, r"CopyC\c.jpg")
+    video = find_group(report, r"CopyB\b.mov")
+    chosen = {group.hash: {lib.file_by_rel(path)["id"]}
+              for group, path in ((first, r"CopyB\b.jpg"), (second, r"CopyC\c.jpg"))}
+    plan = cleanup.plan_cleanup(lib, report, hashes={first.hash, second.hash},
+                                file_choices=chosen, include_linked=True)
+    assert len(plan.actions) == 2 and plan.linked_skipped == 1 and plan.groups == 2
+    assert "preserve a verified exact-content copy" in plan.linked_reasons[0]
+    assert not any(part["unmatched"] for part in plan.review_parts)
+    assert_safe(plan)
+    assert execute(lib, plan).done == 2
+    for group in (first, second, video):
+        assert any(lib.abspath(row["rel_path"]).exists() for row in group.files)
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_combined_review_does_not_label_proven_duplicates_as_unmatched(make_library, linked):
+    lib = make_library(asset_files() if linked else {"a.jpg": b"photo", "b.jpg": b"photo", "c.jpg": b"photo"})
+    report = duplicates.find_all(lib)
+    strict = cleanup.plan_cleanup(lib, report)
+    plan = cleanup.plan_cleanup(lib, report, include_linked=True)
+    assert {action.file_id for action in plan.actions} == {action.file_id for action in strict.actions}
+    assert not any(part["unmatched"] for part in plan.review_parts) and not plan.linked_skipped
+    assert bool(plan.review_parts) == linked
+    assert_safe(plan)
+    assert execute(lib, plan).done == len(plan.actions)
+
+
+@pytest.mark.parametrize("protection", ["unchecked-file", "saved-file", "unchecked-folder", "saved-folder"])
+def test_combined_linked_review_cannot_override_protected_components(make_library, protection):
+    lib = make_library(asset_files())
+    report = duplicates.find_all(lib)
+    photo, video = find_group(report, r"Backup\IMG.jpg"), find_group(report, r"Backup\IMG.mov")
+    backup = lib.file_by_rel(r"Backup\IMG.jpg")["id"]
+    choices, folders, saved = {photo.hash: {backup}}, {}, set()
+    if protection == "unchecked-file":
+        choices[video.hash] = {lib.file_by_rel(r"Original\IMG.mov")["id"]}
+    elif protection == "saved-file":
+        saved.add(duplicates.file_review_key(video))
+    else:
+        match = report.folders[0]
+        if protection == "unchecked-folder":
+            folders[match.id] = {"Original"}
+        else:
+            saved.add(report.folder_review_key(match))
+    for signature in saved:
+        duplicates.remember_keep(lib, signature, True)
+    before = snapshot(lib)
+    plan = cleanup.plan_cleanup(lib, report, hashes={photo.hash}, file_choices=choices,
+                                folder_choices=folders, include_linked=True)
+    assert not plan.actions and not plan.review_parts
+    if protection.endswith("file"):
+        assert plan.linked_skipped == 1 and "protected" in plan.linked_reasons[0]
+    assert duplicates.kept_choices(lib) == saved and snapshot(lib) == before
+
+
+def test_combined_review_protects_hidden_copies_and_never_adds_unrelated_scope(make_library):
+    files = asset_files(different=("Backup", ".aae"))
+    files.update({"hidden.jpg": b"photo", "one.jpg": b"unrelated", "two.jpg": b"unrelated"})
+    lib = make_library(files)
+    report = duplicates.find_all(lib)
+    photo = find_group(report, "hidden.jpg")
+    source = lib.file_by_rel(r"Backup\IMG.jpg")["id"]
+    plan = cleanup.plan_cleanup(lib, report, hashes={photo.hash},
+                                file_choices={photo.hash: {source}}, include_linked=True)
+    assert len(plan.actions) == 3 and all("Backup" in action.src for action in plan.actions)
+    assert_safe(plan)
+    assert execute(lib, plan).done == 3
+    for path in ("hidden.jpg", "one.jpg", "two.jpg", r"Original\IMG.jpg"):
+        assert lib.abspath(path).exists()
+    assert not cleanup.plan_cleanup(lib, report, hashes=set(), include_linked=True).actions
+
+
+@pytest.mark.parametrize("change", ["new", "missing", "same-stamp"])
+def test_combined_review_blocks_stale_membership_and_content_but_keeps_other_work(make_library, change):
+    files = asset_files()
+    files.update({"one.jpg": b"unrelated", "two.jpg": b"unrelated"})
+    lib = make_library(files)
+    report = duplicates.find_all(lib)
+    photo = find_group(report, r"Backup\IMG.jpg")
+    source = lib.file_by_rel(r"Backup\IMG.jpg")["id"]
+    path = lib.root / "Backup" / "IMG.aae"
+    if change == "new":
+        path.with_suffix(".xmp").write_bytes(b"new part")
+        scanner.scan(lib)
+    elif change == "missing":
+        path.unlink()
+        scanner.scan(lib)
+    else:
+        stamp = path.stat()
+        path.write_bytes(b"other")
+        os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    plan = cleanup.plan_cleanup(lib, report, file_choices={photo.hash: {source}}, include_linked=True)
+    assert len(plan.actions) == 1 and plan.linked_skipped >= 1 and plan.linked_reasons
+    assert Path(plan.actions[0].src).name in {"one.jpg", "two.jpg"}
+    assert not plan.review_parts
+
+
+@pytest.mark.parametrize("change", ["new", "source-part", "keeper"])
+def test_combined_plan_is_locked_against_changes_before_execution(make_library, change):
+    lib = make_library(asset_files(different=("Backup", ".aae")))
+    report = duplicates.find_all(lib)
+    photo = find_group(report, r"Backup\IMG.jpg")
+    source = lib.file_by_rel(r"Backup\IMG.jpg")["id"]
+    plan = cleanup.plan_cleanup(lib, report, hashes={photo.hash},
+                                file_choices={photo.hash: {source}}, include_linked=True)
+    path = lib.root / ("Original" if change == "keeper" else "Backup") / (
+        "IMG.jpg" if change == "keeper" else "IMG.xmp" if change == "new" else "IMG.aae")
+    if change == "new":
+        path.write_bytes(b"new linked part")
+        scanner.scan(lib)
+    else:
+        stamp = path.stat()
+        value = bytes(byte ^ 1 for byte in path.read_bytes())
+        path.write_bytes(value)
+        os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    before = snapshot(lib)
+    if change == "new":
+        with pytest.raises(ValueError, match="component|review"):
+            execute(lib, plan)
+    else:
+        result = execute(lib, plan)
+        assert result.done == 0 and result.skipped == 3 and not result.failed
+    assert snapshot(lib) == before
+
+
+@pytest.mark.parametrize("failure", [None, "offline", "identity"])
+def test_combined_cross_root_review_validates_identity_and_undo(make_library, tmp_path, failure):
+    lib = make_library({"a.jpg": b"photo"})
+    external = tmp_path / "external"
+    external.mkdir()
+    (external / "b.jpg").write_bytes(b"photo")
+    (external / "b.aae").write_bytes(b"unmatched edits")
+    source = roots.add(lib, external)
+    scanner.scan(lib)
+    report = duplicates.find_all(lib)
+    group = report.groups[0]
+    chosen = {lib.file_by_rel(roots.key_for(source, "b.jpg"))["id"]}
+    if failure == "offline":
+        lib.db.execute("UPDATE library_roots SET online=0 WHERE id=?", (source,))
+    elif failure == "identity":
+        marker = external / ".memoria" / roots.MARKER
+        data = json.loads(marker.read_text())
+        data["source"] = "different-volume"
+        marker.write_text(json.dumps(data))
+    if failure:
+        with pytest.raises(LibraryUnavailable):
+            cleanup.plan_cleanup(lib, report, file_choices={group.hash: chosen}, include_linked=True)
+    else:
+        plan = cleanup.plan_cleanup(lib, report, file_choices={group.hash: chosen}, include_linked=True)
+        assert len(plan.actions) == 2 and sum(part["unmatched"] for part in plan.review_parts) == 1
+        assert_safe(plan)
+        result = execute(lib, plan)
+        assert result.done == 2 and not result.skipped and not result.failed
+        assert actions.undo(lib, result.batch_id).done == 2
+    assert (lib.root / "a.jpg").read_bytes() == (external / "b.jpg").read_bytes() == b"photo"
+    assert (external / "b.aae").read_bytes() == b"unmatched edits"
+
+
+@pytest.mark.parametrize("include_linked", [False, True])
+def test_cleanup_planning_obeys_cancellation_before_any_work(make_library, include_linked):
+    lib = make_library({"a.jpg": b"photo", "b.jpg": b"photo"})
+    report = duplicates.find_all(lib)
+    progress = Progress()
+    progress.cancel_event.set()
+    with pytest.raises(Cancelled):
+        cleanup.plan_cleanup(lib, report, include_linked=include_linked, progress=progress)
+    assert len(lib.files()) == 2 and not lib.db.execute("SELECT 1 FROM operations").fetchone()
+
+
+@pytest.mark.parametrize("include_linked", [False, True])
+def test_linked_hashing_cancels_between_small_chunks_without_writes(make_library, monkeypatch, include_linked):
+    lib = make_library(asset_files())
+    report, before = duplicates.find_all(lib), snapshot(lib)
+    progress, reads = Progress(), []
+    real_open = open
+
+    class CancelOnRead:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+        def readinto(self, buffer):
+            count = self.stream.readinto(buffer)
+            reads.append(count)
+            progress.cancel_event.set()
+            return count
+
+    def interrupt(path, *args, **kwargs):
+        stream = real_open(path, *args, **kwargs)
+        return CancelOnRead(stream) if str(path).lower().endswith(".aae") else stream
+
+    monkeypatch.setattr(cleanup, "open", interrupt, raising=False)
+    monkeypatch.setattr(cleanup, "CHUNK", 2)
+    with pytest.raises(Cancelled):
+        cleanup.plan_cleanup(lib, report, include_linked=include_linked, progress=progress)
+    assert reads and max(reads) <= 2
+    assert snapshot(lib) == before and not lib.db.execute("SELECT 1 FROM operations").fetchone()

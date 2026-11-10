@@ -719,16 +719,36 @@ class DuplicatesPage(Page):
             try:
                 progress.update(0, 0, "Choosing verified survivors and protecting linked components...", force=True)
                 plan = duplicate_cleanup.plan_cleanup(lib, report, hashes=hashes, file_choices=file_choices,
-                                                      folder_choices=folder_choices)
+                                                      folder_choices=folder_choices, progress=progress)
                 progress.check()
                 return plan
             finally:
                 lib.close_thread()
         def ready(plan):
+            include_linked = False
+            if plan.linked_skipped:
+                from ..duplicate_cleanup_review import CleanupReviewDialog
+                dialog = CleanupReviewDialog(self, self.ctx, report, hashes, file_choices, folder_choices, plan)
+                try:
+                    if dialog.exec() != dialog.DialogCode.Accepted:
+                        self.action_note.setText("Cleanup cancelled. No files moved.")
+                        return
+                    plan = dialog.selected_plan()
+                    include_linked = dialog.include_linked.isChecked()
+                except ValueError as error:
+                    MessageDialog(self, "Review the combined linked parts", str(error)).exec()
+                    return
+                finally:
+                    dialog.shutdown()
+                    dialog.deleteLater()
             if not plan.actions:
-                self.action_note.setText(
+                message = (
                     f"No redundant copies can be removed with these choices. {plan.protected_groups} kept set(s); "
                     f"{plan.linked_skipped} linked asset(s) need individual review. Nothing moved.")
+                self.action_note.setText(message)
+                MessageDialog(self, "No copies are eligible for this cleanup", message,
+                              "Saved Keep choices and unchecked reviewed copies are protected. "
+                              "No files were moved. Review those choices or find duplicates again.").exec()
                 return
             size = sum(action.size for action in plan.actions)
             details = [
@@ -736,17 +756,24 @@ class DuplicatesPage(Page):
                 f"{plan.groups} exact content set(s) affected. At least one verified copy of every content is retained.",
                 "Saved Keep choices and unchecked copies you reviewed are protected. Keep-one safety wins even "
                 "if every copy was checked in an individual comparison.",
-                "Unique files, system leftovers and empty folders are not removed by this action. "
-                "Only complete, verified-equivalent linked assets can be removed together.",
+                ("You explicitly included linked parts that may be unique. The next confirmation covers this "
+                 "entire scope, not each set individually." if include_linked else
+                 "Unique files, system leftovers and empty folders are not removed by this action. "
+                 "Only complete, verified-equivalent linked assets can be removed together."),
                 f"{plan.protected_groups} protected set(s); {plan.linked_skipped} linked asset(s) left for individual review.",
                 "This always asks for confirmation, even with Quick remove. Originals go to Recovery; "
                 "this move does not free disk space until Recovery is explicitly emptied.",
             ]
+            unmatched = [part for part in plan.review_parts if part["unmatched"]]
+            if unmatched:
+                details.insert(2, f"<b>{len(unmatched)} linked part(s) ({fmt_size(sum(part['size'] for part in unmatched))}) "
+                               "are not proven duplicates and may be unique. They were included in your combined review.</b>")
             self.apply_actions(
                 "duplicates", title, plan.actions,
                 summary=f"{fmt_n(len(plan.actions), 'file')} ({fmt_size(size)}) will move; verified survivors remain.",
                 details=details, confirm_text=f"Move {fmt_n(len(plan.actions), 'file')}", note=recovery_note(),
-                confirm_action=True, done_message=lambda result: f"Moved {fmt_size(result.bytes)} of redundant exact copies.",
+                require_ack=("I approve moving the reviewed linked parts that may be unique." if unmatched else None),
+                confirm_action=True, done_message=lambda result: f"Moved {fmt_size(result.bytes)} from the reviewed duplicate cleanup.",
                 after=lambda result: self.action_note.setText(
                     f"This cleanup moved {fmt_size(result.bytes)}. Verified copies were retained."
                     + (" Review skipped/failed items in History." if result.failed or result.skipped else "")),

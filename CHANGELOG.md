@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Combined review for blocked linked-duplicate cleanup
+- Group/all-group cleanup now explains exclusions in a visible review instead of finishing with only a small
+  status note. This covers exact photos whose linked videos or edit sidecars differ.
+- Strict cleanup remains the default. A single scope-wide option can include linked parts that may be unique;
+  the paged review flags them and requires acknowledgement, followed by one combined move confirmation.
+- Verified exact-content survivors, saved Keep decisions and unchecked choices remain protected. Unrelated
+  unique files are not included. This removes the need to repeat the individual linked-parts dialog for every set.
+- Verified strict/explicit review modes, potentially unique-part flags, cancellation, full-scope one-batch cleanup
+  and exact Undo with generated sidecar/video fixtures. No originals from the user's library were accessed.
+
+### In-app source updates
+- Added Updates with manual upstream checks and an opt-in per-device startup check (off by default).
+  Checks fetch/compare commits but do not automatically install or upload media/catalogue data.
+- Pull and restart requires confirmation and idle library work. A separate stable helper waits for clean process
+  shutdown, permits only the checked fast-forward update, installs changed dependencies in the managed virtual
+  environment and restarts Memoria. Progress/errors remain visible; restart is verified rather than assumed.
+- Dirty/untracked work, detached or untracked branches, divergence and checkout/upstream changes are surfaced.
+  Nothing is automatically stashed, reset or discarded. Packaged executables are not updated by Git.
+- Media tools remain offline; optional update checks and dependency downloads require network access.
+- Full integrated suite: 579 passed. Also verified the actual Windows helper's parent-exit, fast-forward and
+  managed restart/readiness flow in an isolated local Git fixture, plus a real read-only source update check.
+  Documentation, screenshots and the quality report are refreshed; packaged executables were not rebuilt.
+
 ### Whole-group primary duplicate action
 - In a folder collection, the main button now reads Move folder group to Recovery and handles every eligible
   set/page with one combined confirmation, rather than only the highlighted set. Verified keepers and saved/user

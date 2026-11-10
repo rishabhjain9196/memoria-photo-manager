@@ -104,7 +104,7 @@ files — so the app must make proof easy to see.</p>
       <li>Explain every suggestion in plain language.</li>
       <li>Fit each task into one page with one obvious primary action.</li>
       <li>Stay fast on tens of thousands of files; never freeze the window.</li>
-      <li>Work entirely offline; keep all data on the user's PC.</li>
+      <li>Run media tools offline; keep library data local. Network access for application updates is explicit/opt-in.</li>
       <li>Be testable against a library with known answers.</li>
     </ul></td><td>
     <ul>
@@ -276,9 +276,13 @@ page; the user explicitly updates that view. Ready and pending counts distinguis
 analysis. Index completion/cancellation is published after worker callbacks to avoid starting overlapping operations.</p>
 <p>Diagnostics is opt-in per library and device, with local-only reports inside the source checkout. It uses
 allowlisted aggregate categories rather than raw logs or catalogue exports. The user can preview JSON and must stop
-recording and review it before committing; the app never uploads or runs git mutations. Existing cached libraries
+recording and review it before committing; diagnostics never uploads or runs git mutations. Existing cached libraries
 work without rescanning, while unrecorded past performance cannot be reconstructed. Aggregates are not promised
 anonymous, and opt-out does not erase previously shared git history.</p>
+<p>Application updating is separate from diagnostics. Startup checks are opt-in and fetch only from the configured
+upstream; pulling/restarting requires explicit confirmation, an idle library and a clean fast-forwardable checkout.
+A stable external helper waits for process exit before changing code or installing changed dependencies. It reports
+progress/failures and verifies the restarted app becomes ready. Local changes are not discarded or stashed.</p>
 <p>Metadata controls distinguish available values from unknowns: numeric sorts put missing/inapplicable rows last,
 video bitrate is labelled as an overall estimate rather than a quality score, and photo exposure uses explicit units.
 The extended catalogue refresh is one-time and resumable; it must not clear IDs, organisation or health baselines.
