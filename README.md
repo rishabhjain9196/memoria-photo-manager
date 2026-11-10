@@ -279,7 +279,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 445 tests; see docs/technical.html
+.\.venv\Scripts\python -m pytest -q                       # 452 tests; see docs/technical.html
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 .\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + documentation screenshots
@@ -303,8 +303,8 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_duplicate_choices.py` | 16 | Adaptive pane/table selections, current-group-only removal, subset shared-only behavior, actual refresh/Undo, quick consent, changed-file protection, remembered choices and migration. |
 | `tests/test_folder_comparison.py` | 6 | Either/both subset sides, preserved unique content and linked parts, snapshot-only selection, changed-file guards and Undo. |
 | `tests/test_recovery_accounting.py` | 20 | Prior plus latest logical sizes, tracked/untracked/changed/missing entries, roots and remapping, unreadable/offline storage, no-follow links, scan safety and UI emptying gates. |
-| `tests/test_recovery_restore.py` | 48 | Logged/unlogged restoration, manual destination mapping, inferred provenance, filtered Undo, no overwrites, conflict policies, linked names, interruption/cancellation, changed sources and unsafe-path rejection. |
-| `tests/test_recovery_restore_ui.py` | 7 | Preview acknowledgement/manual mapping, real History restore flow, scoped conflict popups, cancellation/error routing and a bounded 100k-entry preview. |
+| `tests/test_recovery_restore.py` | 54 | Current and legacy session layouts, logged/unlogged restoration, manual mapping, inferred provenance, filtered Undo, no overwrites, linked names, interruption/cancellation and unsafe-path rejection. |
+| `tests/test_recovery_restore_ui.py` | 8 | Current/legacy inferred-preview acknowledgement, manual mapping, real History restore flow, scoped conflict popups, cancellation/error routing and a bounded 100k-entry preview. |
 | `tests/test_notifications.py` | 10 | Private event routing, preferences, focus/background handling, partial failures, cancellation, Undo preservation and shutdown. |
 | `tests/test_insights.py` | 9 | Folder/type totals, filters, leap dates, album links, bounded 10,000-file browsing, offline place labels, wheel/touchpad/keyboard zoom, drag panning and stale-query handling. |
 | `tests/test_metadata.py` | 21 | Real EXIF/video extraction, schema-5 backfill, retained-row migration, cancellation/resume, numeric sorting with unknowns last, combined metadata filters and preview UI. |
@@ -397,6 +397,11 @@ Original logged paths are preferred. Files missing from History can use a suppor
 but those destinations are labelled inferred and require acknowledgement. For an ambiguous group, explicitly
 choose its destination folder; anything unresolved, offline, changed or unreadable stays in Recovery with a report.
 Missing historical metadata cannot be invented.
+
+Supported containers are current `YYYYMMDD-HHMMSS-xxxxxx` batches and legacy `session_YYYYMMDD_HHMMSS` folders.
+For example, `.memoria\recovery\session_20260609_014409\_Incoming\Pictures\Trip\photo.jpg` restores beneath that
+source root as `_Incoming\Pictures\Trip\photo.jpg`: only the session container is removed, not the nested folders.
+Malformed timestamps or unfamiliar container names still require explicit mapping.
 
 When a destination already exists, a popup offers **Keep both** (a numbered restored name), **Leave in Recovery**,
 or **Cancel restoration**. Reuse a choice for the exact destination folder or all remaining conflicts; these rules

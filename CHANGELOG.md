@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Legacy Recovery session destinations
+- Restore preview now recognises older `session_YYYYMMDD_HHMMSS` folders as well as current
+  `YYYYMMDD-HHMMSS-xxxxxx` batch folders. The full path after that folder is preserved beneath the owning media
+  root; valid legacy names no longer leave every unlogged file marked "Original location unknown".
+- Dates/times and the complete session name are validated; malformed names still require manual mapping.
+  Logged destinations retain priority. Inferred destinations still require acknowledgement, and existing-file
+  conflicts, linked-part naming and no-overwrite protections are unchanged.
+- Reproduced the reported rejection using generated nested files, then passed all 82 restore/UI/accounting
+  tests. No user Recovery files were accessed, no schema migration or cache reset is required.
+
 ### Simpler duplicate comparison and explained Recovery totals
 - Added Restore all available Recovery with a destination preview, explicit review of inferred unlogged paths
   and manual mapping for ambiguous groups. Conflicts offer Keep both, Leave in Recovery or Cancel, with exact-folder

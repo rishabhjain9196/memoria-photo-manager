@@ -613,6 +613,9 @@ their recycle operations <code>purged</code> and batches <code>emptied</code> af
 and preserve remaining recovery records. Undo and exporter rollback can separately delete generated copies.</p>
 <p><code>recovery_restore.preview</code> returns a read-only <code>RestorePlan</code> with logged, inferred or
 unresolved destinations; <code>map_destination</code> explicitly maps an ambiguous stored group.
+Layout inference accepts validated <code>YYYYMMDD-HHMMSS-xxxxxx</code> batches and case-insensitive legacy
+<code>session_YYYYMMDD_HHMMSS</code> folders. It removes exactly one container component, retains all nested
+relative-path components and preserves journal priority and target-path validation.
 <code>execute</code> validates reviewed sources and destinations, restores eligible data and reports skipped,
 failed and cancelled work. Unlogged contents are adopted through clearly labelled <code>recovery_import</code>
 records, not fabricated historical deletions. Import batches are excluded from latest-cleanup accounting.</p>
@@ -825,8 +828,9 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>445 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
+<p><b>452 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
 <a href="report.html">quality report</a> records the test inventory and last full regression run.
+That snapshot has 445 passing tests; the subsequent legacy-session fix passed 82 restore/UI/accounting tests.
 Focused suites now include synthetic 100,000-entry catalogues, root reconnection, compound operations, metadata
 Undo and smart albums. Fake-tray/offscreen tests do not verify
 actual Windows popup appearance or OS delivery policy.</p>
@@ -862,8 +866,8 @@ actual Windows popup appearance or OS delivery policy.</p>
     and same-timestamp History ordering.</td></tr>
   <tr><td><code>test_folder_comparison.py</code></td><td>6</td><td>Either/both subset sides, unique linked assets, immutable review snapshots, changed-source guards and Undo.</td></tr>
   <tr><td><code>test_recovery_accounting.py</code></td><td>20</td><td>Older plus latest logical sizes, per-root/per-change attribution, untracked/changed/missing entries, offline/unreadable paths, no-follow links, scan safety and guarded inspection UI.</td></tr>
-  <tr><td><code>test_recovery_restore.py</code></td><td>48</td><td>Logged and imported restoration, reviewed/manual paths, filtered Undo, rename/skip/cancel conflicts, linked groups, race/interruption handling, retained originals and path safety.</td></tr>
-  <tr><td><code>test_recovery_restore_ui.py</code></td><td>7</td><td>Inferred-path acknowledgement, manual mapping, real History restoration, exact-folder/all-remaining conflict scopes, GUI cancellation/errors and 100k-preview bounds.</td></tr>
+  <tr><td><code>test_recovery_restore.py</code></td><td>54</td><td>Current/legacy session layouts, invalid timestamps, nested paths and root identities; logged/imported restoration, filtered Undo, linked conflicts, interruption handling, retained originals and path safety.</td></tr>
+  <tr><td><code>test_recovery_restore_ui.py</code></td><td>8</td><td>Current/legacy inferred-path acknowledgement, manual mapping, real History restoration, exact-folder/all-remaining conflict scopes, GUI cancellation/errors and 100k-preview bounds.</td></tr>
   <tr><td><code>test_insights.py</code></td><td>9</td><td>Folder/type totals, literal search, combined filters, leap dates,
     saved-album links, India/world switching, bounded 10,000-row paging, visible offline labels, mouse/touchpad/keyboard
     zoom, drag geometry, stale-result rejection and map responsiveness during a blocked background query.</td></tr>

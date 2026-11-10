@@ -144,14 +144,15 @@ def _wait_preview(app, dialog):
     assert not dialog.bg.running and not dialog._loading, dialog.status.text()
 
 
-def test_unlogged_restore_preview_requires_acknowledgement_and_does_not_move_files(tmp_path):
+@pytest.mark.parametrize("container", ["20261110-120000-abcdef", "session_20260609_014409"])
+def test_unlogged_restore_preview_requires_acknowledgement_and_does_not_move_files(tmp_path, container):
     from memoria.engine.db import Library
     from memoria.ui.recovery_restore import RestoreDialog
     from memoria.ui.tasks import TaskRunner
     from memoria.ui.widgets import AppContext
     app = _app()
     lib = Library(tmp_path)
-    source = lib.recovery / "20261110-120000-abcdef" / "Trip" / "photo.jpg"
+    source = lib.recovery / container / "Trip" / "photo.jpg"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"Recovery data")
     ctx = AppContext(TaskRunner())

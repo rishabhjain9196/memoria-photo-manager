@@ -120,7 +120,47 @@ def test_unlogged_preserves_hierarchy_and_adoption_is_not_cleanup(lib):
     assert len(lib.files()) == 2
 
 
-@pytest.mark.parametrize("container", ["", "unknown-folder", "20260230-121314-abcdef", "20261110-bogus-abcdef"])
+@pytest.mark.parametrize("added_root", [False, True])
+def test_legacy_session_restores_nested_paths_and_linked_conflicts(lib, tmp_path, added_root):
+    root_id, home = 1, lib.root
+    session = "session_20260609_014409"
+    if added_root:
+        home = tmp_path / "phone"
+        home.mkdir()
+        root_id = roots.add(lib, home, "Phone")
+        session = session.upper()
+    relative = Path(r"_Incoming\Pictures\Phone import\Event")
+    photo = stored(lib, str(relative / "IMG_1.jpg"), container=session, root=root_id, data=b"photo")
+    sidecar = stored(lib, str(relative / "IMG_1.AAE"), container=session, root=root_id, data=b"edits")
+    target_folder = home / relative
+    target_folder.mkdir(parents=True)
+    original = target_folder / "IMG_1.jpg"
+    original.write_bytes(b"existing original")
+    before = lib.db.total_changes
+    plan = restore.preview(lib)
+    assert lib.db.total_changes == before
+    assert not plan.errors and not plan.offline_roots
+    assert len(plan.items) == 2
+    for item in plan.items:
+        assert item.target == target_folder / item.source.name
+        assert item.provenance == "inferred" and item.operation_id is None and not item.issue
+        assert Path(item.relative_path) == relative / item.source.name
+    conflicts = []
+    result = restore.execute(lib, plan, resolve_conflict=lambda conflict: conflicts.append(conflict) or "rename")
+    assert (result.restored, result.skipped, result.failed) == (2, 0, 0), result.messages
+    assert len(conflicts) == 1 and conflicts[0].folder == str(target_folder)
+    assert original.read_bytes() == b"existing original"
+    assert (target_folder / "IMG_1 (2).jpg").read_bytes() == b"photo"
+    assert (target_folder / "IMG_1 (2).AAE").read_bytes() == b"edits"
+    assert not photo.exists() and not sidecar.exists()
+    assert not (home / session).exists()
+
+
+@pytest.mark.parametrize("container", [
+    "", "unknown-folder", "20260230-121314-abcdef", "20261110-bogus-abcdef",
+    "session_20260230_121314", "session_20260609_251314", "session_20260609_01440",
+    "session_20260609_014409-extra",
+])
 def test_ambiguous_layout_requires_explicit_group_mapping(lib, container):
     source = stored(lib, "photo.jpg", container=container)
     plan = restore.preview(lib)

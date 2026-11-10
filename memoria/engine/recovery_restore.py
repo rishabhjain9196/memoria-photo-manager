@@ -26,6 +26,7 @@ from .db import LibraryUnavailable
 from .progress import Cancelled, Progress
 
 _BATCH = re.compile(r"\d{8}-\d{6}-[0-9a-f]{6}")
+_LEGACY_SESSION = re.compile(r"session_(\d{8}_\d{6})", re.IGNORECASE)
 _MAPPING = "Original location unknown; choose a destination folder for this group."
 
 
@@ -148,10 +149,12 @@ def _layout(root_id: int, relative: Path):
     parts = relative.parts
     group = f"{root_id}:{parts[0]}" if len(parts) > 1 else f"{root_id}:<Recovery root>"
     inside = Path(*parts[1:]) if len(parts) > 1 else relative
-    known = len(parts) > 1 and _BATCH.fullmatch(parts[0]) is not None
+    legacy = _LEGACY_SESSION.fullmatch(parts[0]) if len(parts) > 1 else None
+    known = len(parts) > 1 and (_BATCH.fullmatch(parts[0]) is not None or legacy is not None)
     if known:
         try:
-            datetime.strptime(parts[0][:15], "%Y%m%d-%H%M%S")
+            timestamp = legacy[1].replace("_", "-") if legacy else parts[0][:15]
+            datetime.strptime(timestamp, "%Y%m%d-%H%M%S")
         except ValueError:
             known = False
     return group, str(inside), known

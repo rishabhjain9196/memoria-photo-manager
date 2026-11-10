@@ -659,6 +659,10 @@ results are not presented as a complete backup inventory.</p>
 acknowledge inferred paths when original logs are unavailable; absent historical metadata cannot be reconstructed
 just from filenames. Cancelled or partial work is reported, and remaining files are left intact. After restoring,
 run duplicate finding again to review the library afresh.</p>
+<p>Automatic inference recognises both current <code>YYYYMMDD-HHMMSS-xxxxxx</code> batch folders and older
+<code>session_YYYYMMDD_HHMMSS</code> folders. Everything after that container is preserved beneath the source
+root, including nested <code>_Incoming\Pictures\...</code> paths. The preview still labels these destinations
+inferred and requires acknowledgement; malformed dates/times or unfamiliar layouts require a chosen destination.</p>
 <figure><img src="images/recovery-restore-preview.png" alt="Review inferred Recovery restore destinations"><figcaption>Unlogged destinations are labelled and acknowledged before any files move. Unknown layouts need an explicitly chosen folder.</figcaption></figure>
 <figure><img src="images/recovery-restore-conflict.png" alt="Choose a restore conflict policy for one file, this folder or all remaining conflicts"><figcaption>Keep both, leave in Recovery or cancel. Reuse a safe choice per destination folder or for the remaining restoration.</figcaption></figure>
 <figure><img src="images/history.png" alt="History and recovery"><figcaption>Every step of a change is listed with its
