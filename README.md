@@ -90,12 +90,9 @@ the rendered page).
   If they block cleanup, a combined review lets you explicitly include linked parts that may be unique for the
   entire folder/all-group scope, with a paged file list and mandatory acknowledgement. System leftovers and
   folders are left alone. A fully excluded plan is explained visibly, not just a disappearing progress bar.
-- **Recovery accounting**: cumulative measured storage is separated from the latest cleanup, older retained
-  cleanups and untracked contents. Per-root/per-change details, unreadable/offline warnings and **Inspect accounting**
-  explain unexpected totals without deleting anything. Links/junctions are not followed.
-  **Restore all available...** previews logged or inferred destinations before moving files back; unresolved
-  locations require an explicit destination. Conflict popups offer Keep both, Leave in Recovery or Cancel, with
-  choices reusable for that destination folder or all remaining conflicts in the current restoration.
+- **Simple Recovery**: one total, **Restore all...** and **Empty Recovery...**. Emptying fixes interrupted work and
+  cleans up leftovers by itself, then asks once. It waits only for a disconnected drive or unreadable items, and
+  says what to do. Restoring never overwrites; a name clash offers Keep both, Skip or Stop.
 - **People**: finds faces with two small open models (YuNet + SFace, run by OpenCV), groups the same person
   together, and lets you name, join and correct groups, find look-alikes, and search Photos & videos by name. All
   offline; face data stays in the library's catalogue and can be forgotten with one click.
@@ -105,7 +102,7 @@ the rendered page).
 - **Similar videos**: finds compressed, resized or trimmed copies by comparing frames, and keeps the best copy.
 - **Batch actions** in Photos & videos: select many items, then move to Recovery, copy to a folder (verified), move
   within the library, compress, or send to the Story maker. All undoable.
-- **Light, dark or Match Windows** themes, keyboard shortcuts, a built-in viewer, and thumbnail zoom.
+- **Light, dark or Match Windows** themes in a calm slate palette with one accent colour, plus subtle page, dialog and toast transitions (about 150 ms; **Settings ▸ Reduce motion** or the Windows animation setting turns them off). Keyboard shortcuts, a built-in viewer and thumbnail zoom.
 - **Progress for long operations**: percentage, elapsed time and time left where available, with cooperative Cancel
   (Esc). Insights has a separate background loading indicator.
 - **Key-event notifications**: desktop messages only while Memoria is backgrounded/minimised by default. Indexing,
@@ -162,7 +159,7 @@ No library handy? On the welcome screen choose **Try it on a sample library**. I
 
 ## Application updates
 
-Open **Updates...** in the sidebar:
+Open **Settings ▸ Updates...** at the bottom of the sidebar:
 
 1. **Check for updates** fetches the configured Git upstream and compares commits without changing your checkout.
 2. Optionally enable **Automatically check for updates when Memoria opens**. This per-device setting defaults off.
@@ -201,9 +198,9 @@ Existing installations need one manual pull/restart to receive the new Updates s
 | **Video compressor** | Smaller copies of videos for sharing, using presets or a target size, with verification and a quality score. | Writes new files to an output folder |
 | **Health check** | Records a fingerprint of every file, then flags *possibly damaged*, *can't be opened* and *missing* files on later checks. | Nothing (catalogue only) |
 | **Compare & sync** | Compares the library with a backup by content, so renamed copies still match. Copies what's missing in either direction. | Writes verified copies |
-| **History & recovery** | Paged operations, Undo, Recovery accounting/inspection, restore-all with reviewed unlogged destinations and scoped conflict choices, guarded emptying. | Restore never overwrites originals; Empty Recovery permanently deletes stored originals |
+| **History & recovery** | Paged changes with Undo, one Recovery total, Restore all (never overwrites) and self-fixing Empty Recovery. | Restore never overwrites originals; Empty Recovery permanently deletes stored originals |
 
-The [Features guide](docs/features.html) explains every option, including the sidebar's **Storage & reset** controls.
+The [Features guide](docs/features.html) explains every option, including the sidebar's **Library ▸ Storage & reset** controls.
 These documents describe unreleased source updates after 1.4; an existing packaged executable must be rebuilt to include them.
 
 ## Why you can trust it
@@ -316,7 +313,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 ## Testing & quality reports
 
 ```powershell
-.\.venv\Scripts\python -m pytest -q                       # 588 tests; see docs/technical.html
+.\.venv\Scripts\python -m pytest -q                       # 593 tests; see docs/technical.html
 .\.venv\Scripts\python tools\make_reports.py              # tests + benchmark → docs\report.html
 .\.venv\Scripts\python tools\make_reports.py --no-bench   # tests only
 .\.venv\Scripts\python tools\make_reports.py --no-bench --refresh-images # report + documentation screenshots
@@ -335,7 +332,7 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_batch.py` | 5 | Batch copy, move and recycle with undo; Check everything is read-only and correct. |
 | `tests/test_video.py` | 11 | Verified compression and cancellation; 10,000-row lazy loading, bounded incremental probes, guarded multi-root inputs, selection and external-file handoff. |
 | `tests/test_story.py` | 30 | Exact output sizes, every template, panorama seams, EXIF rotation, story-video duration. |
-| `tests/test_ui_smoke.py` | 5 | Drives every page in both themes; clicks primary task buttons and checks work starts/finishes; verifies Undo, thumbnails, opt-in cleanup, protected Apple sidecars, visible analysis-error details, reset confirmations and the resumable reset UI. |
+| `tests/test_ui_smoke.py` | 6 | Drives every page in both themes; transitions settle in their final state and honour Reduce motion; clicks primary task buttons and checks work starts/finishes; verifies Undo, thumbnails, opt-in cleanup, protected Apple sidecars, visible analysis-error details, reset confirmations and the resumable reset UI. |
 | `tests/test_storage.py` | 14 | Safe/custom/hard reset, retained media/Undo and duplicate choices, rollback, interruption, cancellation/retry and low-space compaction. |
 | `tests/test_duplicate_choices.py` | 16 | Adaptive pane/table selections, current-group-only removal, subset shared-only behavior, actual refresh/Undo, quick consent, changed-file protection, remembered choices and migration. |
 | `tests/test_duplicate_cleanup.py` | 57 | Same-folder/partial-overlap collections, 100k grouping, strict/explicit linked review, global keep-one and saved/user protections, source/keeper checks, cancellation and exact Undo. |
@@ -343,9 +340,9 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_app_updates.py` | 52 | Disposable local Git repositories: upstream checks, fast-forward and race guards, dirty/ahead/diverged refusals, dependency setup/failures, exact-parent exit waiting and restart readiness. |
 | `tests/test_updates_ui.py` | 8 | Opt-in startup/manual checking, active-work gates, explicit restart consent, helper-ready-before-close and visible failure/cancellation handling. |
 | `tests/test_folder_comparison.py` | 6 | Either/both subset sides, preserved unique content and linked parts, snapshot-only selection, changed-file guards and Undo. |
-| `tests/test_recovery_accounting.py` | 29 | Logical sizes and tracked/untracked/changed/missing entries; no-follow/offline safety; fresh emptying review, exact blocker explanations, mandatory acknowledgement, cancellation and post-confirmation race protection. |
-| `tests/test_recovery_restore.py` | 54 | Current and legacy session layouts, logged/unlogged restoration, manual mapping, inferred provenance, filtered Undo, no overwrites, linked names, interruption/cancellation and unsafe-path rejection. |
-| `tests/test_recovery_restore_ui.py` | 8 | Current/legacy inferred-preview acknowledgement, manual mapping, real History restore flow, scoped conflict popups, cancellation/error routing and a bounded 100k-entry preview. |
+| `tests/test_recovery_accounting.py` | 32 | Logical sizes and tracked/untracked/changed/missing entries; no-follow/offline safety; self-fixing Empty Recovery that asks once, disconnected-drive guidance, legacy-manifest self-cleaning, mandatory acknowledgement, cancellation and post-confirmation race protection. |
+| `tests/test_recovery_restore.py` | 55 | Current and legacy session layouts, logged/unlogged restoration, manual mapping, inferred provenance, filtered Undo, no overwrites, linked names, interruption/cancellation and unsafe-path rejection. |
+| `tests/test_recovery_restore_ui.py` | 8 | Current/legacy inferred previews ready without extra acknowledgement, manual mapping, real History restore flow, scoped conflict popups, cancellation/error routing and a bounded 100k-entry preview. |
 | `tests/test_notifications.py` | 10 | Private event routing, preferences, focus/background handling, partial failures, cancellation, Undo preservation and shutdown. |
 | `tests/test_insights.py` | 9 | Folder/type totals, filters, leap dates, album links, bounded 10,000-file browsing, offline place labels, wheel/touchpad/keyboard zoom, drag panning and stale-query handling. |
 | `tests/test_metadata.py` | 21 | Real EXIF/video extraction, schema-5 backfill, retained-row migration, cancellation/resume, numeric sorting with unknowns last, combined metadata filters and preview UI. |
@@ -384,7 +381,7 @@ SmartScreen warns the first time it runs.
 
 ## Local diagnostics
 
-Open **Diagnostics** in the sidebar and enable recording for the current library on that device.
+Open **Settings ▸ Diagnostics** at the bottom of the sidebar and enable recording for the current library on that device.
 This works with an **already-scanned catalogue**: diagnostics does not reset or rescan media. Past timings cannot
 be reconstructed; future tasks, browsing and previews are measured. You can enable it while an initial scan is
 running to include that task when it finishes.
@@ -408,7 +405,7 @@ snapshot. A packaged installation without a source checkout cannot record reposi
 
 ## Library folders and linked assets
 
-Use **Library folders...** in the sidebar to add a media folder or reconnect one that moved. The current library
+Use **Library ▸ Library folders...** in the sidebar to add a media folder or reconnect one that moved. The current library
 remains the catalogue home and must be available. Additional folders are indexed in place; overlapping roots and
 folders containing separate Memoria catalogues are rejected rather than silently merging catalogues.
 
@@ -417,44 +414,31 @@ source. Reconnect verifies the marker: a different drive using the old letter is
 Offline roots retain their catalogue entries, organisation and cached thumbnails; reading/mutating their originals
 requires reconnection. Filters can select a root and online/offline availability.
 
-Recovery is local to each source root. History provides a Recovery-location selector and labels totals from
-available roots; offline Recovery is not reported as empty. Reconnect all roots before emptying Recovery.
-Moving files to Recovery does not free space on that drive.
+### Recovery in three buttons
 
-**A Recovery total is not the size of your last cleanup.** History separates cumulative measured bytes, the latest
-cleanup's recorded movement and retained bytes, older cleanups, and untracked/ambiguous contents. For example,
-50 GB retained earlier plus a new 5 GB cleanup can show about 55 GB. These are logical file sizes, not allocated
-disk space or space freed. Select a change for its own remaining Recovery size. The location picker affects
-**Open / Inspect**, not the all-roots total or Empty Recovery scope.
+Removed files wait in Recovery (a `.memoria\recovery` folder on each media folder) until you decide. History shows
+one total, such as **25,047 files · 141.6 GB**, with three actions:
 
-Use **Refresh accounting** and **Inspect accounting** when a number looks unexpected. This reads directory metadata
-and the journal only; it does not read original media, create Recovery or remove anything. Offline/unreadable
-locations and skipped links are explicit; incomplete totals are lower bounds. Untracked, changed, missing or
-interrupted entries require inspection and block permanent deletion. **Empty Recovery...** remains a review action
-while the library is idle: it checks current contents and either offers an acknowledged deletion confirmation or
-shows the exact blocker counts and suggested next steps. It is greyed out during active library work, with an
-explanation. Historical **Done/Restored** labels do not prove current Recovery contents match their records.
-No particular unexpected total
-should be assumed safe to delete just because it is labelled Recovery.
+- **Restore all...** puts files back where they came from. Files Memoria has no record of are matched by their
+  folder layout. If the original location is unknown, select the file and use **Choose folder...**. Nothing is ever
+  overwritten: if a name is taken, choose **Keep both** (adds a number), **Skip** (leaves it in Recovery) or
+  **Stop restoring**, for just this file, its folder or everything.
+- **Empty Recovery...** first fixes what it safely can: it finishes interrupted changes and cleans up leftovers.
+  Then it asks once, showing the size it will free. If some files didn't come from a Memoria cleanup, the same
+  dialog says so; cancel and use Restore all to keep them. Emptying waits only when it truly must: a media folder
+  is disconnected, something in Recovery can't be read (for example a shortcut or locked file), or an earlier change
+  can't finish yet. The message says exactly what to do. Emptying is permanent and needs one tick to confirm.
+- **Open folder** and **Details** are for the curious. Details lists totals per cleanup and per media folder, plus
+  any files worth a look. Nothing there needs action.
 
-To restart cleanup, use **Restore all available...** instead of Empty Recovery. Review the destination table first.
-Original logged paths are preferred. Files missing from History can use a supported preserved Recovery hierarchy,
-but those destinations are labelled inferred and require acknowledgement. For an ambiguous group, explicitly
-choose its destination folder; anything unresolved, offline, changed or unreadable stays in Recovery with a report.
-Missing historical metadata cannot be invented.
+Memoria self-cleans Recovery when a library opens and after restoring. It removes empty folders and old
+`session_YYYYMMDD_HHMMSS` folders that hold nothing but their own `manifest.json`. Photos, unknown files and links
+are never removed automatically. Moving files to Recovery doesn't free disk space; emptying it does. Recovery
+isn't a backup.
 
-Supported containers are current `YYYYMMDD-HHMMSS-xxxxxx` batches and legacy `session_YYYYMMDD_HHMMSS` folders.
-For example, `.memoria\recovery\session_20260609_014409\_Incoming\Pictures\Trip\photo.jpg` restores beneath that
-source root as `_Incoming\Pictures\Trip\photo.jpg`: only the session container is removed, not the nested folders.
-Malformed timestamps or unfamiliar container names still require explicit mapping.
-
-When a destination already exists, a popup offers **Keep both** (a numbered restored name), **Leave in Recovery**,
-or **Cancel restoration**. Reuse a choice for the exact destination folder or all remaining conflicts; these rules
-are not saved for later restorations. Linked parts keep coherent names. Existing originals are never overwritten.
-Restoration does not empty Recovery automatically or undo unrelated exports; completed work remains recorded if
-cancelled. Restoring to the same drive normally moves rather than duplicating the whole library, though verification
-can read the Recovery files. Re-run duplicate finding after the restoration completes.
-
+Old `session_YYYYMMDD_HHMMSS` folders restore beneath their media folder. For example
+`.memoria\recovery\session_20260609_014409\_Incoming\Pictures\Trip\photo.jpg` returns to
+`_Incoming\Pictures\Trip\photo.jpg`. A session's own `manifest.json` is never restored.
 Linked assets are inferred from matching names in the same folder: image/video pairs, RAW+JPEG, and AAE/XMP edit
 sidecars (including names such as `IMG_1.DNG.xmp`). They remain ordinary files on disk. A reviewed operation includes
 their components together, uses a common collision suffix, and journals them for Undo. The whole linked unit is
@@ -547,7 +531,7 @@ You can still close the app, pull manually and restart. Do not reset/delete the 
 
 ### Storage & reset
 
-Use **Storage & reset** below the library name in the sidebar. For normal additions or changes to your
+Use **Library ▸ Storage & reset** below the library name in the sidebar. For normal additions or changes to your
 photos, try **Rescan library (F5)** first.
 
 - **Safe rebuild (soft)** is the default: clear photo/video thumbnails, analysis and similarity caches,

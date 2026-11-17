@@ -3,6 +3,7 @@ from dataclasses import asdict
 
 from PySide6.QtWidgets import QCheckBox, QDialog, QWidget
 
+from .motion import Dialog
 from ..engine.storage import ResetOptions
 from .widgets import Banner, button, fmt_size, hbox, label, scroll, vbox
 
@@ -22,7 +23,7 @@ CHOICES = {
 }
 
 
-class StorageDialog(QDialog):
+class StorageDialog(Dialog):
     def __init__(self, parent, sizes: dict[str, int], interrupted: bool = False):
         super().__init__(parent)
         self.setWindowTitle("Storage & reset")

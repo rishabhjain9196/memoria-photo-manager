@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QHeaderView, QPlainTextEdit,
                                QTreeWidget, QTreeWidgetItem)
 
+from .motion import Dialog
 from .tasks import LatestCall
 from .widgets import button, fmt_n, fmt_size, hbox, label, vbox
 
@@ -18,9 +19,10 @@ if TYPE_CHECKING:
     from ..engine.recovery_restore import RestoreConflict, RestorePlan
 
 PAGE_SIZE = 200
+ORIGIN = {"history": "Where it came from", "inferred": "Matched by folder", "manual": "You chose"}
 
 
-class RestoreDialog(QDialog):
+class RestoreDialog(Dialog):
     def __init__(self, parent, ctx):
         super().__init__(parent)
         self.ctx, self.lib = ctx, ctx.library
@@ -29,17 +31,15 @@ class RestoreDialog(QDialog):
         self._loading = True
         self._valid = False
         self.offset = 0
-        self.setWindowTitle("Restore Recovery to original folders")
+        self.setWindowTitle("Restore removed files")
         self.resize(1040, 660)
-        self.summary = label("Reading Recovery...", "h2", wrap=True)
+        self.summary = label("Checking Recovery…", "h2", wrap=True)
         self.status = label("", "small", wrap=True)
-        self.include_unlogged = QCheckBox("Include files missing from History")
+        self.include_unlogged = QCheckBox("Also restore files Memoria has no record of")
         self.include_unlogged.setChecked(True)
         self.include_unlogged.toggled.connect(self._selection_changed)
-        self.ack = QCheckBox("I reviewed the inferred / chosen destinations for files without original logs.")
-        self.ack.toggled.connect(self._update)
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Recovery file", "Restore destination", "Size", "Origin", "Review"])
+        self.tree.setHeaderLabels(["File", "Goes back to", "Size", "How"])
         self.tree.setRootIsDecorated(False)
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -47,22 +47,17 @@ class RestoreDialog(QDialog):
         self.previous = button("Previous", on_click=lambda: self._turn(-1))
         self.next = button("Next", on_click=lambda: self._turn(1))
         self.page_note = label("", "small")
-        self.map_btn = button("Choose destination for this group...", on_click=self._map)
-        self.refresh_btn = button("Refresh preview", on_click=self.refresh)
-        self.go_btn = button("Restore available files", "primary", self.accept)
+        self.map_btn = button("Choose folder…", on_click=self._map,
+                              tip="Pick where the selected file's group should go.")
+        self.go_btn = button("Restore", "primary", self.accept)
         self.cancel_btn = button("Cancel", on_click=self.reject)
         self.setLayout(vbox(
             self.summary,
-            label("Logged locations are preferred. Unlogged locations are inferred only from supported Recovery "
-                  "layout, or chosen explicitly below. Ambiguous, offline or unreadable items stay in Recovery. "
-                  "Review this preview before restoring; it does not move files.",
+            label("Nothing is ever overwritten. If a file with the same name exists, you'll be asked.",
                   "muted", wrap=True),
-            self.include_unlogged, self.tree,
+            self.tree,
             hbox(self.previous, self.page_note, None, self.next),
-            hbox(self.map_btn, None, self.refresh_btn), self.ack, self.status,
-            label("Existing files are never overwritten. Each conflict offers Keep both, Leave in Recovery, or Cancel, "
-                  "with an option to reuse the choice for that folder or all remaining conflicts.",
-                  "small", wrap=True),
+            hbox(self.include_unlogged, None, self.map_btn), self.status,
             hbox(None, self.cancel_btn, self.go_btn), margins=(18, 18, 18, 18)))
         self.bg = LatestCall(self)
         self.bg.result.connect(self._loaded)
@@ -77,10 +72,7 @@ class RestoreDialog(QDialog):
 
     def selected_plan(self):
         if self.plan is None or not self._valid or self._loading:
-            raise ValueError("The restoration preview is not ready.")
-        if any(item.target is not None and not item.issue and item.provenance != "history"
-               for item in self._selected_items()) and not self.ack.isChecked():
-            raise ValueError("Acknowledge the reviewed inferred destinations before restoring.")
+            raise ValueError("Recovery is still being checked. Try again in a moment.")
         return replace(self.plan, items=self._selected_items())
 
     def accept(self):
@@ -91,8 +83,7 @@ class RestoreDialog(QDialog):
         from ..engine import recovery_restore
         lib, generation = self.lib, self.ctx.generation
         self._loading, self._valid = True, False
-        self.ack.setChecked(False)
-        self.status.setText("Reading file metadata and History; no originals are being changed.")
+        self.status.setText("")
         self._update()
         def work():
             try:
@@ -106,48 +97,53 @@ class RestoreDialog(QDialog):
         if self._closed:
             return
         if generation != self.ctx.generation:
-            self._failed(ValueError("The library changed. Refresh this preview before restoring."))
+            self._failed(ValueError("The library changed. Close this window and try again."))
             return
         self.plan = plan
         self._loading, self._valid = False, True
         self.offset = 0
         notes = []
         if plan.offline_roots:
-            notes.append(f"{len(plan.offline_roots)} folder(s) are offline and not included.")
+            notes.append(f"{fmt_n(len(plan.offline_roots), 'disconnected folder')} skipped — connect "
+                         f"{'it' if len(plan.offline_roots) == 1 else 'them'} to include those files.")
         if plan.errors:
-            notes.extend(plan.errors[:5])
-            if len(plan.errors) > 5:
-                notes.append(f"{len(plan.errors) - 5} additional inspection warnings.")
+            notes.append(f"{fmt_n(len(plan.errors), 'item')} couldn't be read and will stay in Recovery.")
         self.status.setText("\n".join(notes))
+        self.status.setToolTip("\n".join(plan.errors[:50]))
         self._render()
         self._update()
 
     def _failed(self, error):
         if not self._closed:
             self._loading, self._valid = False, False
-            self.status.setText(f"Restoration preview could not finish: {error}")
+            self.status.setText(f"Couldn't check Recovery: {error}")
             self._update()
 
     def _selection_changed(self):
         self.offset = 0
-        self.ack.setChecked(False)
         self._render()
         self._update()
+
+    def _where(self, path):
+        try:
+            return self.lib.display_path(self.lib.rel(path, resolve=False))
+        except ValueError:
+            return str(path)
 
     def _render(self):
         items = self._selected_items()
         self.tree.clear()
         for item in items[self.offset:self.offset + PAGE_SIZE]:
-            row = QTreeWidgetItem([str(item.source), str(item.target) if item.target is not None else "Choose destination",
-                                   fmt_size(item.size), item.provenance, item.issue or "Eligible for review"])
+            how = item.issue or ORIGIN.get(item.provenance, item.provenance)
+            row = QTreeWidgetItem([item.source.name, self._where(item.target) if item.target is not None
+                                   else "Select, then Choose folder…", fmt_size(item.size), how])
             row.setData(0, Qt.ItemDataRole.UserRole, item)
             row.setToolTip(0, str(item.source))
             row.setToolTip(1, str(item.target) if item.target is not None else item.issue)
-            row.setToolTip(4, item.issue)
+            row.setToolTip(3, item.issue or how)
             self.tree.addTopLevelItem(row)
         self.page_note.setText(f"Showing {self.offset + 1 if items else 0}-"
-                               f"{min(self.offset + PAGE_SIZE, len(items))} of {len(items):,}. "
-                               "Restoration includes eligible items on all pages.")
+                               f"{min(self.offset + PAGE_SIZE, len(items))} of {len(items):,}")
         self.previous.setEnabled(self.offset > 0 and not self._loading)
         self.next.setEnabled(self.offset + PAGE_SIZE < len(items) and not self._loading)
 
@@ -158,18 +154,21 @@ class RestoreDialog(QDialog):
     def _update(self, *_):
         items = self._selected_items()
         eligible = [item for item in items if item.target is not None and not item.issue]
-        inferred = sum(item.provenance != "history" for item in eligible)
-        self.summary.setText(
-            f"{fmt_n(len(eligible), 'file')} ({fmt_size(sum(item.size for item in eligible))}) eligible to restore"
-            + (f"; {len(items) - len(eligible)} need attention" if len(eligible) != len(items) else ""))
-        self.ack.setVisible(inferred > 0)
-        self.go_btn.setEnabled(self._valid and not self._loading and bool(eligible)
-                               and (not inferred or self.ack.isChecked()))
+        waiting = len(items) - len(eligible)
+        if self._loading:
+            self.summary.setText("Checking Recovery…")
+        elif not items:
+            self.summary.setText("Nothing to restore.")
+        else:
+            self.summary.setText(
+                f"Restore {fmt_n(len(eligible), 'file')} ({fmt_size(sum(item.size for item in eligible))})"
+                + (f" · {waiting:,} need a folder or will stay in Recovery" if waiting else ""))
+        self.go_btn.setText(f"Restore {fmt_n(len(eligible), 'file')}" if eligible else "Restore")
+        self.go_btn.setEnabled(self._valid and not self._loading and bool(eligible))
         current = self.tree.currentItem()
         item = current.data(0, Qt.ItemDataRole.UserRole) if current else None
         self.map_btn.setEnabled(not self._loading and item is not None and bool(item.mapping_group)
                                 and item.provenance != "history")
-        self.refresh_btn.setEnabled(not self._loading)
         self.include_unlogged.setEnabled(not self._loading)
 
     def _map(self):
@@ -178,13 +177,11 @@ class RestoreDialog(QDialog):
         if current is None or self.plan is None:
             return
         item = current.data(0, Qt.ItemDataRole.UserRole)
-        folder = QFileDialog.getExistingDirectory(self, "Choose the destination for this Recovery group's contents",
-                                                    str(self.lib.root))
+        folder = QFileDialog.getExistingDirectory(self, "Where should these files go?", str(self.lib.root))
         if not folder:
             return
         plan, lib, generation, group = self.plan, self.lib, self.ctx.generation, item.mapping_group
         self._loading, self._valid = True, False
-        self.ack.setChecked(False)
         self._update()
         def work():
             try:
@@ -198,28 +195,28 @@ class RestoreDialog(QDialog):
         self.bg.wait()
 
 
-class ConflictDialog(QDialog):
+class ConflictDialog(Dialog):
     def __init__(self, parent, conflict):
         super().__init__(parent)
         self.decision = "cancel"
-        self.setWindowTitle("Recovery restore conflict")
+        self.setWindowTitle("This file already exists")
         self.resize(760, 440)
         details = QPlainTextEdit()
         details.setReadOnly(True)
-        details.setPlainText("Recovery sources:\n" + "\n".join(conflict.sources) +
-                             "\n\nRestore destinations:\n" + "\n".join(conflict.targets))
+        details.setPlainText("In Recovery:\n" + "\n".join(conflict.sources) +
+                             "\n\nAlready exists at:\n" + "\n".join(conflict.targets))
         self.scope = QComboBox()
-        for text, value in (("This conflict only", "one"), ("This folder's remaining conflicts", "folder"),
-                            ("All remaining conflicts", "all")):
+        for text, value in (("Just this file", "one"), ("Everything else in this folder", "folder"),
+                            ("Everything else", "all")):
             self.scope.addItem(text, value)
         self.keep_btn = button("Keep both", "primary", lambda: self._choose("rename"))
-        self.skip_btn = button("Leave in Recovery", on_click=lambda: self._choose("skip"))
-        self.cancel_btn = button("Cancel restoration", on_click=self.reject)
+        self.skip_btn = button("Skip", on_click=lambda: self._choose("skip"))
+        self.cancel_btn = button("Stop restoring", on_click=self.reject)
         self.setLayout(vbox(
-            label("A file already exists at the restore destination", "h2", wrap=True),
-            label("Keep both restores a numbered copy without overwriting the existing file. Linked components "
-                  "keep a common name. Leave in Recovery skips this item/linked group.", "muted", wrap=True),
-            details, hbox(label("Use this choice for:"), self.scope),
+            label("A file with this name already exists", "h2", wrap=True),
+            label("Keep both restores it with a number added, e.g. “photo (2).jpg”. Skip leaves it in Recovery.",
+                  "muted", wrap=True),
+            details, hbox(label("Do the same for:"), self.scope),
             hbox(self.cancel_btn, None, self.skip_btn, self.keep_btn),
             margins=(18, 18, 18, 18)))
 

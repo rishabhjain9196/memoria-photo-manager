@@ -156,6 +156,17 @@ def test_legacy_session_restores_nested_paths_and_linked_conflicts(lib, tmp_path
     assert not (home / session).exists()
 
 
+def test_legacy_session_manifest_is_never_restored_into_the_library(lib):
+    photo = stored(lib, r"Trip\photo.jpg", container="session_20260609_015147", data=b"photo")
+    manifest = stored(lib, "manifest.json", container="session_20260609_015147", data=b"{}")
+    plan = restore.preview(lib)
+    assert [item.source for item in plan.items] == [photo] and not plan.errors
+    result = restore.execute(lib, plan)
+    assert (result.restored, result.skipped, result.failed) == (1, 0, 0), result.messages
+    assert (lib.root / "Trip" / "photo.jpg").read_bytes() == b"photo"
+    assert manifest.exists() and not (lib.root / "manifest.json").exists()
+
+
 @pytest.mark.parametrize("container", [
     "", "unknown-folder", "20260230-121314-abcdef", "20261110-bogus-abcdef",
     "session_20260230_121314", "session_20260609_251314", "session_20260609_01440",
@@ -470,7 +481,7 @@ def test_missing_linked_component_blocks_whole_logged_unit(lib):
     ops = actions.operations(lib, removed.batch_id)
     Path(next(op["dst"] for op in ops if op["dst"].endswith(".mov"))).unlink()
     plan = restore.preview(lib)
-    assert len(plan.items) == 1 and "incomplete" in plan.items[0].issue
+    assert len(plan.items) == 1 and "linked parts" in plan.items[0].issue
     assert restore.execute(lib, plan).restored == 0
     assert plan.items[0].source.exists()
 

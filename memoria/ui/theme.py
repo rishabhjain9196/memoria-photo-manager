@@ -9,41 +9,45 @@ ICON_FONT = "Segoe Fluent Icons"
 ICON_FONT_FALLBACK = "Segoe MDL2 Assets"
 
 # Badges keep the same strong colours in both themes (white text on top).
-BADGE_OK = "#15803D"
-BADGE_WARN = "#B45309"
-BADGE_INFO = "#2563EB"
-BADGE_MUTED = "#6B7280"
+BADGE_OK = "#0F7B4F"
+BADGE_WARN = "#A15C07"
+BADGE_INFO = "#3557D6"
+BADGE_MUTED = "#5D6676"
 
+# A restrained, slate-neutral system with one indigo-blue accent. Status colours are muted, and
+# solid danger fills are separate from danger text so destructive buttons never look garish.
 PALETTES: dict[str, dict[str, str]] = {
     "light": {
-        "ACCENT": "#2563EB", "ACCENT_HOVER": "#1D4ED8", "ACCENT_SOFT": "#E8EFFE", "ACCENT_BORDER": "#C9D8FB",
-        "INFO_TEXT": "#1E3A8A",
-        "OK": "#15803D", "OK_SOFT": "#E7F6EC", "OK_BORDER": "#C7E9D2",
-        "WARN": "#B45309", "WARN_SOFT": "#FDF3E1", "WARN_BORDER": "#F3D9A9",
-        "DANGER": "#B91C1C", "DANGER_SOFT": "#FDECEC", "DANGER_BORDER": "#F5C2C2",
-        "TEXT": "#1F2328", "MUTED": "#5E6670", "BORDER": "#E3E6EA", "INPUT_BORDER": "#CDD2D8",
-        "BG": "#F4F5F7", "CARD": "#FFFFFF", "SIDEBAR": "#ECEEF2", "NAV_HOVER": "#E0E3E8",
-        "HOVER": "#F0F2F5", "PRESSED": "#E5E8EC", "DISABLED_TEXT": "#A0A6AD", "DISABLED_BG": "#F4F5F7",
-        "PRIMARY_DISABLED": "#9DB5F0", "PRIMARY_DISABLED_TEXT": "#EEF2FD", "DANGER_DISABLED": "#E9A9A9",
-        "HEADER_BG": "#F7F8FA", "TRACK": "#E3E6EA", "TOAST_BG": "#1F2328", "TOAST_TEXT": "#FFFFFF",
-        "TOAST_LINK": "#93B4FF", "SCROLL": "#C4C9D0", "SCROLL_HOVER": "#A7AEB7", "PLACEHOLDER": "#E9EBEF",
-        "PREVIEW_BG": "#F0F2F5", "SEGMENT_BG": "#EBEDF0", "SEGMENT_BORDER": "#D5D9DF", "SUBTLE": "#ECEEF1",
-        "SELECTION_TEXT": "#1F2328",
+        "ACCENT": "#3557D6", "ACCENT_HOVER": "#2B49BC", "ACCENT_PRESSED": "#233E9F", "ACCENT_SOFT": "#EDF1FD",
+        "ACCENT_BORDER": "#D3DCF8", "INFO_TEXT": "#23367F",
+        "OK": "#0F7B4F", "OK_SOFT": "#ECF7F1", "OK_BORDER": "#CDE9DA",
+        "WARN": "#A15C07", "WARN_SOFT": "#FDF6E9", "WARN_BORDER": "#F0DEB8",
+        "DANGER": "#B42318", "DANGER_SOFT": "#FDF0EF", "DANGER_BORDER": "#F4D0CC",
+        "DANGER_SOLID": "#C4321F", "DANGER_SOLID_HOVER": "#A82A1A",
+        "TEXT": "#161B26", "MUTED": "#5D6676", "BORDER": "#E4E7EC", "INPUT_BORDER": "#D0D5DD",
+        "BG": "#F6F7F9", "CARD": "#FFFFFF", "SIDEBAR": "#F0F2F5", "NAV_HOVER": "#E6E9EE", "NAV_ACTIVE": "#FFFFFF",
+        "HOVER": "#F3F5F8", "PRESSED": "#E9ECF1", "DISABLED_TEXT": "#9AA3AF", "DISABLED_BG": "#F4F5F7",
+        "PRIMARY_DISABLED": "#AFBDEE", "PRIMARY_DISABLED_TEXT": "#F3F5FD", "DANGER_DISABLED": "#E8B6AF",
+        "HEADER_BG": "#F9FAFB", "TRACK": "#E4E7EC", "TOAST_BG": "#1C2230", "TOAST_TEXT": "#FFFFFF",
+        "TOAST_LINK": "#AFC0FF", "SCROLL": "#CDD2DA", "SCROLL_HOVER": "#AEB5C0", "PLACEHOLDER": "#EDEFF2",
+        "PREVIEW_BG": "#F2F4F7", "SEGMENT_BG": "#EEF0F3", "SEGMENT_BORDER": "#D6DAE1", "SUBTLE": "#EEF0F3",
+        "SELECTION_TEXT": "#161B26", "SHADOW": "#2E101828",
     },
     "dark": {
-        "ACCENT": "#4C8DFF", "ACCENT_HOVER": "#6AA0FF", "ACCENT_SOFT": "#1E2D4A", "ACCENT_BORDER": "#2C4470",
-        "INFO_TEXT": "#BFD4FF",
-        "OK": "#4ADE80", "OK_SOFT": "#14291C", "OK_BORDER": "#1F4A2E",
-        "WARN": "#F5B454", "WARN_SOFT": "#30250F", "WARN_BORDER": "#5A4217",
-        "DANGER": "#F87171", "DANGER_SOFT": "#361919", "DANGER_BORDER": "#5C2626",
-        "TEXT": "#E6E8EB", "MUTED": "#A1A7B0", "BORDER": "#34373D", "INPUT_BORDER": "#464A52",
-        "BG": "#1B1C20", "CARD": "#24262B", "SIDEBAR": "#1F2024", "NAV_HOVER": "#2B2D33",
-        "HOVER": "#2D3036", "PRESSED": "#353840", "DISABLED_TEXT": "#6B7079", "DISABLED_BG": "#222428",
-        "PRIMARY_DISABLED": "#2C3E66", "PRIMARY_DISABLED_TEXT": "#8FA3C7", "DANGER_DISABLED": "#5C2B2B",
-        "HEADER_BG": "#2A2C31", "TRACK": "#34373D", "TOAST_BG": "#0E0F12", "TOAST_TEXT": "#F2F3F5",
-        "TOAST_LINK": "#93B4FF", "SCROLL": "#4A4E56", "SCROLL_HOVER": "#5E636C", "PLACEHOLDER": "#2E3036",
-        "PREVIEW_BG": "#2A2C31", "SEGMENT_BG": "#2A2C31", "SEGMENT_BORDER": "#464A52", "SUBTLE": "#2A2C31",
-        "SELECTION_TEXT": "#E6E8EB",
+        "ACCENT": "#5476EE", "ACCENT_HOVER": "#6887F1", "ACCENT_PRESSED": "#4766DA", "ACCENT_SOFT": "#1C2440",
+        "ACCENT_BORDER": "#2D3A63", "INFO_TEXT": "#C3D0FB",
+        "OK": "#4CC38A", "OK_SOFT": "#12261D", "OK_BORDER": "#1E4332",
+        "WARN": "#E9AE4B", "WARN_SOFT": "#29200F", "WARN_BORDER": "#4D3A17",
+        "DANGER": "#F0857A", "DANGER_SOFT": "#2D1715", "DANGER_BORDER": "#532620",
+        "DANGER_SOLID": "#C23A2C", "DANGER_SOLID_HOVER": "#D44A3B",
+        "TEXT": "#E8EAEE", "MUTED": "#9AA2AE", "BORDER": "#2B2F36", "INPUT_BORDER": "#3A3F48",
+        "BG": "#121418", "CARD": "#1A1D22", "SIDEBAR": "#16181C", "NAV_HOVER": "#22262C", "NAV_ACTIVE": "#1F2430",
+        "HOVER": "#23272E", "PRESSED": "#2B3038", "DISABLED_TEXT": "#636A75", "DISABLED_BG": "#1A1D22",
+        "PRIMARY_DISABLED": "#27325A", "PRIMARY_DISABLED_TEXT": "#8592BC", "DANGER_DISABLED": "#47231F",
+        "HEADER_BG": "#1F2228", "TRACK": "#2B2F36", "TOAST_BG": "#262A31", "TOAST_TEXT": "#F2F3F5",
+        "TOAST_LINK": "#9DB2FF", "SCROLL": "#3A3F48", "SCROLL_HOVER": "#4C525C", "PLACEHOLDER": "#23272E",
+        "PREVIEW_BG": "#1F2228", "SEGMENT_BG": "#1F2228", "SEGMENT_BORDER": "#3A3F48", "SUBTLE": "#1F2228",
+        "SELECTION_TEXT": "#E8EAEE", "SHADOW": "#80000000",
     },
 }
 
@@ -61,8 +65,9 @@ NAME = "light"     # what is applied: light | dark
 QSS = ""
 
 # Populated by use(); listed here for editors and type checkers.
-ACCENT = ACCENT_HOVER = ACCENT_SOFT = ACCENT_BORDER = INFO_TEXT = ""
+ACCENT = ACCENT_HOVER = ACCENT_PRESSED = ACCENT_SOFT = ACCENT_BORDER = INFO_TEXT = ""
 OK = OK_SOFT = OK_BORDER = WARN = WARN_SOFT = WARN_BORDER = DANGER = DANGER_SOFT = DANGER_BORDER = ""
+DANGER_SOLID = DANGER_SOLID_HOVER = NAV_ACTIVE = SHADOW = ""
 TEXT = MUTED = BORDER = INPUT_BORDER = BG = CARD = SIDEBAR = NAV_HOVER = HOVER = PRESSED = ""
 DISABLED_TEXT = DISABLED_BG = PRIMARY_DISABLED = PRIMARY_DISABLED_TEXT = DANGER_DISABLED = ""
 HEADER_BG = TRACK = TOAST_BG = TOAST_TEXT = TOAST_LINK = SCROLL = SCROLL_HOVER = PLACEHOLDER = ""
@@ -117,74 +122,87 @@ def _build_qss() -> str:
 * {{ font-family: 'Segoe UI Variable Text', 'Segoe UI'; font-size: 10pt; color: {TEXT}; }}
 QMainWindow, #content {{ background: {BG}; }}
 #sidebar {{ background: {SIDEBAR}; border-right: 1px solid {BORDER}; }}
-#appTitle {{ font-size: 15pt; font-weight: 600; }}
+#appTitle {{ font-size: 14pt; font-weight: 600; }}
 #libraryLabel {{ color: {MUTED}; font-size: 9pt; }}
-#navGroup {{ color: {MUTED}; font-size: 8pt; font-weight: 600; letter-spacing: 1px; padding: 10px 14px 2px 14px; }}
-QPushButton#nav {{ text-align: left; padding: 7px 12px; border: none; border-radius: 6px; background: transparent; }}
+#navGroup {{ color: {MUTED}; font-size: 7.5pt; font-weight: 600; letter-spacing: 1px; padding: 10px 14px 3px 14px; }}
+QPushButton#nav {{ text-align: left; padding: 6px 12px; border: 1px solid transparent; border-radius: 8px; background: transparent; }}
 QPushButton#nav:hover {{ background: {NAV_HOVER}; }}
-QPushButton#nav:checked {{ background: {CARD}; font-weight: 600; color: {ACCENT}; }}
+QPushButton#nav:checked {{ background: {NAV_ACTIVE}; border-color: {BORDER}; font-weight: 600; color: {ACCENT}; }}
 #navBadge {{ background: {ACCENT_SOFT}; color: {ACCENT}; border-radius: 9px; padding: 0 7px; font-size: 8pt; font-weight: 600; }}
-#pageTitle {{ font-size: 19pt; font-weight: 600; }}
+QPushButton#sideMenu {{ text-align: left; padding: 6px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: {MUTED}; }}
+QPushButton#sideMenu:hover {{ background: {NAV_HOVER}; color: {TEXT}; }}
+QPushButton#sideMenu:disabled {{ color: {DISABLED_TEXT}; background: transparent; }}
+QPushButton#sideMenu::menu-indicator {{ image: none; width: 0; }}
+#pageTitle {{ font-size: 18pt; font-weight: 600; }}
 #pageSubtitle {{ color: {MUTED}; font-size: 10pt; }}
-#h2 {{ font-size: 12.5pt; font-weight: 600; }}
+#h2 {{ font-size: 12pt; font-weight: 600; }}
 #muted {{ color: {MUTED}; }}
 #small {{ color: {MUTED}; font-size: 9pt; }}
-#card {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}
-#tile {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}
+#card {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}
+#tile {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}
 #tileValue {{ font-size: 18pt; font-weight: 600; }}
 #tileLabel {{ color: {MUTED}; font-size: 9pt; }}
-#trust {{ background: {OK_SOFT}; border: 1px solid {OK_BORDER}; border-radius: 8px; color: {OK}; padding: 8px 12px; }}
-#warnBox {{ background: {WARN_SOFT}; border: 1px solid {WARN_BORDER}; border-radius: 8px; color: {WARN}; padding: 8px 12px; }}
-#dangerBox {{ background: {DANGER_SOFT}; border: 1px solid {DANGER_BORDER}; border-radius: 8px; color: {DANGER}; padding: 8px 12px; }}
-#infoBox {{ background: {ACCENT_SOFT}; border: 1px solid {ACCENT_BORDER}; border-radius: 8px; color: {INFO_TEXT}; padding: 8px 12px; }}
-#selectionBar {{ background: {ACCENT_SOFT}; border: 1px solid {ACCENT_BORDER}; border-radius: 8px; }}
-QPushButton {{ background: {CARD}; border: 1px solid {INPUT_BORDER}; border-radius: 6px; padding: 6px 14px; min-height: 20px; }}
-QPushButton:hover {{ background: {HOVER}; }}
+#trust {{ background: {OK_SOFT}; border: 1px solid {OK_BORDER}; border-radius: 10px; color: {OK}; padding: 9px 13px; }}
+#warnBox {{ background: {WARN_SOFT}; border: 1px solid {WARN_BORDER}; border-radius: 10px; color: {WARN}; padding: 9px 13px; }}
+#dangerBox {{ background: {DANGER_SOFT}; border: 1px solid {DANGER_BORDER}; border-radius: 10px; color: {DANGER}; padding: 9px 13px; }}
+#infoBox {{ background: {ACCENT_SOFT}; border: 1px solid {ACCENT_BORDER}; border-radius: 10px; color: {INFO_TEXT}; padding: 9px 13px; }}
+#selectionBar {{ background: {ACCENT_SOFT}; border: 1px solid {ACCENT_BORDER}; border-radius: 10px; }}
+QPushButton {{ background: {CARD}; border: 1px solid {INPUT_BORDER}; border-radius: 8px; padding: 6px 14px; min-height: 20px; }}
+QPushButton:hover {{ background: {HOVER}; border-color: {SEGMENT_BORDER}; }}
 QPushButton:pressed {{ background: {PRESSED}; }}
 QPushButton:disabled {{ color: {DISABLED_TEXT}; background: {DISABLED_BG}; border-color: {BORDER}; }}
 QPushButton#primary {{ background: {ACCENT}; color: white; border: 1px solid {ACCENT}; font-weight: 600; }}
-QPushButton#primary:hover {{ background: {ACCENT_HOVER}; }}
+QPushButton#primary:hover {{ background: {ACCENT_HOVER}; border-color: {ACCENT_HOVER}; }}
+QPushButton#primary:pressed {{ background: {ACCENT_PRESSED}; border-color: {ACCENT_PRESSED}; }}
 QPushButton#primary:disabled {{ background: {PRIMARY_DISABLED}; border-color: {PRIMARY_DISABLED}; color: {PRIMARY_DISABLED_TEXT}; }}
-QPushButton#danger {{ background: {DANGER}; color: white; border: 1px solid {DANGER}; font-weight: 600; }}
+QPushButton#danger {{ background: {DANGER_SOLID}; color: white; border: 1px solid {DANGER_SOLID}; font-weight: 600; }}
+QPushButton#danger:hover {{ background: {DANGER_SOLID_HOVER}; border-color: {DANGER_SOLID_HOVER}; }}
 QPushButton#danger:disabled {{ background: {DANGER_DISABLED}; border-color: {DANGER_DISABLED}; }}
 QPushButton#link {{ border: none; background: transparent; color: {ACCENT}; padding: 2px 4px; }}
-QPushButton#link:hover {{ text-decoration: underline; }}
+QPushButton#link:hover {{ color: {ACCENT_HOVER}; text-decoration: underline; }}
 QPushButton#link:disabled {{ color: {DISABLED_TEXT}; background: transparent; }}
-QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit {{ background: {CARD}; border: 1px solid {INPUT_BORDER}; border-radius: 6px; padding: 5px 8px; }}
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit {{ background: {CARD}; border: 1px solid {INPUT_BORDER}; border-radius: 8px; padding: 5px 9px; }}
+QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {{ border-color: {SCROLL_HOVER}; }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QPlainTextEdit:focus {{ border: 1px solid {ACCENT}; }}
 QComboBox::drop-down {{ border: none; width: 22px; }}
-QComboBox QAbstractItemView {{ background: {CARD}; border: 1px solid {BORDER}; selection-background-color: {ACCENT_SOFT}; selection-color: {SELECTION_TEXT}; }}
-QListView, QTreeView, QTableView, QListWidget, QTreeWidget, QTableWidget {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 8px; outline: none; }}
-QTreeView::item, QTableView::item, QListWidget::item, QTreeWidget::item {{ padding: 4px; }}
+QComboBox QAbstractItemView {{ background: {CARD}; border: 1px solid {BORDER}; padding: 4px; selection-background-color: {ACCENT_SOFT}; selection-color: {SELECTION_TEXT}; }}
+QListView, QTreeView, QTableView, QListWidget, QTreeWidget, QTableWidget {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px; outline: none; }}
+QTreeView::item, QTableView::item, QListWidget::item, QTreeWidget::item {{ padding: 5px 4px; }}
+QTreeView::item:hover, QListWidget::item:hover, QTreeWidget::item:hover {{ background: {HOVER}; }}
 QTreeView::item:selected, QTableView::item:selected, QListWidget::item:selected, QTreeWidget::item:selected {{ background: {ACCENT_SOFT}; color: {SELECTION_TEXT}; }}
-QHeaderView::section {{ background: {HEADER_BG}; border: none; border-bottom: 1px solid {BORDER}; padding: 6px; color: {MUTED}; font-weight: 600; }}
+QHeaderView::section {{ background: {HEADER_BG}; border: none; border-bottom: 1px solid {BORDER}; padding: 7px 6px; color: {MUTED}; font-weight: 600; font-size: 9pt; }}
 QTableCornerButton::section {{ background: {HEADER_BG}; border: none; }}
 QProgressBar {{ background: {TRACK}; border: none; border-radius: 3px; height: 6px; text-align: center; }}
 QProgressBar::chunk {{ background: {ACCENT}; border-radius: 3px; }}
 QSlider::groove:horizontal {{ height: 4px; background: {TRACK}; border-radius: 2px; }}
-QSlider::handle:horizontal {{ background: {ACCENT}; width: 14px; height: 14px; margin: -5px 0; border-radius: 7px; }}
+QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }}
+QSlider::handle:horizontal {{ background: {CARD}; border: 2px solid {ACCENT}; width: 12px; height: 12px; margin: -6px 0; border-radius: 8px; }}
 #taskBar {{ background: {CARD}; border-top: 1px solid {BORDER}; }}
-#toast {{ background: {TOAST_BG}; border: 1px solid {BORDER}; border-radius: 8px; }}
+#toast {{ background: {TOAST_BG}; border: 1px solid {BORDER}; border-radius: 12px; }}
 #toast QLabel {{ color: {TOAST_TEXT}; }}
 #toast QPushButton {{ background: transparent; color: {TOAST_LINK}; border: none; font-weight: 600; }}
+#toast QPushButton:hover {{ text-decoration: underline; }}
 QTabWidget::pane {{ border: none; }}
-QTabBar::tab {{ background: transparent; padding: 8px 14px; border: none; color: {MUTED}; }}
+QTabBar::tab {{ background: transparent; padding: 8px 14px; border: none; border-bottom: 2px solid transparent; color: {MUTED}; }}
+QTabBar::tab:hover {{ color: {TEXT}; }}
 QTabBar::tab:selected {{ color: {ACCENT}; border-bottom: 2px solid {ACCENT}; font-weight: 600; }}
 QScrollArea {{ border: none; background: transparent; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
-QCheckBox, QRadioButton {{ spacing: 6px; }}
+QCheckBox, QRadioButton {{ spacing: 7px; }}
 QSplitter::handle {{ background: transparent; }}
-QToolTip {{ background: {TOAST_BG}; color: {TOAST_TEXT}; border: 1px solid {BORDER}; padding: 6px; }}
-QMenu {{ background: {CARD}; border: 1px solid {BORDER}; padding: 4px; }}
-QMenu::item {{ padding: 6px 18px; border-radius: 4px; }}
+QToolTip {{ background: {TOAST_BG}; color: {TOAST_TEXT}; border: 1px solid {BORDER}; padding: 6px 8px; }}
+QMenu {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px; padding: 5px; }}
+QMenu::item {{ padding: 7px 22px 7px 14px; border-radius: 6px; }}
 QMenu::item:selected {{ background: {ACCENT_SOFT}; color: {SELECTION_TEXT}; }}
-QMenu::separator {{ height: 1px; background: {BORDER}; margin: 4px 8px; }}
+QMenu::item:disabled {{ color: {DISABLED_TEXT}; }}
+QMenu::separator {{ height: 1px; background: {BORDER}; margin: 5px 8px; }}
 QDialog {{ background: {CARD}; }}
-QScrollBar:vertical {{ background: transparent; width: 12px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: {SCROLL}; border-radius: 4px; min-height: 30px; }}
+QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
+QScrollBar::handle:vertical {{ background: {SCROLL}; border-radius: 3px; min-height: 30px; }}
 QScrollBar::handle:vertical:hover {{ background: {SCROLL_HOVER}; }}
-QScrollBar:horizontal {{ background: transparent; height: 12px; margin: 2px; }}
-QScrollBar::handle:horizontal {{ background: {SCROLL}; border-radius: 4px; min-width: 30px; }}
+QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
+QScrollBar::handle:horizontal {{ background: {SCROLL}; border-radius: 3px; min-width: 30px; }}
+QScrollBar::handle:horizontal:hover {{ background: {SCROLL_HOVER}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 """

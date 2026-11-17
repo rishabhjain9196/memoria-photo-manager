@@ -10,6 +10,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QHeaderView, QInputDialog, QLineEdit, QMenu, QSlider,
                                QSplitter, QTreeWidget, QTreeWidgetItem, QWidget)
 
+from ..motion import Dialog
 from ...engine import albums, batch, catalogue, organisation
 from ..tasks import LatestCall
 from ..library_filters import FilterDialog, KINDS, SORTS, metadata_filter_notes, sort_caption
@@ -407,7 +408,7 @@ class PhotosPage(Page):
         selected = self.selected()
         if not selected or self.busy:
             return
-        dialog = QDialog(self)
+        dialog = Dialog(self)
         dialog.setWindowTitle(f"Organise {len(selected):,} selected files")
         form = QFormLayout()
         if len(selected) == 1:

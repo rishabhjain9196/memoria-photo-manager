@@ -6,6 +6,7 @@ from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QDoubleSpinBox, QFormLayout, QLineEdit,
                                QSpinBox, QTabWidget, QWidget)
 
+from .motion import Dialog
 from ..engine import catalogue
 from .widgets import MessageDialog, button, fmt_date, fmt_duration, fmt_size, hbox, label, scroll, vbox
 
@@ -105,7 +106,7 @@ def metadata_filter_notes(filters: catalogue.Filters) -> list[str]:
     return notes
 
 
-class FilterDialog(QDialog):
+class FilterDialog(Dialog):
     def __init__(self, parent, lib, current: catalogue.Filters):
         super().__init__(parent)
         self.setWindowTitle("Filter library")

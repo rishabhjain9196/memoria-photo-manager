@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### Professional look, smooth flow and a simpler sidebar
+- New slate-neutral light and dark palettes with one indigo-blue accent, muted status colours and dedicated solid
+  danger fills. The result is calmer, more consistent buttons, softer card and menu radii, hover states on lists,
+  inputs, tabs and links, and a quieter active navigation item.
+- Subtle transitions: pages cross-fade, dialogs fade in, the task bar fades in and toasts slide up with a soft
+  shadow. Each takes about 150 ms, never blocks work and always settles in its final state. They are off for
+  **Settings ▸ Reduce motion**, Windows "Animation effects" off, and offscreen or remote rendering.
+- The sidebar's six link buttons are now a **Library** menu (Change library, Library folders, Storage & reset)
+  and a **Settings** menu (Appearance, Reduce motion, Diagnostics, Updates). **Notifications** keeps its live
+  count. The menus flag "update" and "resume rebuild" when relevant. No functionality was removed.
+- History & recovery disables Empty Recovery when there is nothing to empty, and paging controls no longer
+  look active when no change is selected.
+
+### Simple, self-fixing Recovery
+- History & recovery now shows one Recovery total with **Restore all...** and **Empty Recovery...**. **Open
+  folder** and **Details** replace the location picker, Refresh accounting and Inspect accounting. The page
+  refreshes itself.
+- Empty Recovery fixes what it safely can before asking: it finishes interrupted changes and self-cleans
+  leftovers. It then shows a single confirmation with the space to be freed. Files that didn't come from a Memoria
+  cleanup are called out in that dialog instead of blocking. Missing or unresolvable History records no longer
+  block emptying.
+- Emptying still waits for a disconnected media folder, unreadable items or links, or work that can't finish yet.
+  Each case gets one plain sentence saying what to do. Recovery is re-checked after confirmation.
+- Restore all is a plain preview ("Goes back to", "How") with no extra acknowledgement. Name clashes offer Keep
+  both, Skip or Stop. Recovery self-cleans after restoring, and per-file notes avoid journal jargon.
+- The Overview, change summaries, Undo confirmation and Details wording were simplified to match.
+
+### Legacy Recovery session manifests
+- A legacy `session_YYYYMMDD_HHMMSS\manifest.json` was counted as an untracked file and blocked Empty Recovery
+  indefinitely. It is now reported as legacy session metadata and no longer blocks emptying. Other untracked
+  content, including content beside that manifest, still blocks deletion.
+- Restore all no longer copies that manifest into the library root as `manifest.json`.
+- Opening a library self-cleans its own Recovery: empty folders and legacy sessions containing only their manifest
+  are removed. Media, unknown files, journaled destinations and links are left alone, and nothing is cleaned while
+  interrupted operations remain.
+
 ### Explain unavailable Recovery deletion
 - Empty Recovery is now a clickable review action while library work is idle. It performs a fresh accounting check,
   then either shows the permanent-deletion confirmation or a clear list of blockers with counts and next steps.

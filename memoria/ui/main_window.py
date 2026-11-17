@@ -8,14 +8,14 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QTimer, Qt, Signal
-from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import QActionGroup, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
-                               QProgressBar, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
+                               QMenu, QProgressBar, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import __version__
-from ..engine import actions, scanner, storage
+from ..engine import actions, recovery, scanner, storage
 from ..engine.db import Library, LibraryInUse, LibraryTooNew
-from . import theme
+from . import motion, theme
 from .tasks import TaskRunner
 from .widgets import (AppContext, Banner, ConfirmDialog, MessageDialog, Toast, button, fmt_date, fmt_n,
                       glyph_label, hbox, icon_family, label, scroll, vbox)
@@ -144,6 +144,7 @@ class MainWindow(QMainWindow):
         self._index_refresh.setInterval(2000)
         self._index_refresh.timeout.connect(self._publish_index_progress)
         self._build()
+        motion.install(QApplication.instance())
         from .updates import UpdateController
         self.updates = UpdateController(self)
         self.updates.changed.connect(self._updates_changed)
@@ -166,7 +167,7 @@ class MainWindow(QMainWindow):
         self.runner.progressed.connect(self._task_progress)
         self.runner.finished.connect(self._task_finished)
         self.runner.error.connect(self._task_error)
-        self.runner.busy_changed.connect(lambda busy: self.theme_combo.setEnabled(not busy))
+        self.runner.busy_changed.connect(lambda busy: self.appearance_menu.setEnabled(not busy))
         self.runner.busy_changed.connect(
             lambda busy: self.storage_btn.setEnabled(self.ctx.library is not None and not busy))
         self.ctx.toast_requested.connect(self.toast.show_message)
@@ -197,22 +198,19 @@ class MainWindow(QMainWindow):
             logo.setPixmap(QPixmap(str(logo_path)).scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio,
                                                           Qt.TransformationMode.SmoothTransformation))
         sl.addLayout(hbox(8, logo, label("Memoria", "appTitle"), None, spacing=8))
+        sl.addSpacing(4)
         self.lib_label = label("No library open", "libraryLabel", wrap=True)
-        self.lib_label.setContentsMargins(14, 4, 8, 0)
+        self.lib_label.setContentsMargins(14, 4, 8, 2)
         sl.addWidget(self.lib_label)
-        change = button("Change library…", "link", self.choose_library, tip="Ctrl+O")
-        sl.addLayout(hbox(8, change, None))
-        self.roots_btn = button("Library folders...", "link", self.manage_roots)
-        sl.addLayout(hbox(8, self.roots_btn, None))
-        self.storage_btn = button("Storage && reset…", "link", self.manage_storage)
-        sl.addLayout(hbox(8, self.storage_btn, None))
-        self.diagnostics_btn = button("Diagnostics…", "link", self.manage_diagnostics)
-        sl.addLayout(hbox(8, self.diagnostics_btn, None))
-        self.notifications_btn = button("Notifications…", "link", self.manage_notifications)
-        sl.addLayout(hbox(8, self.notifications_btn, None))
-        self.updates_btn = button("Updates...", "link", self.manage_updates)
-        sl.addLayout(hbox(8, self.updates_btn, None))
-        sl.addSpacing(6)
+        library_menu = QMenu(self)
+        library_menu.setToolTipsVisible(True)
+        library_menu.addAction("Change library…\tCtrl+O", self.choose_library)
+        self.roots_btn = library_menu.addAction("Library folders...", self.manage_roots)
+        self.storage_btn = library_menu.addAction("Storage && reset…", self.manage_storage)
+        self.library_btn = button("Library  ▾", "sideMenu", tip="Change library, manage folders or storage")
+        self.library_btn.setMenu(library_menu)
+        sl.addLayout(hbox(4, self.library_btn, None))
+        sl.addSpacing(2)
         group = QButtonGroup(self)
         group.setExclusive(True)
         self.nav_container = QWidget()
@@ -250,15 +248,29 @@ class MainWindow(QMainWindow):
                 self.nav_buttons[key] = b
                 nl.addWidget(b)
         sl.addWidget(scroll(self.nav_container), 1)
-        self.theme_combo = QComboBox()
+        settings_menu = QMenu(self)
+        settings_menu.setToolTipsVisible(True)
+        self.appearance_menu = settings_menu.addMenu("Appearance")
+        self.theme_actions = QActionGroup(self)
+        self.theme_actions.setExclusive(True)
         for mode, text in theme.MODES.items():
-            self.theme_combo.addItem(text, mode)
-        self.theme_combo.setCurrentIndex(max(0, self.theme_combo.findData(theme.MODE)))
-        self.theme_combo.currentIndexChanged.connect(
-            lambda _: self.theme_change_requested.emit(self.theme_combo.currentData()))
-        sl.addLayout(hbox(4, label("Theme", "small"), self.theme_combo, spacing=8))
-        sl.addSpacing(4)
-        sl.addWidget(label(f"Version {__version__} · offline · no tracking", "small"))
+            action = self.appearance_menu.addAction(text)
+            action.setCheckable(True)
+            action.setChecked(mode == theme.MODE)
+            action.triggered.connect(lambda _=False, m=mode: self.theme_change_requested.emit(m))
+            self.theme_actions.addAction(action)
+        self.motion_action = settings_menu.addAction("Reduce motion")
+        self.motion_action.setCheckable(True)
+        self.motion_action.setChecked(bool(self.settings.value("reduce_motion", False, bool)))
+        self.motion_action.toggled.connect(self._set_reduce_motion)
+        settings_menu.addSeparator()
+        self.diagnostics_btn = settings_menu.addAction("Diagnostics…", self.manage_diagnostics)
+        self.updates_btn = settings_menu.addAction("Updates...", self.manage_updates)
+        self.notifications_btn = button("Notifications", "sideMenu", self.manage_notifications)
+        self.settings_btn = button("Settings  ▾", "sideMenu", tip="Appearance, motion, diagnostics and updates")
+        self.settings_btn.setMenu(settings_menu)
+        sl.addLayout(hbox(self.notifications_btn, self.settings_btn, None, spacing=2))
+        sl.addWidget(label(f"   Version {__version__} · offline · no tracking", "small"))
 
         self.stack = QStackedWidget()
         self.stack.setObjectName("content")
@@ -323,10 +335,18 @@ class MainWindow(QMainWindow):
     def go(self, key: str) -> None:
         if self.ctx.library is None or key not in self.page_classes or self.ctx.maintenance:
             return
-        self.stack.setCurrentWidget(self.page(key))
+        page = self.page(key)
+        changed = self.stack.currentWidget() is not page
+        self.stack.setCurrentWidget(page)
+        if changed:
+            motion.fade_in(page)
         self.nav_buttons[key].setChecked(True)
         self.current_key = key
         self.settings.setValue("last_page", key)
+
+    def _set_reduce_motion(self, reduce: bool) -> None:
+        motion.set_reduced(reduce)
+        motion.install(QApplication.instance())
 
     def browse_filtered(self, filters) -> None:
         if self.ctx.library is None or self.ctx.maintenance:
@@ -400,6 +420,10 @@ class MainWindow(QMainWindow):
                           "\n\nPhotos and Recovery files have not been deleted. Keep the .memoria folder "
                           "for recovery; do not remove it to force a fresh start.").exec()
             return
+        try:
+            recovery.tidy(lib)
+        except Exception:
+            pass  # Self-cleaning is best effort; anything left stays visible in Recovery accounting.
         self._clear_pages()
         self.ctx.set_library(lib)
         parent = str(lib.root.parent)
@@ -492,12 +516,14 @@ class MainWindow(QMainWindow):
 
     def _notifications_updated(self):
         count = self.notifications.unread
-        self.notifications_btn.setText(f"Notifications ({count})" if count else "Notifications…")
+        self.notifications_btn.setText(f"Notifications ({count})" if count else "Notifications")
 
     def _updates_changed(self):
         info = self.updates.info
-        self.updates_btn.setText("Updates (available)" if info and info.behind else
+        available = bool(info and info.behind)
+        self.updates_btn.setText("Updates (available)" if available else
                                  "Updates (checking...)" if self.updates.working else "Updates...")
+        self.settings_btn.setText("Settings  •  update  ▾" if available else "Settings  ▾")
 
     def manage_updates(self):
         if self._updates_dialog is not None:
@@ -557,6 +583,7 @@ class MainWindow(QMainWindow):
         self.stack.setEnabled(not self.ctx.maintenance)
         self.nav_container.setEnabled(self.ctx.library is not None and not self.ctx.maintenance)
         self.storage_btn.setText("Resume rebuild…" if self.ctx.maintenance else "Storage && reset…")
+        self.library_btn.setText("Library  •  resume rebuild  ▾" if self.ctx.maintenance else "Library  ▾")
 
     def _clear_pages(self) -> None:
         for page in self.pages.values():
@@ -734,7 +761,9 @@ class MainWindow(QMainWindow):
         self.task_progress.setRange(0, 0)
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.setText("Cancel")
-        self.task_bar.show()
+        if self.task_bar.isHidden():
+            self.task_bar.show()
+            motion.fade_in(self.task_bar, motion.FAST)
 
     def _task_progress(self, done: int, total: int, msg: str) -> None:
         elapsed = time.monotonic() - self._task_started_at

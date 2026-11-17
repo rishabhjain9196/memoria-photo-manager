@@ -6,8 +6,10 @@ to retained bytes. No originals are read, no hashes are computed and no folders 
 from __future__ import annotations
 
 import os
+import re
 import stat
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from . import config, roots
@@ -18,6 +20,26 @@ SAMPLE_LIMIT = 20
 INTERRUPTED = {"pending", "publishing", "published", "undo_pending"}
 MOVED = {"done", "published", "undo_pending", "undone", "purged"}
 RECORDED = MOVED | INTERRUPTED
+LEGACY_SESSION = re.compile(r"session_(\d{8}_\d{6})", re.IGNORECASE)
+LEGACY_MANIFEST = "manifest.json"
+
+
+def legacy_session(name: str) -> bool:
+    """A pre-batch ``session_YYYYMMDD_HHMMSS`` Recovery container with a real timestamp."""
+    match = LEGACY_SESSION.fullmatch(name)
+    if match is None:
+        return False
+    try:
+        datetime.strptime(match[1], "%Y%m%d_%H%M%S")
+    except ValueError:
+        return False
+    return True
+
+
+def legacy_metadata(relative: Path) -> bool:
+    """The legacy session's own top-level manifest: container metadata, not a recycled library file."""
+    parts = Path(relative).parts
+    return len(parts) == 2 and parts[1].casefold() == LEGACY_MANIFEST and legacy_session(parts[0])
 
 
 @dataclass
@@ -50,6 +72,10 @@ class RootAccounting:
     bytes: int = 0
     untracked_files: int = 0
     untracked_bytes: int = 0
+    legacy_metadata_files: int = 0
+    legacy_metadata_bytes: int = 0
+    review_files: int = 0
+    review_bytes: int = 0
     skipped_links: int = 0
     errors: int = 0
     samples: list[str] = field(default_factory=list)
@@ -101,51 +127,44 @@ class RecoveryAccounting:
         return sum(root.untracked_bytes for root in self.roots)
 
     @property
+    def legacy_metadata_files(self) -> int:
+        return sum(root.legacy_metadata_files for root in self.roots)
+
+    @property
+    def review_files(self) -> int:
+        """Files physically in Recovery that no clean Memoria cleanup record accounts for."""
+        return sum(root.review_files for root in self.roots)
+
+    @property
+    def review_bytes(self) -> int:
+        return sum(root.review_bytes for root in self.roots)
+
+    @property
+    def missing_files(self) -> int:
+        return sum(batch.missing_files for batch in self.batches.values())
+
+    def blockers(self) -> list[str]:
+        """Plain-language reasons emptying is impossible right now, each with the one thing to do."""
+        reasons = [f"“{root.label}” is disconnected. Connect it, then try again." for root in self.roots
+                   if not root.online]
+        reasons += [f"Some items in Recovery on “{root.label}” couldn't be read (shortcuts or locked files). "
+                    "Open Details to see them." for root in self.roots if root.online and not root.complete]
+        if self.interrupted_ops or self.pending_merges:
+            reasons.append("An earlier change hasn't finished. Connect all your media folders, then try again.")
+        return reasons
+
+    @property
     def needs_inspection(self) -> bool:
-        return bool(not self.complete or self.untracked_files or self.interrupted_ops or self.pending_merges
-                    or any(batch.missing_files or batch.changed_files or batch.uncertain_files
-                           or batch.unexpected_files for batch in self.batches.values()))
+        return bool(self.blockers() or self.review_files)
+
+    @property
+    def can_empty(self) -> bool:
+        # This is only a UI gate, not authority to delete. Existing engine guards still apply.
+        return bool(self.files and not self.blockers())
 
     @property
     def safe_to_empty(self) -> bool:
-        # This is only a UI gate, not authority to delete. Existing engine guards still apply.
-        return bool(self.files and not self.needs_inspection)
-
-    def empty_blockers(self) -> list[str]:
-        """Explain the existing deletion guards. Counts can overlap for the same file."""
-        reasons = []
-        offline = sum(not root.online for root in self.roots)
-        incomplete = sum(root.online and not root.complete for root in self.roots)
-        if offline:
-            reasons.append(f"{offline} media folder(s) are offline. Reconnect them and refresh accounting.")
-        if incomplete:
-            reasons.append(f"{incomplete} location(s) could not be fully inspected. Check permissions and skipped links "
-                           "using Inspect accounting.")
-        if not self.journal_complete:
-            reasons.append("Some recorded Recovery destinations could not be resolved. Inspect their History records.")
-        if self.untracked_files:
-            reasons.append(f"{self.untracked_files} file(s) have no unambiguous History match. Use Inspect accounting "
-                           "or Restore all available to review their origin; do not assume they are disposable.")
-        if self.interrupted_ops:
-            reasons.append(f"{self.interrupted_ops} interrupted operation(s) remain. Reopen Memoria to reconcile "
-                           "completed work, then inspect any remaining errors.")
-        if self.pending_merges:
-            reasons.append(f"{self.pending_merges} organisation merge(s) are unfinished. Resolve them before deleting "
-                           "the Recovery copies.")
-        for field, description, advice in (
-            ("missing_files", "recorded file(s) are missing from Recovery",
-             "Check previous restoration or manual file moves against History."),
-            ("changed_files", "file(s) differ in size or type from their recorded copies",
-             "Inspect them before considering permanent deletion."),
-            ("uncertain_files", "file record(s) could not be matched or checked confidently",
-             "Inspect the affected locations and History entries."),
-            ("unexpected_files", "entry warning(s) concern an unexpected History state or storage layout",
-             "Inspect these entries; restoration/import records may still need review."),
-        ):
-            count = sum(getattr(batch, field) for batch in self.batches.values())
-            if count:
-                reasons.append(f"{count} {description}. {advice}")
-        return reasons
+        return self.can_empty and not self.review_files
 
 
 def _key(path: Path) -> str:
@@ -178,6 +197,75 @@ def inspection_path(lib, source: int) -> Path:
     return folder
 
 
+def _prune(lib, directory: Path, legacy: bool) -> tuple[bool, int, int]:
+    """Return (now removed, manifests removed, folders removed) for one no-follow subtree."""
+    removable, manifests, folders, manifest = True, 0, 0, None
+    try:
+        with os.scandir(L(directory)) as entries:
+            children = [(directory / entry.name, entry.name, entry.stat(follow_symlinks=False))
+                        for entry in entries]
+    except OSError:
+        return False, 0, 0
+    for path, name, info in children:
+        if _link(info):
+            removable = False
+        elif stat.S_ISDIR(info.st_mode):
+            gone, child_manifests, child_folders = _prune(lib, path, False)
+            manifests += child_manifests
+            folders += child_folders
+            removable = removable and gone
+        elif legacy and stat.S_ISREG(info.st_mode) and name.casefold() == LEGACY_MANIFEST:
+            manifest = path
+        else:
+            removable = False
+    if not removable:
+        return False, manifests, folders
+    try:
+        if manifest is not None:
+            if lib.db.execute("SELECT 1 FROM operations WHERE dst=? COLLATE NOCASE OR dst_key=? COLLATE NOCASE",
+                              (str(manifest), lib.rel(manifest, resolve=False))).fetchone():
+                return False, manifests, folders
+            os.remove(L(manifest))
+            manifests += 1
+        os.rmdir(L(directory))
+    except (OSError, ValueError):
+        return False, manifests, folders
+    return True, manifests, folders + 1
+
+
+def tidy(lib) -> tuple[int, int]:
+    """Self-clean the opened library's own Recovery; returns (legacy manifests, folders) removed.
+
+    Only empty folders and legacy session containers whose sole file is their top-level manifest
+    are removed. Media, unknown files, journaled destinations and links are never touched, and
+    nothing happens while interrupted operations remain.
+    """
+    if lib.db.execute("SELECT 1 FROM operations WHERE status IN "
+                      "('pending','publishing','published','undo_pending')").fetchone():
+        return 0, 0
+    try:
+        folder = inspection_path(lib, 1)
+        with os.scandir(L(folder)) as entries:
+            children = [(folder / entry.name, entry.name, entry.stat(follow_symlinks=False)) for entry in entries]
+    except (OSError, ValueError, LibraryUnavailable):
+        return 0, 0
+    manifests = folders = 0
+    for path, name, info in children:
+        if not _link(info) and stat.S_ISDIR(info.st_mode):
+            _, child_manifests, child_folders = _prune(lib, path, legacy_session(name))
+            manifests += child_manifests
+            folders += child_folders
+    return manifests, folders
+
+
+def prepare_to_empty(lib) -> RecoveryAccounting:
+    """Fix what can be fixed safely (finish interrupted work, self-clean), then measure afresh."""
+    from .actions import reconcile
+    reconcile(lib)
+    tidy(lib)
+    return inspect(lib)
+
+
 def _walk(root: RootAccounting, home: Path, blocked: set[str], directories: set[str]):
     """Yield regular files only; any inaccessible subtree stays explicitly unknown."""
     def block(path, message, *, link=False):
@@ -191,10 +279,10 @@ def _walk(root: RootAccounting, home: Path, blocked: set[str], directories: set[
     try:
         info = _lstat(home)
     except OSError as error:
-        block(home, f"Unreadable ({error})")
+        block(home, f"Couldn't read ({error})")
         return
     if _link(info):
-        block(home, "Link / junction / reparse point not followed", link=True)
+        block(home, "Shortcut / link skipped", link=True)
         return
     path = home
     for part in root.path.relative_to(home).parts:
@@ -204,13 +292,13 @@ def _walk(root: RootAccounting, home: Path, blocked: set[str], directories: set[
         except FileNotFoundError:
             return
         except OSError as error:
-            block(path, f"Unreadable ({error})")
+            block(path, f"Couldn't read ({error})")
             return
         if _link(info):
-            block(path, "Link / junction / reparse point not followed", link=True)
+            block(path, "Shortcut / link skipped", link=True)
             return
         if not stat.S_ISDIR(info.st_mode):
-            block(path, "Expected Recovery directory")
+            block(path, "Not a folder")
             return
 
     pending = [root.path]
@@ -220,7 +308,7 @@ def _walk(root: RootAccounting, home: Path, blocked: set[str], directories: set[
             # Recheck queued directories: they may have changed since being discovered.
             info = _lstat(directory)
             if _link(info) or not stat.S_ISDIR(info.st_mode):
-                block(directory, "Changed directory / link not followed", link=_link(info))
+                block(directory, "Folder changed while reading / link skipped", link=_link(info))
                 continue
             directories.add(_key(directory))
             with os.scandir(L(directory)) as entries:
@@ -232,13 +320,13 @@ def _walk(root: RootAccounting, home: Path, blocked: set[str], directories: set[
                         block(path, f"Cannot measure ({error})")
                         continue
                     if _link(info):
-                        block(path, "Link / junction / reparse point not followed", link=True)
+                        block(path, "Shortcut / link skipped", link=True)
                     elif stat.S_ISDIR(info.st_mode):
                         pending.append(path)
                     elif stat.S_ISREG(info.st_mode):
                         yield path, info.st_size
                     else:
-                        block(path, "Non-regular item not measured")
+                        block(path, "Special item skipped")
         except OSError as error:
             block(directory, f"Cannot list ({error})")
 
@@ -265,7 +353,7 @@ def inspect(lib) -> RecoveryAccounting:
                 roots.check(lib, root.id)
         except LibraryUnavailable as error:
             root.online = root.complete = False
-            root.note(f"Offline / unavailable: {error}")
+            root.note(f"Disconnected: {error}")
         report.roots.append(root)
 
     report.interrupted_ops = lib.db.execute(
@@ -326,28 +414,42 @@ def inspect(lib) -> RecoveryAccounting:
             # Reused destinations cannot be attributed confidently to either operation.
             active = [match for match in matches if match[0]["status"] in RECORDED - {"undone", "purged"}]
             match = active[0] if len(active) == 1 else matches[0] if len(matches) == 1 else None
+            if not matches and legacy_metadata(path.relative_to(root.path)):
+                root.legacy_metadata_files += 1
+                root.legacy_metadata_bytes += size
+                continue
             if match is None:
                 root.untracked_files += 1
                 root.untracked_bytes += size
-                root.note(f"{'Ambiguous journal destination' if matches else 'Untracked / holding file'}: {path}")
+                root.review_files += 1
+                root.review_bytes += size
+                root.note(f"{'Matches more than one recorded change' if matches else 'Not from a Memoria cleanup'}: "
+                          f"{path}")
                 for _, _, batch in matches:
                     batch.uncertain_files += 1
                 continue
             op, _, batch = match
             batch.files += 1
             batch.bytes += size
+            review = False
             if op["size"] is not None and size != op["size"]:
                 batch.changed_files += 1
-                root.note(f"Size changed (recorded {op['size']:,}; now {size:,} bytes): {path}")
+                review = True
+                root.note(f"Changed since it was removed (was {op['size']:,} bytes; now {size:,}): {path}")
             if op["status"] not in {"done", "published"}:
                 batch.unexpected_files += 1
+                review = True
             if op["status"] != "done":
-                root.note(f"Inspect journal state '{op['status']}': {path}")
+                root.note(f"From an unfinished or undone change ({op['status']}): {path}")
             relative = path.relative_to(root.path)
             if (op["batch_kind"] == "recovery_import" or op["op"] != "recycle"
                     or len(relative.parts) < 2 or relative.parts[0] != batch.id):
                 batch.unexpected_files += 1
-                root.note(f"Journaled file outside the normal cleanup layout; inspect before emptying: {path}")
+                review = True
+                root.note(f"Not in a normal cleanup folder: {path}")
+            if review:
+                root.review_files += 1
+                root.review_bytes += size
 
     for key, matches in destinations.items():
         if key in seen:
@@ -358,11 +460,11 @@ def inspect(lib) -> RecoveryAccounting:
                 continue
             if key in directories:
                 batch.changed_files += 1
-                root.note(f"Recorded file is now a directory: {key}")
+                root.note(f"Recorded file is now a folder: {key}")
             elif unknown or op["status"] != "done":
                 batch.uncertain_files += 1
             else:
                 batch.missing_files += 1
                 batch.missing_bytes += op["size"] or 0
-                root.note(f"Recorded destination missing ({op['size'] or 0:,} recorded bytes): {key}")
+                root.note(f"No longer in Recovery: {key}")
     return report

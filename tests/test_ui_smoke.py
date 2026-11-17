@@ -259,3 +259,36 @@ def test_storage_reset_window_flow(tmp_path, monkeypatch):
         window.close()
         window.deleteLater()
         app.processEvents()
+
+
+def test_transitions_settle_in_their_final_state_and_respect_reduced_motion(monkeypatch):
+    import time
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QApplication, QWidget
+    from memoria.ui import motion
+    from memoria.ui.widgets import Toast
+    app = QApplication.instance() or QApplication([])
+    assert not motion.enabled()  # Offscreen/test platforms never animate.
+    parent = QWidget()
+    parent.resize(1200, 800)
+    page, toast = QWidget(parent), Toast(parent)
+    parent.show()
+    motion.fade_in(page)
+    assert page.graphicsEffect() is None
+    monkeypatch.setattr(motion, "enabled", lambda: True)
+    motion.fade_in(page)
+    motion.fade_in(page)  # Restarting mid-flight must not leak or stack effects.
+    toast.show_message("Moved 3 files to Recovery.", "batch")
+    target = toast._place()
+    deadline = time.monotonic() + 2
+    while (page.graphicsEffect() is not None or toast.pos() != target) and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(.01)
+    assert page.graphicsEffect() is None and toast.pos() == target and toast.isVisible()
+    monkeypatch.undo()
+    monkeypatch.setenv("MEMORIA_REDUCE_MOTION", "1")
+    monkeypatch.setattr(motion, "_reduced", None)
+    assert motion.reduced() and not motion.enabled()
+    parent.deleteLater()
+    app.processEvents()

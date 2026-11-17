@@ -8,6 +8,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QComboBox, QDialog, QHeaderView, QPlainTextEdit, QSplitter,
                                QTreeWidget, QTreeWidgetItem, QWidget)
 
+from ..motion import Dialog
 from ...engine import actions, recovery
 from .. import theme
 from ..tasks import LatestCall
@@ -36,7 +37,7 @@ def status_label(status):
 
 class HistoryPage(Page):
     title = "History & recovery"
-    subtitle = "Review recorded changes. Undo applies to the whole selected change, not just its displayed steps."
+    subtitle = "Undo past changes, bring back removed files, or empty Recovery to free up space."
 
     def __init__(self, ctx):
         super().__init__(ctx)
@@ -48,12 +49,12 @@ class HistoryPage(Page):
         self._can_undo = False
         self._restore_conflicts = None
         self.batches = QTreeWidget()
-        self.batches.setHeaderLabels(["When", "What", "Recorded items", "Recorded size", "Status"])
+        self.batches.setHeaderLabels(["When", "What", "Files", "Size", "Status"])
         self.batches.setRootIsDecorated(False)
         self.batches.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.batches.currentItemChanged.connect(self._select)
         self.ops = QTreeWidget()
-        self.ops.setHeaderLabels(["Action", "File", "Now at", "Status"])
+        self.ops.setHeaderLabels(["Action", "File", "Now in", "Status"])
         self.ops.setRootIsDecorated(False)
         for column in (1, 2):
             self.ops.header().setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
@@ -68,31 +69,34 @@ class HistoryPage(Page):
         self.op_next = button("Next steps", on_click=lambda: self._turn_ops(1))
         top, bottom = QWidget(), QWidget()
         top.setLayout(vbox(self.batches, hbox(self.batch_prev, self.batch_note, None, self.batch_next)))
-        bottom.setLayout(vbox(hbox(self.detail, None, self.undo_btn), self.ops,
+        bottom_head = hbox(self.detail, self.undo_btn)
+        bottom_head.setStretch(0, 1)
+        bottom.setLayout(vbox(bottom_head, self.ops,
                               hbox(self.op_prev, self.op_note, None, self.op_next)))
         split = QSplitter(Qt.Orientation.Vertical)
         split.addWidget(top)
         split.addWidget(bottom)
-        self.rec_label = label("Reading available Recovery...", "", wrap=True)
+        self.rec_total = label("…", "tileValue")
+        self.rec_label = label("Checking Recovery…", "muted", wrap=True)
         self.rec_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.root_note = label("", "small", wrap=True)
-        self.root_note.setTextFormat(Qt.TextFormat.PlainText)
-        self.recovery_root = QComboBox()
-        self.recovery_root.currentIndexChanged.connect(self._show_root)
-        self.inspect_rec = button("Inspect accounting", on_click=self._inspect_recovery)
-        self.refresh_rec = button("Refresh accounting", on_click=self.refresh)
-        self.restore_rec = button("Restore all available...", "primary", self.restore_recovery)
-        self.open_rec = button("Open Recovery folder", on_click=self._open_recovery)
-        self.empty_btn = button("Empty Recovery...", "danger", self.empty_recovery)
+        self.rec_notice = label("", "", wrap=True)
+        self.rec_notice.setTextFormat(Qt.TextFormat.PlainText)
+        self.rec_notice.setStyleSheet(f"color: {theme.WARN};")
+        self.rec_notice.hide()
+        self.restore_rec = button("Restore all…", "primary", self.restore_recovery,
+                                  tip="Put removed files back where they came from.")
+        self.empty_btn = button("Empty Recovery…", "danger", self.empty_recovery)
         self.empty_btn.setStyleSheet(
             f"QPushButton#danger:disabled {{ background: {theme.DISABLED_BG}; color: {theme.DISABLED_TEXT}; "
             f"border-color: {theme.BORDER}; }}")
         self.empty_btn.setEnabled(False)
+        self.open_rec = button("Open folder", "link", self._open_recovery)
+        self.details_rec = button("Details", "link", self._recovery_details)
         self.empty_status = label("", "small", wrap=True)
-        self.body.addWidget(Card(vbox(hbox(label("Recovery — all media folders", "h2"), None,
-                                          self.refresh_rec, self.restore_rec, self.empty_btn), self.empty_status, self.rec_label,
-                                     hbox(label("Open / inspect location:", "small"), self.recovery_root, None,
-                                          self.inspect_rec, self.open_rec), self.root_note)))
+        self.body.addWidget(Card(vbox(
+            hbox(vbox(label("Recovery", "h2"), self.rec_total, spacing=2), None, self.restore_rec, self.empty_btn),
+            self.rec_label, self.rec_notice,
+            hbox(self.empty_status, None, self.open_rec, self.details_rec))))
         self.body.addWidget(split, 1)
         self.bg, self.op_bg = LatestCall(self), LatestCall(self)
         self.bg.result.connect(self._show_batches)
@@ -115,26 +119,24 @@ class HistoryPage(Page):
             self.stale = True
         self.undo_btn.setEnabled(self._can_undo and not busy)
         self._empty_control(busy)
-        self.open_rec.setEnabled(not busy and self.recovery_root.count() > 0)
-        self.inspect_rec.setEnabled(not busy and self._accounting_ready)
-        self.refresh_rec.setEnabled(not busy)
+        self.open_rec.setEnabled(not busy and self.lib is not None)
+        self.details_rec.setEnabled(not busy and self._accounting_ready)
         self.restore_rec.setEnabled(not busy and self.lib is not None and self._recovery_count > 0)
 
     def _empty_control(self, busy):
-        self.empty_btn.setEnabled(self.lib is not None and not busy)
+        report = self._accounting if self._accounting_ready else None
+        # Nothing to empty is a quiet, disabled state; unknown or blocked states stay clickable to explain.
+        nothing = report is not None and not report.files and not report.blockers()
+        self.empty_btn.setEnabled(self.lib is not None and not busy and not nothing)
         if self.lib is None:
-            message = "Open a library before reviewing Recovery."
+            message = "Open a library first."
         elif busy:
-            message = ("Empty Recovery is unavailable while library work is active. Finish or cancel the current "
-                       "task first; unfinished rebuilds must be resolved.")
-        elif self._accounting_ready and self._accounting and self._accounting.needs_inspection:
-            message = "Permanent deletion is blocked. Click Empty Recovery to see the specific reasons; nothing will be deleted."
-        elif self._accounting_ready and self._accounting and not self._accounting.files:
-            message = "No Recovery files are currently measured. Clicking Empty Recovery checks again before doing anything."
+            message = "Available when the current task finishes."
         else:
-            message = "Empty Recovery first checks every location, then asks for permanent-deletion acknowledgement if safe."
+            message = ""
         self.empty_status.setText(message)
-        self.empty_btn.setToolTip(message)
+        self.empty_btn.setToolTip(message or ("Recovery is empty." if nothing else
+                                              "Permanently delete everything in Recovery to free up space."))
 
     def refresh(self):
         self._batch_offset = 0
@@ -146,8 +148,8 @@ class HistoryPage(Page):
             return
         self._accounting_ready = False
         self._empty_control(self.busy)
-        self.inspect_rec.setEnabled(False)
-        self.rec_label.setText("Reading Recovery accounting — previous totals are not current...")
+        self.details_rec.setEnabled(False)
+        self.rec_label.setText("Checking Recovery…")
         def work():
             try:
                 accounting = recovery.inspect(lib)
@@ -165,37 +167,18 @@ class HistoryPage(Page):
         self._recovery_count, self._recovery_bytes = data["recovery"]
         self._accounting = report = data["accounting"]
         self._accounting_ready = True
+        self._roots = data["roots"]
         self._offline = sum(not root.online for root in report.roots)
-        latest = report.latest
-        blockers = report.empty_blockers()
-        self.rec_label.setText(
-            f"Cumulative Recovery across all available roots: {fmt_n(report.files, 'measured file')} "
-            f"({fmt_size(report.bytes)} logical bytes). Not just the last cleanup.\n"
-            + (f"Latest cleanup ({fmt_date(latest.created_at, True)}): {fmt_size(latest.moved_bytes)} recorded as moved; "
-               f"{fmt_size(latest.bytes)} still in Recovery."
-               + (f" Planned/recorded: {fmt_size(latest.recorded_bytes)}."
-                  if latest.recorded_bytes != latest.moved_bytes else "") + "\n"
-               if latest else "No recorded cleanup. Any contents below are accounted independently of the journal.\n")
-            + f"Older cleanups still retained: {fmt_size(report.older_bytes)}. "
-            f"Other journaled contents: {fmt_size(report.other_bytes)}. "
-            f"Untracked / ambiguously matched: {fmt_n(report.untracked_files, 'file')} "
-            f"({fmt_size(report.untracked_bytes)}).\n"
-            + ("INCOMPLETE — totals are measured lower bounds, not empty-storage confirmation. "
-               f"{self._offline} root(s) offline; unreadable items / skipped links are not included. "
-               if not report.complete else "")
-            + ("Inspection needed: " + " ".join(blockers[:2])
-               + (" Additional reasons are available by clicking Empty Recovery." if len(blockers) > 2 else "")
-               + " Permanent deletion remains blocked. " if report.needs_inspection else "")
-            + (f"{report.interrupted_ops} interrupted journal step(s). " if report.interrupted_ops else "")
-            + (f"{report.pending_merges} organisation merge(s) pending. " if report.pending_merges else "")
-            + "Moving here frees no disk space. Logical bytes are not allocated disk space. "
-            "Empty Recovery permanently deletes across ALL registered media folders.")
-        self.rec_label.setToolTip(latest.title if latest else "")
-        selected_root = self.recovery_root.currentData()
-        self.recovery_root.clear()
-        for root in data["roots"]:
-            self.recovery_root.addItem(root["label"] + ("" if root["online"] else " (offline)"), root["id"])
-        self.recovery_root.setCurrentIndex(max(0, self.recovery_root.findData(selected_root)))
+        self.rec_total.setText(f"{fmt_n(report.files, 'file')} · {fmt_size(report.bytes)}"
+                               if report.files else "Empty")
+        self.rec_label.setText("Files you remove wait here until you restore them or empty Recovery."
+                               if report.files else "Files you remove with Memoria will wait here, ready to restore.")
+        notices = list(report.blockers())
+        if report.review_files and not notices:
+            notices.append(f"{fmt_n(report.review_files, 'file')} here didn't come from a Memoria cleanup. "
+                           "You'll be asked before it's deleted.")
+        self.rec_notice.setText("\n".join(notices))
+        self.rec_notice.setVisible(bool(notices))
         current = self.batches.currentItem()
         selected = current.data(0, Qt.ItemDataRole.UserRole)["id"] if current else None
         newest = data["batches"][0]["id"] if data["batches"] else None
@@ -226,41 +209,53 @@ class HistoryPage(Page):
         self._select(selected_item, None)
         self.on_busy_changed(self.busy)
 
-    def _show_root(self, *_):
-        root = self._selected_root()
-        if root is None:
-            self.root_note.setText("")
+    def _recovery_details(self):
+        report = self._accounting
+        if report is None:
             return
-        self.root_note.setText(
-            f"This location: {fmt_n(root.files, 'measured file')} / {fmt_size(root.bytes)} logical bytes; "
-            f"untracked {fmt_n(root.untracked_files, 'file')} / {fmt_size(root.untracked_bytes)}. "
-            + ("Offline / unavailable. " if not root.online else "Incomplete scan. " if not root.complete else "")
-            + "Picker only changes Open / Inspect, NOT totals, Restore all or Empty Recovery scope.")
-
-    def _selected_root(self):
-        return next((root for root in self._accounting.roots
-                     if root.id == self.recovery_root.currentData()), None) if self._accounting else None
-
-    def _inspect_recovery(self):
-        root = self._selected_root()
-        if root is None:
-            return
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Recovery accounting — local inspection")
+        dialog = Dialog(self)
+        dialog.setWindowTitle("Recovery details")
         text = QPlainTextEdit()
         text.setReadOnly(True)
-        text.setPlainText(
-            f"Location: {root.label}\n{root.path}\n\n"
-            f"Measured: {root.files:,} files / {root.bytes:,} logical bytes\n"
-            f"Untracked / ambiguous: {root.untracked_files:,} files / {root.untracked_bytes:,} bytes\n"
-            f"Online: {root.online}; complete scan: {root.complete}\n"
-            f"Skipped links / junctions: {root.skipped_links:,}; read errors: {root.errors:,}\n\n"
-            f"Up to {recovery.SAMPLE_LIMIT} local inspection examples (not an exhaustive file list):\n"
-            + ("\n".join(root.samples) if root.samples else "No exceptional items observed at this location.")
-            + "\n\nOpen the existing Recovery folder to inspect the full contents locally. "
-            "No filenames need to be uploaded. Interrupted / holding files are left untouched. "
-            "Size checks cannot detect same-size content changes. Refresh after operations finish.")
-        dialog.setLayout(vbox(text, hbox(None, button("Close", on_click=dialog.accept))))
+        where = QComboBox()
+        for root in report.roots:
+            where.addItem(root.label + ("" if root.online else " (disconnected)"), root.id)
+        latest = report.latest
+
+        def show(*_):
+            root = next((r for r in report.roots if r.id == where.currentData()), None)
+            lines = [f"All media folders: {fmt_n(report.files, 'file')} · {fmt_size(report.bytes)}"]
+            if latest:
+                lines.append(f"Latest cleanup ({fmt_date(latest.created_at, True)}): {fmt_size(latest.bytes)}")
+                lines.append(f"Earlier cleanups: {fmt_size(report.older_bytes)}")
+            if report.other_bytes:
+                lines.append(f"Other changes: {fmt_size(report.other_bytes)}")
+            if report.review_files:
+                lines.append(f"Didn't come from a Memoria cleanup: {fmt_n(report.review_files, 'file')} "
+                             f"· {fmt_size(report.review_bytes)}")
+            if report.legacy_metadata_files:
+                lines.append(f"Old Memoria session files: {report.legacy_metadata_files:,}")
+            if report.missing_files:
+                lines.append(f"Already gone from Recovery: {fmt_n(report.missing_files, 'file')}")
+            lines += [f"• {reason}" for reason in report.blockers()]
+            if root is not None:
+                lines += ["", f"{root.label}: {root.path}",
+                          "Disconnected." if not root.online else
+                          f"{fmt_n(root.files, 'file')} · {fmt_size(root.bytes)}"
+                          + (f" · {root.skipped_links:,} shortcut(s) skipped" if root.skipped_links else "")
+                          + (f" · {root.errors:,} item(s) couldn't be read" if root.errors else "")]
+                if root.samples:
+                    lines += ["", "Worth a look:"] + root.samples
+            text.setPlainText("\n".join(lines))
+
+        def open_folder():
+            dialog.accept()
+            self._open_recovery(where.currentData())
+        where.currentIndexChanged.connect(show)
+        show()
+        dialog.setLayout(vbox(hbox(label("Location:"), where, None), text,
+                              hbox(button("Open this folder", on_click=open_folder), None,
+                                   button("Close", "primary", dialog.accept)), margins=(18, 18, 18, 18)))
         dialog.resize(780, 480)
         dialog.exec()
 
@@ -270,6 +265,9 @@ class HistoryPage(Page):
         if current is None or self.lib is None:
             self.ops.clear()
             self.detail.setText("No changes yet.")
+            self.op_note.setText("")
+            self.op_prev.setEnabled(False)
+            self.op_next.setEnabled(False)
             return
         if current is not previous:
             self._op_offset = 0
@@ -313,21 +311,16 @@ class HistoryPage(Page):
             self.ops.addTopLevelItem(item)
         self._op_count = data["count"]
         self._can_undo = data["done"] > 0 and data["batch"]["status"] != "emptied" and not imported
-        self.undo_btn.setToolTip("Use Restore all available to finish this restoration with conflict choices."
-                                if imported else "")
+        self.undo_btn.setToolTip("Use Restore all to finish this restore." if imported else "")
         accounting = self._accounting.batches.get(data["batch"]["id"]) if self._accounting else None
-        self.detail.setText(f"{KIND.get(data['batch']['kind'], data['batch']['kind'])} - "
-                            f"{fmt_n(self._op_count, 'step')}. Undo applies to the whole change."
-                            + (" Some Recovery files were permanently deleted." if data["purged"] else "")
-                            + (f"\nThis change: {fmt_size(accounting.recorded_bytes)} cleanup bytes recorded; "
-                               f"{fmt_n(accounting.files, 'file')} / {fmt_size(accounting.bytes)} still measured "
-                               f"in Recovery. Missing: {accounting.missing_files} "
-                               f"({fmt_size(accounting.missing_bytes)} recorded); size/type changed: "
-                               f"{accounting.changed_files}; unknown: {accounting.uncertain_files}; "
-                               f"unexpected state: {accounting.unexpected_files}."
-                               if accounting else "\nNo Recovery destinations recorded for this change.")
-                            + (" Recovery accounting is incomplete." if self._accounting and not self._accounting.complete
-                               else ""))
+        parts = [KIND.get(data['batch']['kind'], data['batch']['kind']), fmt_n(self._op_count, 'step')]
+        if accounting and accounting.files:
+            parts.append(f"{fmt_n(accounting.files, 'file')} ({fmt_size(accounting.bytes)}) still in Recovery")
+        if accounting and accounting.missing_files:
+            parts.append(f"{fmt_n(accounting.missing_files, 'file')} already gone from Recovery")
+        if data["purged"]:
+            parts.append("Recovery for this change was emptied")
+        self.detail.setText(" · ".join(parts))
         self.op_note.setText(f"Steps {self._op_offset + 1 if self._op_count else 0}-"
                             f"{self._op_offset + len(data['ops'])} of {self._op_count:,}")
         self.op_prev.setEnabled(self._op_offset > 0)
@@ -349,7 +342,7 @@ class HistoryPage(Page):
         for source, folder in self.lib.recovery_folders():
             if folder in p.parents:
                 relative = p.relative_to(folder)
-                return f"Recovery (folder {source}) - " + str(Path(*relative.parts[1:]))
+                return "Recovery › " + str(Path(*relative.parts[1:]))
         try:
             return self.lib.display_path(self.lib.rel(p, resolve=False))
         except ValueError:
@@ -362,39 +355,54 @@ class HistoryPage(Page):
                 show_in_explorer(path)
                 return
 
-    def _open_recovery(self):
-        source, lib = self.recovery_root.currentData(), self.lib
-        if source is None or self.busy:
+    def _open_recovery(self, source=None):
+        lib = self.lib
+        if lib is None or self.busy:
             return
+        if source is None:
+            # The library's own Recovery first, then any connected folder that has one.
+            sources = [root.id for root in self._accounting.roots if root.online and root.files] \
+                if self._accounting else []
+            source = 1 if not sources or 1 in sources else sources[0]
         def work(progress):
             progress.check()
-            return recovery.inspection_path(lib, source)
-        self.run("Opening Recovery folder", work, open_path, notify_success=False)
+            try:
+                return recovery.inspection_path(lib, source)
+            except ValueError as error:
+                return str(error)
+        def opened(path):
+            if isinstance(path, str):
+                self.ctx.toast_requested.emit("Recovery is empty — there's no folder to open yet."
+                                              if "No Recovery folder" in path else path, "")
+            else:
+                open_path(path)
+        self.run("Opening Recovery folder", work, opened, notify_success=False)
 
     def undo(self):
         current = self.batches.currentItem()
         if current is None or not self._can_undo:
             return
         batch = current.data(0, Qt.ItemDataRole.UserRole)
-        dialog = ConfirmDialog(self, "Undo this change?", f"{batch['title']} will be reversed.",
-                               ["This applies to the whole change, including steps on other pages.",
-                                "Reconnect affected media folders first. Changed generated copies are left alone."], "Undo")
+        dialog = ConfirmDialog(self, "Undo this change?", f"“{batch['title']}” will be reversed.",
+                               ["Everything in this change is undone together.",
+                                "Copies you've changed since are left as they are."], "Undo")
         if dialog.exec():
             self.window().undo_batch(batch["id"])
 
     def empty_recovery(self):
         if self.busy or self.lib is None:
-            self.ctx.toast_requested.emit("Finish the current library task or rebuild before emptying Recovery.", "")
+            self.ctx.toast_requested.emit("Empty Recovery is available when the current task finishes.", "")
             return
         lib = self.lib
-        def done(count):
+        def done(result):
+            count, size = result
             self.ctx.library_modified.emit()
-            self.ctx.toast_requested.emit(f"Recovery emptied: {fmt_n(count, 'file')} deleted.", "")
+            self.ctx.toast_requested.emit(f"Recovery emptied — {fmt_size(size)} freed.", "")
             self.ctx.notification_requested.emit("operation_complete", count)
-        def inspect(progress):
+        def prepare(progress):
             try:
-                progress.update(0, 0, "Checking Recovery before permanent deletion...", force=True)
-                report = recovery.inspect(lib)
+                progress.update(0, 0, "Getting Recovery ready…", force=True)
+                report = recovery.prepare_to_empty(lib)
                 progress.check()
                 return report
             finally:
@@ -402,42 +410,43 @@ class HistoryPage(Page):
         def review(report):
             if self._closed or self.lib is not lib:
                 return
-            if not report.safe_to_empty:
-                blockers = report.empty_blockers()
-                title = "Recovery needs attention before emptying" if blockers else "Recovery is empty"
-                message = ("Nothing was deleted. Permanent deletion is blocked for the reasons below."
-                           if blockers else "No Recovery files were found. Nothing was deleted.")
-                self.empty_status.setText(message)
-                MessageDialog(self, title, message, "\n\n".join(blockers) +
-                              ("\n\nCounts can overlap. Done/Restored labels describe past operations, not a guarantee "
-                               "that current Recovery contents match History. Inspect accounting shows local examples. "
-                               "Restoring files is different from permanently emptying Recovery."
-                               if blockers else "")).exec()
+            self.ctx.library_modified.emit()
+            if not report.files and not report.blockers():
+                self.ctx.toast_requested.emit("Recovery is already empty.", "")
                 return
-            expected = (report.files, report.bytes)
+            if not report.can_empty:
+                MessageDialog(self, "Can't empty Recovery yet",
+                              "\n\n".join(report.blockers()) + "\n\nNothing was deleted.").exec()
+                return
+            expected = (report.files, report.bytes, report.review_files)
+            details = []
+            if report.review_files:
+                details.append(f"<b>{fmt_n(report.review_files, 'file')} ({fmt_size(report.review_bytes)}) didn't "
+                               "come from a Memoria cleanup.</b> To keep anything, cancel and use Restore all.")
+            if sum(root.online for root in report.roots) > 1:
+                details.append("Includes Recovery on all your media folders.")
             dialog = ConfirmDialog(
-                self, "Permanently delete files in Recovery?",
-                f"{fmt_n(report.files, 'file')} ({fmt_size(report.bytes)} logical bytes) will be deleted forever.",
-                ["This deletes Recovery on all registered media folders.",
-                 "Deleted Recovery files can no longer be restored. Cancelling leaves everything in place."],
-                "Delete permanently", danger=True, require_ack="I understand these files cannot be recovered", note=None)
+                self, "Empty Recovery?",
+                f"{fmt_n(report.files, 'file')} ({fmt_size(report.bytes)}) will be deleted forever "
+                "to free up space.",
+                details, "Delete forever", danger=True, require_ack="I understand this can't be undone", note=None)
             accepted = dialog.exec() == dialog.DialogCode.Accepted and dialog.ack.isChecked()
             dialog.deleteLater()
             if not accepted:
-                self.ctx.toast_requested.emit("Nothing was deleted from Recovery.", "")
+                self.ctx.toast_requested.emit("Nothing was deleted.", "")
                 return
             def work(progress):
                 try:
                     progress.check()
                     current = recovery.inspect(lib)
-                    if not current.safe_to_empty or (current.files, current.bytes) != expected:
-                        raise ValueError("Recovery changed or needs inspection. Nothing was deleted. "
-                                         "Check accounting and review the new result before emptying.")
-                    return actions.empty_recovery(lib, progress=progress)
+                    if not current.can_empty or (current.files, current.bytes, current.review_files) != expected:
+                        raise ValueError("Recovery changed while you were deciding, so nothing was deleted. "
+                                         "Click Empty Recovery again to see the latest.")
+                    return actions.empty_recovery(lib, progress=progress), current.bytes
                 finally:
                     lib.close_thread()
             self.run("Emptying Recovery", work, done, notify_success=False)
-        self.run("Checking Recovery for emptying", inspect, review, notify_success=False)
+        self.run("Getting Recovery ready", prepare, review, notify_success=False)
 
     def restore_recovery(self):
         if self.busy or self.lib is None:
@@ -450,7 +459,7 @@ class HistoryPage(Page):
                 return
             plan = dialog.selected_plan()
         except ValueError as error:
-            MessageDialog(self, "Review Recovery destinations", str(error)).exec()
+            MessageDialog(self, "Can't restore yet", str(error)).exec()
             return
         finally:
             dialog.shutdown()
@@ -460,8 +469,13 @@ class HistoryPage(Page):
         self._restore_conflicts = controller
         def work(progress):
             try:
-                return recovery_restore.execute(lib, plan, progress,
-                                                lambda conflict: controller.resolve(conflict, progress))
+                result = recovery_restore.execute(lib, plan, progress,
+                                                  lambda conflict: controller.resolve(conflict, progress))
+                try:
+                    recovery.tidy(lib)
+                except Exception:
+                    pass  # Self-cleaning is best effort.
+                return result
             finally:
                 lib.close_thread()
         def done(result):
@@ -469,17 +483,21 @@ class HistoryPage(Page):
             controller.deleteLater()
             self._restore_conflicts = None
             self.ctx.library_modified.emit()
-            message = (f"Restored {fmt_n(result.restored, 'file')} ({fmt_size(result.bytes)}). "
-                       f"{result.skipped} skipped; {result.failed} failed. Remaining files were not emptied.")
+            message = f"Restored {fmt_n(result.restored, 'file')} ({fmt_size(result.bytes)})."
+            if result.skipped:
+                message += f" {fmt_n(result.skipped, 'file')} left in Recovery."
+            if result.failed:
+                message += f" {fmt_n(result.failed, 'file')} couldn't be restored."
             if result.cancelled:
-                message = "Restoration stopped. " + message
+                message = "Restoring stopped. " + message
             self.ctx.toast_requested.emit(message, "")
             self.ctx.notification_requested.emit("operation_partial" if result.skipped or result.failed else
                                                  "task_cancelled" if result.cancelled else "operation_complete",
                                                  result.skipped + result.failed if result.skipped or result.failed
                                                  else 0 if result.cancelled else result.restored)
-            if result.skipped or result.failed or result.messages:
-                MessageDialog(self, "Recovery restoration results", message,
+            if result.failed:
+                MessageDialog(self, "Some files couldn't be restored",
+                              message + " They're still safe in Recovery.",
                               "\n".join(result.messages[:200])).exec()
         if not self.run("Restoring Recovery", work, done, notify_success=False):
             controller.shutdown()

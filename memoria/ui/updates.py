@@ -8,6 +8,7 @@ from datetime import datetime
 from PySide6.QtCore import QObject, QSettings, QTimer, Qt, Signal
 from PySide6.QtWidgets import QCheckBox, QDialog, QPlainTextEdit
 
+from .motion import Dialog
 from ..engine import app_updates
 from .tasks import LatestCall
 from .widgets import ConfirmDialog, button, hbox, label, vbox
@@ -186,7 +187,7 @@ class UpdateController(QObject):
                 self.window.ctx.toast_requested.emit(f"Could not cancel the update helper: {error}", "")
 
 
-class UpdatesDialog(QDialog):
+class UpdatesDialog(Dialog):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller

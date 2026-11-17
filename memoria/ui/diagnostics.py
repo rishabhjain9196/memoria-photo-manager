@@ -6,6 +6,7 @@ import uuid
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot, Qt
 from PySide6.QtWidgets import QCheckBox, QDialog, QPlainTextEdit
 
+from .motion import Dialog
 from ..engine import diagnostics
 from .widgets import button, hbox, label, show_in_explorer, vbox
 
@@ -191,7 +192,7 @@ class DiagnosticsController(QObject):
         return None
 
 
-class DiagnosticsDialog(QDialog):
+class DiagnosticsDialog(Dialog):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller

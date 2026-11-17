@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QF
                                QLabel, QListWidget, QListWidgetItem, QPushButton, QScrollArea, QSlider, QSpinBox,
                                QSplitter, QWidget)
 
+from ..motion import Dialog
 from ...engine import actions, config
 from .. import theme
 from ..cropcanvas import CropCanvas, flip_crop, rotate_crop
@@ -84,7 +85,7 @@ class Slider(QWidget):
         self._show(self.s.value())
 
 
-class LibraryPicker(QDialog):
+class LibraryPicker(Dialog):
     """Pick photos/videos from the library to add to the editor."""
 
     def __init__(self, parent, ctx):

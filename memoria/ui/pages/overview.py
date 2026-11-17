@@ -73,8 +73,7 @@ class OverviewPage(Page):
 
     def _insights_failed(self, error):
         self.updating.setText("")
-        self.trust.setText("Recovery accounting is unavailable — storage is not confirmed empty. "
-                           "Open History & recovery to inspect available roots and retry.")
+        self.trust.setText("Couldn't check Recovery right now. Open History &amp; recovery to try again.")
 
     def on_busy_changed(self, busy: bool) -> None:
         self.rescan_btn.setEnabled(not busy)
@@ -121,22 +120,12 @@ class OverviewPage(Page):
     def _insights(self, d: dict) -> None:
         self.updating.setText("")
         rf, rs = d["recovery"]
-        report = d["recovery_accounting"]
         self.trust.setText(
-            f"<b>Recovery is not a backup.</b> Cumulative Recovery across all available roots: "
-            f"{fmt_n(rf, 'measured file')} ({fmt_size(rs)} logical bytes), not just the last cleanup. "
-            + (f"Latest cleanup: {fmt_size(report.latest.moved_bytes)} recorded as moved; "
-               f"{fmt_size(report.latest.bytes)} still measured in Recovery. " if report.latest else "")
-            + (f"Older cleanups retained: {fmt_size(report.older_bytes)}. " if report.latest else "")
-            + (f"Other journaled contents: {fmt_size(report.other_bytes)}. " if report.other_bytes else "")
-            + (f"Untracked / ambiguous: {fmt_n(report.untracked_files, 'file')} "
-               f"({fmt_size(report.untracked_bytes)}). " if report.untracked_files else "")
-            + (f"{d['offline_roots']} media folder(s) offline; their Recovery is not included. " if d["offline_roots"] else "")
-            + ("INCOMPLETE: measured lower bounds only; unreadable items / skipped links are excluded. "
-               if not report.complete else "")
-            + ("Inspection needed. " if report.needs_inspection else "")
-            + "See History & recovery for the per-cleanup and per-root breakdown. "
-            "Moving to Recovery frees no disk space; logical bytes are not disk allocation. Keep a separate backup.")
+            (f"<b>Recovery</b> holds {fmt_n(rf, 'file')} ({fmt_size(rs)}) you removed, ready to restore. "
+             "Empty it in History &amp; recovery to free up space. " if rf else
+             "<b>Recovery</b> is empty. Files you remove wait there, ready to restore. ")
+            + (f"{fmt_n(d['offline_roots'], 'media folder')} disconnected — not included. " if d["offline_roots"] else "")
+            + "Recovery isn't a backup, so keep one separately.")
         if d["dup_groups"] is not None:
             n = d["dup_copies"]
             nf = d["dup_folders"]

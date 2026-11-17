@@ -145,7 +145,7 @@ def _wait_preview(app, dialog):
 
 
 @pytest.mark.parametrize("container", ["20261110-120000-abcdef", "session_20260609_014409"])
-def test_unlogged_restore_preview_requires_acknowledgement_and_does_not_move_files(tmp_path, container):
+def test_unlogged_restore_preview_is_ready_to_restore_without_moving_files(tmp_path, container):
     from memoria.engine.db import Library
     from memoria.ui.recovery_restore import RestoreDialog
     from memoria.ui.tasks import TaskRunner
@@ -164,11 +164,8 @@ def test_unlogged_restore_preview_requires_acknowledgement_and_does_not_move_fil
         assert dialog.plan is not None
         item = next(item for item in dialog.plan.items if item.source == source)
         assert item.target == lib.root / "Trip" / "photo.jpg" and item.provenance == "inferred"
-        assert dialog.ack.isVisible() and not dialog.go_btn.isEnabled()
-        with pytest.raises(ValueError, match="Acknowledge"):
-            dialog.selected_plan()
-        dialog.ack.setChecked(True)
-        assert dialog.go_btn.isEnabled()
+        assert dialog.go_btn.isEnabled() and dialog.go_btn.text() == "Restore 1 file"
+        assert dialog.tree.topLevelItem(0).text(3) == "Matched by folder"
         assert len(dialog.selected_plan().items) == 1
         if os.environ.get("MEMORIA_SHOT_LABEL"):
             for index in range(dialog.tree.topLevelItemCount()):
@@ -216,8 +213,6 @@ def test_ambiguous_recovery_group_can_be_mapped_explicitly_before_confirmation(t
         _wait_preview(app, dialog)
         mapped = next(item for item in dialog.plan.items if item.source == source)
         assert mapped.target == target_folder / "photo.jpg" and mapped.provenance == "manual"
-        assert not dialog.go_btn.isEnabled()
-        dialog.ack.setChecked(True)
         assert dialog.go_btn.isEnabled()
         assert source.read_bytes() == b"Unknown origin" and not mapped.target.exists()
     finally:
@@ -265,7 +260,6 @@ def test_history_restore_button_restores_logged_and_unlogged_files_with_folder_c
         def exec(self):
             self.show()
             _wait_preview(app, self)
-            self.ack.setChecked(True)
             assert self.go_btn.isEnabled()
             self.go_btn.click()
             return self.result()

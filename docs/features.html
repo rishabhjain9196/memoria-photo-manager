@@ -74,9 +74,9 @@
 <figure><img src="images/welcome.png" alt="Welcome screen"><figcaption>The welcome screen explains the safety promises
 before you choose a folder.</figcaption></figure>
 <p>Memoria remembers the last library and page and reopens them next time. Recent libraries are listed on the welcome
-screen; use <b>Change library…</b> in the sidebar to switch.</p>
+screen; use <b>Library ▸ Change library…</b> in the sidebar to switch.</p>
 <h3>Check, pull and restart</h3>
-<p>Open <b>Updates...</b> from the sidebar. <b>Check for updates</b> checks the configured Git upstream without
+<p>Open <b>Settings ▸ Updates...</b> at the bottom of the sidebar. <b>Check for updates</b> checks the configured Git upstream without
 changing application files. The optional <b>Automatically check for updates when Memoria opens</b> setting
 defaults off and only checks; it never installs without your action.</p>
 <p>When an update is available, finish/cancel active library work, choose <b>Pull and restart</b>, and confirm.
@@ -89,7 +89,7 @@ be resolved manually; the updater does not discard or stash anything. Update che
 need network access, but do not upload photos or library metadata and do not reset your catalogue.</p>
 <figure><img src="images/application-updates.png" alt="Application updates with opt-in startup checks and pull/restart"><figcaption>Manual or opt-in startup checks; installation is a separate confirmed action and waits for active work.</figcaption></figure>
 <h3>One library, multiple folders</h3>
-<p>Use <b>Library folders...</b> to add other media folders or drives without copying their originals.
+<p>Use <b>Library ▸ Library folders...</b> to add other media folders or drives without copying their originals.
 The current folder remains the catalogue home and must stay connected. Added folders can be offline: cached
 metadata, organisation and thumbnails remain available. Filters offer root and online/offline selections.</p>
 <p><b>Reconnect selected...</b> verifies the source identity stored in its hidden <code>.memoria</code> folder.
@@ -683,40 +683,26 @@ results are not presented as a complete backup inventory.</p>
       emptied). Select one to see each step — what moved, from where, to where.</li>
   <li><b>Undo this change</b> puts files back where they were. If a file with that name has appeared in the meantime, the
       restored file gets a new name. Copies are removed only if unchanged.</li>
-  <li><b>Cumulative Recovery</b> is the total measured across available folders, not the last cleanup. The latest
-      cleanup's recorded movement and bytes still retained are separate from older cleanups and untracked contents.</li>
-  <li>Select a history change to see its own remaining Recovery files/bytes. <b>Refresh accounting</b> rechecks
-      storage; <b>Inspect accounting</b> explains the selected location and exceptional entries locally.
-      The location picker changes Open/Inspect only, not the all-roots totals or permanent-emptying scope.</li>
-  <li>Sizes are logical bytes, not allocated disk space or space freed. Links/junctions are not followed.
-      Offline/unreadable paths make totals incomplete rather than falsely empty. Untracked, changed, missing or
-      interrupted entries require inspection and prevent permanent deletion.</li>
-  <li><b>Empty Recovery...</b> first performs a fresh check. If blocked, it shows the actual reasons and counts:
-      untracked files, missing/changed entries, unavailable locations, interrupted work or pending metadata merges.
-      Done/Restored labels describe past operations, not a guarantee of matching current contents. Clicking this
-      review action does not itself delete anything. During active library work it is greyed out with an explanation.</li>
-  <li><b>Open Recovery folder</b> opens an existing, verified location in Explorer; inspection never creates one.</li>
-  <li><b>Restore all available...</b> previews destinations before moving files back. It supports both original
-      logged paths and explicitly reviewed inferred destinations for unlogged files. Ambiguous groups need a manually
-      chosen destination; unresolved/offline/unreadable items remain in Recovery.</li>
-  <li><b>Restore conflicts:</b> choose Keep both (numbered restored names), Leave in Recovery, or Cancel restoration.
-      The popup can reuse a choice for this destination folder's remaining conflicts or all remaining conflicts in
-      this restoration. Existing files are never overwritten; these choices are not persisted to later runs.</li>
-  <li><b>Empty Recovery…</b> permanently deletes the originals held there after acknowledgement. Those deletions cannot be
-      undone. Recovery is checked again after acknowledgement; changed or unsafe contents stop deletion.
-      Undo can separately remove unchanged generated copies. Deletion failures are reported, not silently counted as success.</li>
+  <li><b>Recovery</b> shows one total, such as <i>25,047 files · 141.6 GB</i>: everything you removed that is waiting
+      to be restored or emptied. A warning line appears only when something needs you.</li>
+  <li><b>Restore all...</b> puts files back where they came from. Files without a record are matched by folder layout;
+      if the original location is unknown, select it and use <b>Choose folder...</b>. Nothing is ever overwritten.</li>
+  <li><b>Name clashes:</b> choose <b>Keep both</b> (adds a number), <b>Skip</b> (stays in Recovery) or
+      <b>Stop restoring</b>, for just this file, everything in its folder, or everything else.</li>
+  <li><b>Empty Recovery...</b> fixes what it safely can first: it finishes interrupted changes and cleans up empty
+      folders and old session leftovers. Then it asks once, showing how much space will be freed. Files that didn't
+      come from a Memoria cleanup are called out in the same dialog; cancel and use Restore all to keep them.</li>
+  <li>Emptying waits only when it must: a media folder is disconnected, something in Recovery can't be read (such as a
+      shortcut or locked file), or an earlier change can't finish yet. The message says exactly what to do.
+      Recovery is checked again after you confirm, so nothing changed in the meantime is deleted.</li>
+  <li><b>Open folder</b> and <b>Details</b> are optional. Details shows totals per cleanup and per media folder, plus
+      anything worth a look.</li>
 </ul>
-<figure><img src="images/empty-recovery-blocked.png" alt="Exact reason and count preventing permanent Recovery deletion"><figcaption>A blocked review explains what needs attention without deleting anything.</figcaption></figure>
-<p>Restoration is not permanent cleanup: it does not empty Recovery or delete unrelated exports. Preview and
-acknowledge inferred paths when original logs are unavailable; absent historical metadata cannot be reconstructed
-just from filenames. Cancelled or partial work is reported, and remaining files are left intact. After restoring,
-run duplicate finding again to review the library afresh.</p>
-<p>Automatic inference recognises both current <code>YYYYMMDD-HHMMSS-xxxxxx</code> batch folders and older
-<code>session_YYYYMMDD_HHMMSS</code> folders. Everything after that container is preserved beneath the source
-root, including nested <code>_Incoming\Pictures\...</code> paths. The preview still labels these destinations
-inferred and requires acknowledgement; malformed dates/times or unfamiliar layouts require a chosen destination.</p>
-<figure><img src="images/recovery-restore-preview.png" alt="Review inferred Recovery restore destinations"><figcaption>Unlogged destinations are labelled and acknowledged before any files move. Unknown layouts need an explicitly chosen folder.</figcaption></figure>
-<figure><img src="images/recovery-restore-conflict.png" alt="Choose a restore conflict policy for one file, this folder or all remaining conflicts"><figcaption>Keep both, leave in Recovery or cancel. Reuse a safe choice per destination folder or for the remaining restoration.</figcaption></figure>
+<p>Memoria self-cleans Recovery when a library opens and after restoring. Photos, unknown files and links are never
+removed automatically. Older <code>session_YYYYMMDD_HHMMSS</code> folders restore beneath their media folder,
+including nested paths, and a session's own <code>manifest.json</code> is never restored.</p>
+<figure><img src="images/recovery-restore-preview.png" alt="Review inferred Recovery restore destinations"><figcaption>Each file shows where it goes back to and how that was decided.</figcaption></figure>
+<figure><img src="images/recovery-restore-conflict.png" alt="Choose a restore conflict policy for one file, this folder or all remaining conflicts"><figcaption>Keep both, skip or stop, for one file, its folder or everything.</figcaption></figure>
 <figure><img src="images/history.png" alt="History and recovery"><figcaption>Every step of a change is listed with its
 current location.</figcaption></figure>
 <div class="callout warn">If Memoria is closed unexpectedly (crash or power cut) during a change, the next time you open the
@@ -725,7 +711,7 @@ library it checks which steps finished and records them in History, so the chang
 
 <section id="reset">
 <h2>Storage &amp; reset</h2>
-<p>Open it below the library name in the sidebar. For normal new/changed files, try F5 first.</p>
+<p>Open it from <b>Library ▸ Storage &amp; reset</b> below the library name in the sidebar. For normal new/changed files, try F5 first.</p>
 <ul>
   <li><b>Safe rebuild (soft):</b> clear thumbnails, file analysis and similar-video caches, then re-index originals
       in place. Albums, people/corrections, health fingerprints, missing records and duplicate keep choices remain.</li>
@@ -758,7 +744,7 @@ not normal Undo. One main task runs at a time to avoid conflicting file operatio
 
 <section id="diagnostics">
 <h2>Local diagnostics</h2>
-<p>Open <b>Diagnostics</b> in the sidebar and opt in for this library on this device. Existing scanned/cached
+<p>Open <b>Settings ▸ Diagnostics</b> in the sidebar and opt in for this library on this device. Existing scanned/cached
 metadata works immediately; no media rescan or reset is required. Previous timings cannot be recreated, but future
 tasks, browsing and previews are measured, including a task running when you enable recording.</p>
 <p>When using a source checkout, reports update under <code>diagnostics\reports\report-&lt;random&gt;.json</code> after
@@ -802,7 +788,7 @@ Offscreen automated tests verify routing with a fake tray, not actual Windows po
 
 <section id="themes">
 <h2>Themes</h2>
-<p>Choose <b>Match Windows</b>, <b>Light</b> or <b>Dark</b> at the bottom of the sidebar. Match Windows follows your
+<p>Choose <b>Settings ▸ Appearance</b>: <b>Match Windows</b>, <b>Light</b> or <b>Dark</b>. Pages, dialogs and notifications use short (about 150 ms) transitions; tick <b>Settings ▸ Reduce motion</b>, or turn off Windows animation effects, to switch them off. Match Windows follows your
 Windows setting and switches automatically when it changes. Memoria keeps your library and page open when the theme
 changes.</p>
 <figure><img src="images/dark-similar.png" alt="Dark theme"><figcaption>Dark theme.</figcaption></figure>
@@ -886,7 +872,7 @@ for you — try the "Only very blurry" sensitivity.</p>
 Memoria is scanning it, the scan stops rather than treating inaccessible entries as deleted. Reconnect and press F5;
 check History for completed steps if the interruption happened during a file operation.</p>
 <h4>Can one library contain multiple independent folders or drives?</h4>
-<p>Yes: use <b>Library folders...</b>. The catalogue home stays available, while added roots may be disconnected.
+<p>Yes: use <b>Library ▸ Library folders...</b>. The catalogue home stays available, while added roots may be disconnected.
 Their cached entries are retained, not treated as deleted. Reconnect verifies the source identity before scanning
 or changing its originals. This does not merge separate existing catalogues.</p>
 <h4>Why does it say the library is already open?</h4>

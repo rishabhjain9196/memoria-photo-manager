@@ -8,6 +8,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QHeaderView, QMenu,
                                QStyle, QSystemTrayIcon, QTreeWidget, QTreeWidgetItem)
 
+from .motion import Dialog
 from .widgets import button, hbox, label, vbox
 
 MODES = {"background": "Desktop only when Memoria is in the background",
@@ -146,7 +147,7 @@ class NotificationManager(QObject):
             self.tray.hide()
 
 
-class NotificationsDialog(QDialog):
+class NotificationsDialog(Dialog):
     def __init__(self, parent, manager):
         super().__init__(parent)
         self.manager = manager

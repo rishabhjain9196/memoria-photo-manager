@@ -26,8 +26,8 @@ from .db import LibraryUnavailable
 from .progress import Cancelled, Progress
 
 _BATCH = re.compile(r"\d{8}-\d{6}-[0-9a-f]{6}")
-_LEGACY_SESSION = re.compile(r"session_(\d{8}_\d{6})", re.IGNORECASE)
-_MAPPING = "Original location unknown; choose a destination folder for this group."
+_LINKED = "Part of a group that can't be restored yet, so it stays in Recovery."
+_MAPPING = "Original location unknown. Select it, then Choose folder…"
 
 
 @dataclass
@@ -149,12 +149,10 @@ def _layout(root_id: int, relative: Path):
     parts = relative.parts
     group = f"{root_id}:{parts[0]}" if len(parts) > 1 else f"{root_id}:<Recovery root>"
     inside = Path(*parts[1:]) if len(parts) > 1 else relative
-    legacy = _LEGACY_SESSION.fullmatch(parts[0]) if len(parts) > 1 else None
-    known = len(parts) > 1 and (_BATCH.fullmatch(parts[0]) is not None or legacy is not None)
-    if known:
+    known = len(parts) > 1 and (_BATCH.fullmatch(parts[0]) is not None or recovery.legacy_session(parts[0]))
+    if known and _BATCH.fullmatch(parts[0]):
         try:
-            timestamp = legacy[1].replace("_", "-") if legacy else parts[0][:15]
-            datetime.strptime(timestamp, "%Y%m%d-%H%M%S")
+            datetime.strptime(parts[0][:15], "%Y%m%d-%H%M%S")
         except ValueError:
             known = False
     return group, str(inside), known
@@ -177,9 +175,11 @@ def preview(lib) -> RestorePlan:
                 if recovery._link(info) or not stat.S_ISREG(info.st_mode):
                     raise ValueError("Recovery source changed to a non-regular file.")
                 group, relative, known = _layout(row["id"], path.relative_to(report.path))
+                matches = destinations.get(recovery._key(path), [])
+                if not matches and recovery.legacy_metadata(path.relative_to(report.path)):
+                    continue  # Legacy container metadata is not a library file; never restore it.
                 item = RestoreItem(path, None, row["id"], None, None, info.st_size, info.st_mtime,
                                    "inferred", group, relative, _snapshot=_snapshot(info))
-                matches = destinations.get(recovery._key(path), [])
                 active = [op for op in matches if op["status"] not in ("undone", "purged", "failed", "skipped")]
                 if len(active) == 1:
                     op = active[0]
@@ -192,17 +192,17 @@ def preview(lib) -> RestorePlan:
                             item.mapping_group = adoption["mapping_group"]
                             item.relative_path = adoption["relative_path"]
                         except (ValueError, TypeError, KeyError):
-                            item.issue = "The Recovery adoption record is unreadable."
+                            item.issue = "Its restore record is damaged, so it stays in Recovery."
                     try:
                         item.target = actions._operation_path(lib, op, "src")
                     except (ValueError, OSError) as error:
-                        item.issue = f"Invalid historical destination: {error}"
+                        item.issue = f"Its original location is invalid ({error}), so it stays in Recovery."
                     if op["op"] != "recycle" or op["status"] != "done":
-                        item.issue = f"Journal operation is {op['op']} / {op['status']}; repair or review it first."
+                        item.issue = "From a change that didn't finish, so it stays in Recovery."
                     elif op["size"] is not None and op["size"] != info.st_size:
-                        item.issue = "Recovery file size changed from its journal record."
+                        item.issue = "Changed since it was removed, so it stays in Recovery."
                 elif matches:
-                    item.issue = "Ambiguous or inactive journal destination; manual journal review required."
+                    item.issue = "Matches more than one past change, so it stays in Recovery."
                 elif known and not any(token in path.name.casefold()
                                        for token in (".memoria-tmp", ".memoria-undo-", ".memoria-restore-")):
                     item.target = home / relative
@@ -229,11 +229,11 @@ def preview(lib) -> RestorePlan:
                     "SELECT id FROM operations WHERE batch_id=? AND asset_group=? AND status!='undone'",
                     (op["batch_id"], op["asset_group"]))}
                 if not required <= ids:
-                    item.issue = "The linked Recovery group is incomplete; review its missing components."
+                    item.issue = "Some linked parts (e.g. a Live Photo video) are missing, so it stays in Recovery."
         if any(item.issue or item.target is None for item in unit):
             for item in unit:
                 if not item.issue:
-                    item.issue = "A linked component needs review; the whole group stays in Recovery."
+                    item.issue = _LINKED
     return plan
 
 
@@ -249,7 +249,7 @@ def map_destination(lib, plan: RestorePlan, mapping_group: str, destination_fold
         if item.mapping_group != mapping_group:
             updated.append(item)
             continue
-        if item.issue not in ("", _MAPPING, "A linked component needs review; the whole group stays in Recovery."):
+        if item.issue not in ("", _MAPPING, _LINKED):
             raise ValueError(item.issue)
         relative = Path(item.relative_path)
         if relative.is_absolute() or relative.drive or ".." in relative.parts:

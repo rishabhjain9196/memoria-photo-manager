@@ -2,12 +2,13 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QFileDialog, QHeaderView, QTreeWidget, QTreeWidgetItem
 
+from .motion import Dialog
 from ..engine import roots
 from ..engine.db import LibraryUnavailable
 from .widgets import button, hbox, label, vbox
 
 
-class LibraryRootsDialog(QDialog):
+class LibraryRootsDialog(Dialog):
     def __init__(self, parent, ctx):
         super().__init__(parent)
         self.ctx, self.lib = ctx, ctx.library

@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QCheckBox, QDialog, QHeaderView, QTreeWidget, QTreeWidgetItem
 
+from .motion import Dialog
 from ..engine import duplicate_cleanup
 from ..engine.progress import Progress
 from . import theme
@@ -16,7 +17,7 @@ from .widgets import button, fmt_n, fmt_size, hbox, label, vbox
 PAGE_SIZE = 200
 
 
-class CleanupReviewDialog(QDialog):
+class CleanupReviewDialog(Dialog):
     def __init__(self, parent, ctx, report, hashes, file_choices, folder_choices, initial_plan):
         super().__init__(parent)
         self.ctx, self.lib, self.report = ctx, ctx.library, report

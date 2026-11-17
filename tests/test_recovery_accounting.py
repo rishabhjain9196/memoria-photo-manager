@@ -134,6 +134,48 @@ def test_offline_then_reconnect_uses_recorded_root_keys(tmp_path):
         lib.close()
 
 
+def test_legacy_session_manifest_does_not_block_emptying_and_self_cleans(small_library):
+    lib = small_library
+    _batch(lib, "cleanup")
+    _record(lib, "cleanup", "photo.jpg")
+    alone = lib.recovery / "session_20260609_015147"
+    for name in ("a", "b", "c"):
+        (alone / name).mkdir(parents=True)
+    (alone / "manifest.json").write_bytes(b"{}")
+    (lib.recovery / "20261110-121314-abcdef").mkdir()
+    report = recovery.inspect(lib)
+    assert (report.files, report.untracked_files, report.legacy_metadata_files) == (2, 0, 1)
+    assert report.safe_to_empty and not report.blockers()
+
+    # Real content beside a manifest, or a nested manifest, stays untracked and keeps blocking deletion.
+    kept = lib.recovery / "session_20260609_020000"
+    kept.mkdir()
+    (kept / "manifest.json").write_bytes(b"{}")
+    (kept / "photo.jpg").write_bytes(b"x")
+    nested = lib.recovery / "session_20260609_030000" / "Trip"
+    nested.mkdir(parents=True)
+    (nested / "manifest.json").write_bytes(b"{}")
+    report = recovery.inspect(lib)
+    assert (report.untracked_files, report.legacy_metadata_files) == (2, 2)
+    assert not report.safe_to_empty
+
+    assert recovery.tidy(lib) == (1, 5)
+    assert not alone.exists() and not (lib.recovery / "20261110-121314-abcdef").exists()
+    assert (kept / "manifest.json").exists() and (kept / "photo.jpg").exists()
+    assert (nested / "manifest.json").exists() and (lib.recovery / "cleanup" / "photo.jpg").exists()
+
+
+def test_tidy_waits_for_interrupted_operations(small_library):
+    lib = small_library
+    _batch(lib, "cleanup")
+    _record(lib, "cleanup", "photo.jpg", status="pending")
+    empty = lib.recovery / "session_20260609_015147"
+    empty.mkdir()
+    (empty / "manifest.json").write_bytes(b"{}")
+    assert recovery.tidy(lib) == (0, 0)
+    assert (empty / "manifest.json").exists()
+
+
 def test_primary_home_must_be_online(small_library):
     marker = config.app_dir(small_library.root) / roots.MARKER
     original = marker.read_bytes()
@@ -344,18 +386,14 @@ def test_history_and_overview_agree_and_explain_incomplete_emptying(small_librar
     page, overview = HistoryPage(ctx), OverviewPage(ctx)
     try:
         page.show()
-        _wait(app, lambda: page._accounting_ready and "still measured in Recovery" in page.detail.text())
+        _wait(app, lambda: page._accounting_ready and "still in Recovery" in page.detail.text())
         assert page._recovery_bytes == 5 and page.empty_btn.isEnabled()
-        assert "Cumulative Recovery" in page.rec_label.text()
-        assert f"Older cleanups still retained: {fmt_size(3)}" in page.rec_label.text()
-        assert f"{fmt_size(2)} still in Recovery" in page.rec_label.text()
-        assert "cleanup bytes recorded" in page.detail.text()
-        page.recovery_root.setCurrentIndex(1)
-        assert page._recovery_bytes == 5 and f"{fmt_size(0)} logical bytes" in page.root_note.text()
-        assert "NOT totals, Restore all or Empty Recovery scope" in page.root_note.text()
+        assert page.rec_total.text() == f"2 files · {fmt_size(5)}"
+        assert page.rec_notice.isHidden()
         data = _insights(lib, {"duplicates": [], "similar": [], "organize": SimpleNamespace(items=[])})
         overview._insights(data)
         assert data["recovery"] == (page._recovery_count, page._recovery_bytes)
+        assert fmt_size(5) in overview.trust.text()
         original = recovery._lstat
         def measure(path):
             if Path(path) == lib.recovery:
@@ -364,15 +402,15 @@ def test_history_and_overview_agree_and_explain_incomplete_emptying(small_librar
         monkeypatch.setattr(recovery, "_lstat", measure)
         page.refresh()
         assert page.empty_btn.isEnabled()  # A click reviews the block; it does not authorize deletion.
-        _wait(app, lambda: page._accounting_ready and "INCOMPLETE" in page.rec_label.text())
-        assert page._recovery_bytes == 0 and page.empty_btn.isEnabled()
+        _wait(app, lambda: page._accounting_ready and "couldn't be read" in page.rec_notice.text())
+        assert page._recovery_bytes == 0 and page.empty_btn.isEnabled() and not page.rec_notice.isHidden()
         monkeypatch.setattr(actions, "empty_recovery", lambda *args, **kwargs: pytest.fail("Must not empty"))
         monkeypatch.setattr(ConfirmDialog, "exec", lambda *_: pytest.fail("Unsafe accounting cannot offer deletion"))
         notices = []
         monkeypatch.setattr(MessageDialog, "exec", lambda self: notices.append(self.windowTitle()) or 0)
         page.empty_btn.click()
         _wait(app, lambda: not ctx.runner.busy and bool(notices))
-        assert notices == ["Recovery needs attention before emptying"]
+        assert notices == ["Can't empty Recovery yet"]
         data = _insights(lib, {"duplicates": [], "similar": [], "organize": SimpleNamespace(items=[])})
         overview._insights(data)
         assert not data["recovery_accounting"].complete
@@ -441,53 +479,76 @@ def test_empty_click_refreshes_stale_accounting_and_requires_acknowledgement(
     page.empty_btn.click()
     _wait(app, lambda: bool(confirmations) and not ctx.runner.busy)
     assert not errors, errors
-    assert confirmations == ["Permanently delete files in Recovery?"]
+    assert confirmations == ["Empty Recovery?"]
     assert destination.exists() == (decision != "accept")
     assert original.read_bytes() == b"original must remain"
     status = lib.db.execute("SELECT status FROM operations WHERE src LIKE '%photo.jpg'").fetchone()[0]
     assert status == ("purged" if decision == "accept" else "done")
 
 
-@pytest.mark.parametrize("blocker", ["untracked", "changed", "missing", "interrupted"])
-def test_click_explains_actual_recovery_blocker_without_offering_deletion(
-        small_library, history_ui, monkeypatch, blocker):
+@pytest.mark.parametrize("situation", ["untracked", "changed", "missing", "interrupted"])
+def test_empty_self_fixes_and_asks_once_instead_of_blocking(small_library, history_ui, monkeypatch, situation):
     from memoria.ui.widgets import ConfirmDialog, MessageDialog
     lib = small_library
     app, ctx, page, errors = history_ui
     _batch(lib, "cleanup")
-    destination = _record(lib, "cleanup", "photo.jpg", size=3, actual=4 if blocker == "changed" else 3,
-                          status="published" if blocker == "interrupted" else "done")
-    if blocker == "untracked":
+    destination = _record(lib, "cleanup", "photo.jpg", size=3, actual=4 if situation == "changed" else 3,
+                          status="published" if situation == "interrupted" else "done")
+    if situation == "untracked":
         (lib.recovery / "unknown.bin").write_bytes(b"not attributable")
-    elif blocker == "missing":
+    elif situation == "missing":
         _record(lib, "cleanup", "missing.jpg", size=2, actual=None)
-    expected = {"untracked": "no unambiguous History match", "changed": "differ in size or type",
-                "missing": "missing from Recovery", "interrupted": "interrupted operation"}
-    report = recovery.inspect(lib)
-    assert any(expected[blocker] in message for message in report.empty_blockers())
-    monkeypatch.setattr(ConfirmDialog, "exec", lambda *_: pytest.fail("Cannot confirm unsafe permanent deletion"))
-    monkeypatch.setattr(actions, "empty_recovery", lambda *args, **kwargs: pytest.fail("Cannot delete blocked contents"))
+    monkeypatch.setattr(MessageDialog, "exec", lambda *_: pytest.fail("Only a hard blocker shows a message"))
+    monkeypatch.setattr(actions, "empty_recovery", lambda *args, **kwargs: pytest.fail("Cancelled"))
+    shown = []
+    class Ask(ConfirmDialog):
+        def __init__(self, parent, title, summary, details, *args, **kwargs):
+            super().__init__(parent, title, summary, details, *args, **kwargs)
+            shown.append(" ".join(details))
+        def exec(self):
+            return self.DialogCode.Rejected
+    monkeypatch.setattr("memoria.ui.pages.history.ConfirmDialog", Ask)
+    page.show()
+    _wait(app, lambda: page._accounting_ready)
+    page.empty_btn.click()
+    _wait(app, lambda: bool(shown) and not ctx.runner.busy)
+    assert not errors and destination.exists(), errors
+    assert ("didn't come from a Memoria cleanup" in shown[0]) == (situation in ("untracked", "changed"))
+    if situation == "interrupted":  # Finished automatically before asking.
+        assert lib.db.execute("SELECT status FROM operations").fetchone()[0] == "done"
+
+
+def test_disconnected_folder_is_the_one_clear_reason_emptying_waits(small_library, history_ui, monkeypatch, tmp_path):
+    from memoria.ui.widgets import ConfirmDialog, MessageDialog
+    lib = small_library
+    app, ctx, page, errors = history_ui
+    phone = tmp_path / "phone"
+    phone.mkdir()
+    phone_id = roots.add(lib, phone, "Phone")
+    _batch(lib, "cleanup")
+    _record(lib, "cleanup", "photo.jpg")
+    real_check = roots.check
+    def unplugged(library, source, *args, **kwargs):
+        if source == phone_id:
+            raise LibraryUnavailable("Phone is unplugged")
+        return real_check(library, source, *args, **kwargs)
+    monkeypatch.setattr(roots, "check", unplugged)
+    monkeypatch.setattr(ConfirmDialog, "exec", lambda *_: pytest.fail("Cannot offer deletion"))
     messages = []
     class Explain(MessageDialog):
-        def __init__(self, parent, title, summary, details):
-            super().__init__(parent, title, summary, details)
-            messages.append((title, summary, details))
+        def __init__(self, parent, title, text, details=""):
+            super().__init__(parent, title, text, details)
+            messages.append((title, text))
         def exec(self):
-            if blocker == "untracked":
-                self.show()
-                app.processEvents()
-                assert self.grab().save(str(lib.root.parent / "empty-recovery-blocked.png"))
             return self.DialogCode.Accepted
     monkeypatch.setattr("memoria.ui.pages.history.MessageDialog", Explain)
     page.show()
     _wait(app, lambda: page._accounting_ready)
-    assert page.empty_btn.isEnabled()
-    assert "blocked" in page.empty_status.text()
+    assert "“Phone” is disconnected" in page.rec_notice.text()
     page.empty_btn.click()
     _wait(app, lambda: bool(messages) and not ctx.runner.busy)
-    assert not errors and destination.exists(), errors
-    assert expected[blocker] in messages[0][2]
-    assert "Nothing was deleted" in messages[0][1]
+    assert messages[0][0] == "Can't empty Recovery yet"
+    assert "“Phone” is disconnected. Connect it" in messages[0][1] and "Nothing was deleted" in messages[0][1]
 
 
 def test_recovery_change_during_confirmation_blocks_deletion(small_library, history_ui, monkeypatch):
@@ -516,8 +577,8 @@ def test_empty_review_button_explains_active_work(small_library, history_ui):
     ctx.set_indexing(True)
     page.on_busy_changed(True)
     assert not page.empty_btn.isEnabled()
-    assert "library work is active" in page.empty_status.text()
-    assert "Finish or cancel" in page.empty_btn.toolTip()
+    assert "current task finishes" in page.empty_status.text()
+    assert "current task finishes" in page.empty_btn.toolTip()
     ctx.set_indexing(False)
     page.on_busy_changed(False)
     assert page.empty_btn.isEnabled()

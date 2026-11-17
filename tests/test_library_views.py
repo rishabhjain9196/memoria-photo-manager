@@ -75,7 +75,7 @@ def test_history_bounds_operations_and_pages_full_batch(tmp_path):
         page.show()
         _wait(app, lambda: page.ops.topLevelItemCount() == OP_PAGE)
         assert page._op_count == 100_000 and page.undo_btn.isEnabled()
-        assert "whole change" in page.detail.text()
+        assert "100,000 steps" in page.detail.text()
         page.op_next.click()
         _wait(app, lambda: "501-" in page.op_note.text())
         assert page.ops.topLevelItemCount() == OP_PAGE

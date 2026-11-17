@@ -14,10 +14,12 @@ from PySide6.QtCore import (QAbstractListModel, QModelIndex, QObject, QPoint, QR
 from PySide6.QtGui import (QBrush, QColor, QDesktopServices, QFont, QFontDatabase, QImage, QPainter,
                            QPainterPath, QPen, QPixmap)
 from PySide6.QtCore import QUrl
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QFrame, QGridLayout, QHBoxLayout,
-                               QLabel, QListView, QPushButton, QScrollArea, QSizePolicy, QStyle,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QFrame, QGraphicsDropShadowEffect, QGridLayout,
+                               QHBoxLayout, QLabel, QListView, QPushButton, QScrollArea, QSizePolicy, QStyle,
                                QStyledItemDelegate, QVBoxLayout, QWidget)
 
+from . import motion
+from .motion import Dialog
 from . import theme
 from .tasks import LatestCall
 from .image_loader import checked_path, read_image
@@ -736,7 +738,7 @@ class Preview(QFrame):
 
 
 # ------------------------------------------------------------------------------ dialogs
-class ConfirmDialog(QDialog):
+class ConfirmDialog(Dialog):
     """States exactly what will happen before any file is touched."""
 
     def __init__(self, parent, title: str, summary: str, details: list[str], confirm_text: str,
@@ -810,7 +812,7 @@ def confirm(parent, title, summary, details, confirm_text, **kw) -> bool:
     return ConfirmDialog(parent, title, summary, details, confirm_text, **kw).exec() == QDialog.DialogCode.Accepted
 
 
-class Viewer(QDialog):
+class Viewer(Dialog):
     """Full-size viewer with ← / → navigation through a list of library items."""
 
     def __init__(self, parent, ctx: "AppContext", items: list[dict], index: int):
@@ -947,7 +949,7 @@ class Viewer(QDialog):
             (open_path if action == "open" else show_in_explorer)(path)
 
 
-class MessageDialog(QDialog):
+class MessageDialog(Dialog):
     def __init__(self, parent, title: str, text: str, details: str = ""):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -985,23 +987,36 @@ class Toast(QFrame):
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.hide)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(28)
+        shadow.setOffset(0, 6)
+        shadow.setColor(QColor(theme.SHADOW))
+        self.setGraphicsEffect(shadow)
         self.hide()
 
     def show_message(self, text: str, batch_id: str = "", seconds: int = 10) -> None:
         self.msg.setText(text)
         self.batch_id = batch_id
         self.undo_btn.setVisible(bool(batch_id))
-        self.reposition()
+        appearing = not self.isVisible()
+        target = self._place()
         self.show()
         self.raise_()
+        if appearing:
+            motion.slide_in(self, target)
+        else:
+            self.move(target)
         self.timer.start(seconds * 1000)
 
-    def reposition(self) -> None:
+    def _place(self) -> QPoint:
         par = self.parentWidget()
         w = min(640, par.width() - 300)
         self.setFixedWidth(max(360, w))
         self.adjustSize()
-        self.move(par.width() - self.width() - 24, par.height() - self.height() - 70)
+        return QPoint(par.width() - self.width() - 24, par.height() - self.height() - 70)
+
+    def reposition(self) -> None:
+        self.move(self._place())
 
     def _undo(self):
         self.hide()

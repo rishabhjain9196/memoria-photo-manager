@@ -189,7 +189,7 @@ native memory sampling and atomic publication) and <code>ui/diagnostics.py</code
 plain-text JSON preview). See <a href="#diagnostics">Aggregate diagnostics</a> for the privacy and lifecycle contract.</p>
 <table>
   <tr><th>Module</th><th>Lines</th><th>Responsibility</th></tr>
-  <tr><td><code>main_window</code></td><td>700</td><td>Sidebar (<code>NAV</code> groups, count badges, theme selector), lazily created pages (<code>page(key)</code>), <code>WelcomePage</code>, task bar (% · elapsed · time left · Cancel), toast, shortcuts, drag &amp; drop, saved geometry; <code>open_library</code> (lock → reconcile → set context → index), <code>run_checkup</code>, <code>open_sample</code> (with progress), <code>undo_last</code>, <code>undo_batch</code>, <code>restore_last</code>.</td></tr>
+  <tr><td><code>main_window</code></td><td>700</td><td>Sidebar (<code>NAV</code> groups, count badges, compact <b>Library</b> and <b>Settings</b> menus), lazily created pages (<code>page(key)</code>), <code>WelcomePage</code>, task bar (% · elapsed · time left · Cancel), toast, shortcuts, drag &amp; drop, saved geometry; <code>open_library</code> (lock → reconcile → set context → index), <code>run_checkup</code>, <code>open_sample</code> (with progress), <code>undo_last</code>, <code>undo_batch</code>, <code>restore_last</code>.</td></tr>
   <tr><td><code>theme</code></td><td>193</td><td>Light/dark palettes, <code>use(mode)</code> (system | light | dark), stylesheet builder, <code>qpalette()</code>, <code>badge_colors</code>, <code>settings()</code> (profile via <code>MEMORIA_PROFILE</code>).</td></tr>
   <tr><td><code>tasks</code></td><td>197</td><td><code>TaskRunner.run(title, fn(progress), on_done, on_cancel)</code>; signals <code>started/progressed/finished/error/busy_changed</code>. <code>BackgroundCall</code>: latest-wins read-only computations off the UI thread (page insights).</td></tr>
   <tr><td><code>widgets</code></td><td>897</td><td>Formatting/layout helpers, tiles/banners/cards, <code>AppContext</code> (generations, cached results, maintenance state, navigation signals), <code>ThumbCache</code> (64 MiB pixel budget and 4,000-entry cap), model/delegate/grid, Preview, Viewer, confirmation/message dialogs and Toast.</td></tr>
@@ -700,7 +700,7 @@ selections are discarded. Reset does not delete <code>.memoria</code> or recover
 
 <section id="ui">
 <h2>UI architecture</h2>
-<p><b>Application updates:</b> the sidebar's Updates dialog uses a background check against the configured Git
+<p><b>Application updates:</b> the Updates dialog (Settings menu) uses a background check against the configured Git
 upstream. A per-device setting enables startup checking; the entry point schedules it once per launch, not on
 every theme/window rebuild. Checks do not modify the working tree. Installation is blocked during library work
 and requires explicit confirmation, a managed source environment and a clean fast-forwardable branch.</p>
@@ -736,7 +736,14 @@ uses only the standard library while dependencies may be replaced.</p>
   <li><b>Lazy pages:</b> only Overview is built at start; other pages are created on first visit.</li>
   <li><b>Themes:</b> <code>theme.use(mode)</code> sets the palette, stylesheet and <code>QPalette</code>; changing theme builds a new
       window and reopens the same library and page (no stale colours). "Match Windows" follows
-      <code>styleHints().colorSchemeChanged</code>.</li>
+      <code>styleHints().colorSchemeChanged</code>. Both palettes share one key set (slate neutrals, one indigo
+      accent, muted status colours and separate solid danger fills), so every widget reads colours from
+      <code>theme</code>.</li>
+  <li><b>Motion:</b> <code>ui/motion.py</code> provides cosmetic transitions only: a page cross-fade, a dialog fade-in
+      through the <code>motion.Dialog</code> base class, a toast slide-in and a task-bar fade, each at most 160 ms. The temporary
+      opacity effect is removed when an animation ends, and interrupted animations snap to their final state. Motion is
+      off on offscreen/minimal platforms, when Windows animation effects are disabled, or with
+      <b>Settings ▸ Reduce motion</b>. No application event filter is installed, so idle event handling stays native.</li>
   <li><b>Insights:</b> Overview computes card texts with <code>BackgroundCall</code> (own SQLite connection, closed with
       <code>close_thread</code>), showing "Updating…". Library insights uses its own coalesced worker queries.</li>
   <li><b>Persistence:</b> <code>theme.settings()</code> → <code>QSettings("Memoria", profile)</code> stores theme, window
@@ -860,7 +867,7 @@ representing 300 GB. It does not establish real-drive throughput at that size. F
 
 <section id="testing">
 <h2>Testing</h2>
-<p><b>588 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
+<p><b>593 tests</b>: <code>.\.venv\Scripts\python -m pytest -q</code>. The generated
 <a href="report.html">quality report</a> records the test inventory and last full regression run.
 That snapshot has 579 passing tests; the subsequent Recovery review fix passed 61 targeted
 accounting/root/history/notification/restoration/end-to-end UI regressions.
@@ -886,7 +893,7 @@ actual Windows popup appearance or OS delivery policy.</p>
   <tr><td><code>test_photoedit.py</code></td><td>20</td><td>Identity recipe, exact rotate/flip pixel mapping, pixel-exact crops and aspect boxes, straighten leaves no empty corners, adjustments move the right way, filters, resize never upscales, EXIF date kept + Orientation reset + GPS stripped, formats/quality, PNG alpha, HEIC → JPEG, split tiles reassemble exactly, join sizes and cap, size estimate, partial failures, cancellation leaves nothing.</td></tr>
   <tr><td><code>test_videoedit.py</code></td><td>12</td><td>Rotated sources baked upright, recipe planning, trim without overwrite, default output folder, speed changes duration and keeps audio, rotate/crop/mute/max height, fast filtered preview frames, split points, join landscape + portrait, frame extraction, cancelled export/split leave nothing.</td></tr>
   <tr><td><code>test_batch.py</code></td><td>5</td><td>Copy to folder (verified, no overwrite, undo), move within library (rows follow, undo), refusals, batch recycle/undo, Check everything is read-only and matches ground truth with step progress.</td></tr>
-  <tr><td><code>test_ui_smoke.py</code></td><td>5</td><td>Drives the real window offscreen: Check everything, every page (find, preview, viewer, plan, health, compare, story preview, video compress, similar videos), a batch move to Recovery undone with Ctrl+Z, a duplicate removal undone from History, an edited photo
+  <tr><td><code>test_ui_smoke.py</code></td><td>6</td><td>Transitions settle in their final state and honour Reduce motion. Drives the real window offscreen: Check everything, every page (find, preview, viewer, plan, health, compare, story preview, video compress, similar videos), a batch move to Recovery undone with Ctrl+Z, a duplicate removal undone from History, an edited photo
     (crop + adjustments) and an edited video (trim + contrast) saved and undone; light/dark screenshots, reset UI,
     thumbnail budgets/invalidation, single selection, opt-in cleanup, protected-sidecar feedback and escaped,
     selectable analysis-error details.</td></tr>
@@ -902,9 +909,9 @@ actual Windows popup appearance or OS delivery policy.</p>
   <tr><td><code>test_duplicate_bulk_ui.py</code></td><td>9</td><td>Group versus set-only scope, combined linked-part consent/cancellation, visible no-op results, saved keeps, hidden-copy exclusion, layout and actual moves with Undo.</td></tr>
   <tr><td><code>test_app_updates.py</code></td><td>52</td><td>Local disposable Git fixtures, clean fast-forward and target/race guards, managed dependencies/failures, parent-process identity/exit and restarted-app readiness.</td></tr>
   <tr><td><code>test_updates_ui.py</code></td><td>8</td><td>Opt-in startup/manual checks, busy/rebuild installation guards, confirmed helper handoff, failure/cancellation and no premature app close.</td></tr>
-  <tr><td><code>test_recovery_accounting.py</code></td><td>29</td><td>Logical sizes and per-root/per-change attribution; untracked/changed/missing/offline/no-follow safety; fresh UI emptying checks, exact blocker feedback, mandatory acknowledgement and post-confirmation changes.</td></tr>
-  <tr><td><code>test_recovery_restore.py</code></td><td>54</td><td>Current/legacy session layouts, invalid timestamps, nested paths and root identities; logged/imported restoration, filtered Undo, linked conflicts, interruption handling, retained originals and path safety.</td></tr>
-  <tr><td><code>test_recovery_restore_ui.py</code></td><td>8</td><td>Current/legacy inferred-path acknowledgement, manual mapping, real History restoration, exact-folder/all-remaining conflict scopes, GUI cancellation/errors and 100k-preview bounds.</td></tr>
+  <tr><td><code>test_recovery_accounting.py</code></td><td>32</td><td>Logical sizes and per-root/per-change attribution; untracked/changed/missing/offline/no-follow safety; self-fixing emptying that asks once, plain disconnected-drive feedback, legacy-manifest self-cleaning, mandatory acknowledgement and post-confirmation changes.</td></tr>
+  <tr><td><code>test_recovery_restore.py</code></td><td>55</td><td>Current/legacy session layouts, invalid timestamps, nested paths and root identities; logged/imported restoration, filtered Undo, linked conflicts, interruption handling, retained originals and path safety.</td></tr>
+  <tr><td><code>test_recovery_restore_ui.py</code></td><td>8</td><td>Current/legacy inferred paths ready without extra acknowledgement, manual mapping, real History restoration, exact-folder/all-remaining conflict scopes, GUI cancellation/errors and 100k-preview bounds.</td></tr>
   <tr><td><code>test_insights.py</code></td><td>9</td><td>Folder/type totals, literal search, combined filters, leap dates,
     saved-album links, India/world switching, bounded 10,000-row paging, visible offline labels, mouse/touchpad/keyboard
     zoom, drag geometry, stale-result rejection and map responsiveness during a blocked background query.</td></tr>
