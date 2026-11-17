@@ -31,7 +31,7 @@ PALETTES: dict[str, dict[str, str]] = {
         "HEADER_BG": "#F9FAFB", "TRACK": "#E4E7EC", "TOAST_BG": "#1C2230", "TOAST_TEXT": "#FFFFFF",
         "TOAST_LINK": "#AFC0FF", "SCROLL": "#CDD2DA", "SCROLL_HOVER": "#AEB5C0", "PLACEHOLDER": "#EDEFF2",
         "PREVIEW_BG": "#F2F4F7", "SEGMENT_BG": "#EEF0F3", "SEGMENT_BORDER": "#D6DAE1", "SUBTLE": "#EEF0F3",
-        "SELECTION_TEXT": "#161B26", "SHADOW": "#2E101828",
+        "SELECTION_TEXT": "#161B26", "SHADOW": "#2E101828", "CHECK_BORDER": "#7F8896",
     },
     "dark": {
         "ACCENT": "#5476EE", "ACCENT_HOVER": "#6887F1", "ACCENT_PRESSED": "#4766DA", "ACCENT_SOFT": "#1C2440",
@@ -47,7 +47,7 @@ PALETTES: dict[str, dict[str, str]] = {
         "HEADER_BG": "#1F2228", "TRACK": "#2B2F36", "TOAST_BG": "#262A31", "TOAST_TEXT": "#F2F3F5",
         "TOAST_LINK": "#9DB2FF", "SCROLL": "#3A3F48", "SCROLL_HOVER": "#4C525C", "PLACEHOLDER": "#23272E",
         "PREVIEW_BG": "#1F2228", "SEGMENT_BG": "#1F2228", "SEGMENT_BORDER": "#3A3F48", "SUBTLE": "#1F2228",
-        "SELECTION_TEXT": "#E8EAEE", "SHADOW": "#80000000",
+        "SELECTION_TEXT": "#E8EAEE", "SHADOW": "#80000000", "CHECK_BORDER": "#8C94A1",
     },
 }
 
@@ -71,7 +71,12 @@ DANGER_SOLID = DANGER_SOLID_HOVER = NAV_ACTIVE = SHADOW = ""
 TEXT = MUTED = BORDER = INPUT_BORDER = BG = CARD = SIDEBAR = NAV_HOVER = HOVER = PRESSED = ""
 DISABLED_TEXT = DISABLED_BG = PRIMARY_DISABLED = PRIMARY_DISABLED_TEXT = DANGER_DISABLED = ""
 HEADER_BG = TRACK = TOAST_BG = TOAST_TEXT = TOAST_LINK = SCROLL = SCROLL_HOVER = PLACEHOLDER = ""
-PREVIEW_BG = SEGMENT_BG = SEGMENT_BORDER = SUBTLE = SELECTION_TEXT = ""
+PREVIEW_BG = SEGMENT_BG = SEGMENT_BORDER = SUBTLE = SELECTION_TEXT = CHECK_BORDER = ""
+
+
+def _asset(name: str) -> str:
+    from pathlib import Path
+    return (Path(__file__).resolve().parent / "assets" / name).as_posix()
 
 
 def system_prefers_dark() -> bool:
@@ -189,6 +194,15 @@ QTabBar::tab:selected {{ color: {ACCENT}; border-bottom: 2px solid {ACCENT}; fon
 QScrollArea {{ border: none; background: transparent; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QCheckBox, QRadioButton {{ spacing: 7px; }}
+QCheckBox::indicator, QGroupBox::indicator, QAbstractItemView::indicator {{ width: 14px; height: 14px; border: 1.5px solid {CHECK_BORDER}; border-radius: 4px; background: {CARD}; }}
+QRadioButton::indicator {{ width: 14px; height: 14px; border: 1.5px solid {CHECK_BORDER}; border-radius: 8px; background: {CARD}; }}
+QCheckBox::indicator:hover, QRadioButton::indicator:hover, QAbstractItemView::indicator:hover {{ border-color: {ACCENT}; }}
+QCheckBox::indicator:checked, QGroupBox::indicator:checked, QAbstractItemView::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; image: url({_asset("check.svg")}); }}
+QCheckBox::indicator:indeterminate, QAbstractItemView::indicator:indeterminate {{ background: {ACCENT}; border-color: {ACCENT}; image: url({_asset("partial.svg")}); }}
+QRadioButton::indicator:checked {{ border: 1.5px solid {ACCENT}; background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 {ACCENT}, stop:0.45 {ACCENT}, stop:0.55 {CARD}, stop:1 {CARD}); }}
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled, QAbstractItemView::indicator:disabled {{ border-color: {INPUT_BORDER}; background: {DISABLED_BG}; }}
+QCheckBox::indicator:checked:disabled, QCheckBox::indicator:indeterminate:disabled, QAbstractItemView::indicator:checked:disabled {{ background: {PRIMARY_DISABLED}; border-color: {PRIMARY_DISABLED}; }}
+QRadioButton::indicator:checked:disabled {{ border-color: {PRIMARY_DISABLED}; background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 {PRIMARY_DISABLED}, stop:0.45 {PRIMARY_DISABLED}, stop:0.55 {DISABLED_BG}, stop:1 {DISABLED_BG}); }}
 QSplitter::handle {{ background: transparent; }}
 QToolTip {{ background: {TOAST_BG}; color: {TOAST_TEXT}; border: 1px solid {BORDER}; padding: 6px 8px; }}
 QMenu {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px; padding: 5px; }}

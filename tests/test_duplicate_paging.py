@@ -221,7 +221,7 @@ def test_folder_collection_bounds_many_exact_sets_and_keeps_navigation_choices(c
         assert len(page._current_collection.groups) == 50_000
         assert page.sets.topLevelItemCount() == GROUP_PAGE
         assert page.move_btn.isEnabled() and page.clean_all_btn.isEnabled()
-        assert page.move_btn.text() == "Move folder group to Recovery..."
+        assert page.move_btn.text() == "Clean this group..."
         assert page.single_set_btn.isVisible()
         assert "50,000" in page.collection_scope.text()
         assert len(reads) < 12

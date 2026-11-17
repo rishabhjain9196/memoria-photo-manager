@@ -44,6 +44,7 @@ class Action:
     companion_ids: tuple[int, ...] = ()
     companions_locked: bool = False
     merge_into: Optional[int] = None
+    recovery_root: Optional[str] = None  # recycle a file outside the library into this folder's Recovery
 
 
 @dataclass
@@ -80,15 +81,39 @@ def _same_volume(a: Path, b: Path) -> bool:
     return os.path.splitdrive(str(a.resolve()))[0].lower() == os.path.splitdrive(str(b.resolve()))[0].lower()
 
 
-def verified_copy(src: Path, dst: Path, expected: Optional[str] = None) -> str:
-    """Copy src→dst via a temp file and verify content. Returns the hash. Never overwrites."""
+COPY_CHUNK = 4 * 1024 * 1024
+# Receives bytes written by verified_copy during apply(); a context variable keeps the copy/move signatures stable.
+_BYTE_SINK: ContextVar = ContextVar("memoria_copy_bytes", default=None)
+
+
+def _copy_with_progress(src: Path, tmp: Path, on_bytes) -> None:
+    """Copy in chunks so very large files report progress and can pause or stop between chunks."""
+    with open(L(src), "rb") as reader, open(L(tmp), "wb") as writer:
+        while True:
+            chunk = reader.read(COPY_CHUNK)
+            if not chunk:
+                break
+            writer.write(chunk)
+            on_bytes(len(chunk))
+    shutil.copystat(L(src), L(tmp))
+
+
+def verified_copy(src: Path, dst: Path, expected: Optional[str] = None, on_bytes=None) -> str:
+    """Copy src→dst via a temp file and verify content. Returns the hash. Never overwrites.
+
+    ``on_bytes(n)`` is called as data is written; it may raise ``Cancelled`` to stop cleanly.
+    """
     expected = expected or full_hash(src)
     if expected is None:
         raise OSError(f"Cannot read {src}")
+    on_bytes = on_bytes or _BYTE_SINK.get()
     os.makedirs(L(dst.parent), exist_ok=True)
     tmp = dst.with_name(dst.name + ".memoria-tmp")
     try:
-        shutil.copy2(L(src), L(tmp))
+        if on_bytes is None:
+            shutil.copy2(L(src), L(tmp))
+        else:
+            _copy_with_progress(src, tmp, on_bytes)
         got = full_hash(tmp)
         if got != expected:
             raise OSError(f"Verification failed copying {src.name} (content mismatch)")
@@ -158,6 +183,11 @@ def _destinations(lib, unit, batch_id, reserved):
             if lib.contains(src):
                 source, rel = roots.split_key(lib.rel(src))
                 folder = config.recovery_dir(lib.abspath(roots.key_for(source))) / batch_id
+            elif action.recovery_root:
+                base = Path(action.recovery_root)
+                if not _inside(src, base.resolve()):
+                    raise ValueError("The file is outside the library whose Recovery it would use.")
+                rel, folder = src.resolve().relative_to(base.resolve()), config.recovery_dir(base) / batch_id
             else:
                 rel, folder = src.name, lib.recovery / batch_id
             proposed.append(folder / rel)
@@ -246,10 +276,35 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
     db.execute("INSERT INTO batches (id, created_at, kind, title, status) VALUES (?,?,?,?,?)",
                (batch_id, _now(), kind, title, "applying"))
     total = len(actions)
+    total_bytes = sum(a.size or 0 for a in actions if a.op != "rmdir")
+    verbs = {"copy": "Copying", "recycle": "Moving to Recovery:", "move": "Moving", "rmdir": "Removing empty folder"}
     reserved, completed = set(), 0
+    counted = {"items": 0, "bytes": 0}
+    finished_bytes = 0
+
+    def report(message: str, extra: int = 0, force: bool = False) -> None:
+        done_bytes = min(total_bytes, counted["bytes"] + extra)
+        if total_bytes:
+            progress.update(int(1000 * done_bytes / total_bytes), 1000, message, force,
+                            detail={"items": (counted["items"], total), "bytes": (done_bytes, total_bytes),
+                                    "unit": "file"})
+        else:
+            progress.update(counted["items"], total, message, force,
+                            detail={"items": (counted["items"], total), "unit": "file"})
     try:
         for unit in units:
-            progress.update(completed, total, f"{title}… {completed:,} of {total:,}")
+            counted["items"], counted["bytes"] = completed, finished_bytes
+            name = Path(unit[0].src).name
+            message = f"{verbs.get(unit[0].op, 'Processing')} {name}" + (
+                f" (+{len(unit) - 1} linked)" if len(unit) > 1 else "")
+            report(message)
+            inflight = [0]
+
+            def on_bytes(count: int, message=message, inflight=inflight) -> None:
+                inflight[0] += count
+                report(message, inflight[0])
+            unit_bytes = sum(a.size or 0 for a in unit if a.op != "rmdir")
+            finished_bytes += unit_bytes
             seqs = [2 * (completed + i) + 1 for i in range(len(unit))]
             completed += len(unit)
             problem = None
@@ -308,11 +363,15 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
                             raise OSError(problem)
                     db.execute("UPDATE operations SET status='publishing' WHERE id=?", (op["id"],))
                     try:
-                        if a.op in ("recycle", "move"):
-                            safe_move(src, dst)
-                        elif a.op == "copy":
-                            verified_copy(src, dst, a.hash)
-                        elif a.op == "rmdir":
+                        sink = _BYTE_SINK.set(on_bytes)
+                        try:
+                            if a.op in ("recycle", "move"):
+                                safe_move(src, dst)
+                            elif a.op == "copy":
+                                verified_copy(src, dst, a.hash)
+                        finally:
+                            _BYTE_SINK.reset(sink)
+                        if a.op == "rmdir":
                             os.rmdir(L(src))
                     except FileExistsError:
                         db.execute("UPDATE operations SET status='failed',error='Destination already exists' WHERE id=?",
@@ -352,7 +411,8 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
                    (status, res.done, res.bytes, batch_id))
     if not res.cancelled:
         try:
-            progress.update(total, total, f"{title}: done", force=True)
+            counted["items"], counted["bytes"] = total, total_bytes
+            report(f"{title}: done", force=True)
         except Cancelled:
             res.cancelled = True
     return res
@@ -761,7 +821,7 @@ def undo(lib: Library, batch_id: str, progress: Optional[Progress] = None) -> Ba
     total = len(ops)
     for i, unit in enumerate(_operation_units(ops)):
         try:
-            progress.update(i, total, f"Undoing… {i:,} of {total:,}")
+            progress.update(i, total, f"Undoing… {i:,} of {total:,}", detail={"items": (i, total), "unit": "file"})
         except Cancelled:
             res.cancelled = True
             break
@@ -816,6 +876,11 @@ def undo(lib: Library, batch_id: str, progress: Optional[Progress] = None) -> Ba
     for source, folder in lib.recovery_folders():
         if lib.db.execute("SELECT online FROM library_roots WHERE id=?", (source,)).fetchone()[0]:
             _prune_empty(folder / batch_id)
+    for op in ops:
+        if op["op"] == "recycle" and op["dst_key"] is None and op["dst"]:
+            batch_folder = next((parent for parent in Path(op["dst"]).parents if parent.name == batch_id), None)
+            if batch_folder is not None and batch_folder.parent.name == config.RECOVERY_DIR_NAME:
+                _prune_empty(batch_folder)
     remaining = lib.db.execute("SELECT COUNT(*) FROM operations WHERE batch_id=? AND status IN ('done','undo_pending')",
                                (batch_id,)).fetchone()[0]
     lib.db.execute("UPDATE batches SET status=? WHERE id=?", ("undone" if remaining == 0 else "partial", batch_id))

@@ -92,9 +92,9 @@ def test_folder_cleanup_confirms_only_its_collection_and_undoes(library, tmp_pat
         _idle(app, window)
         assert page._current_collection.folders == ("Downloads",)
         assert page.sets.topLevelItemCount() == 2
-        assert page.move_btn.text() == "Move folder group to Recovery..."
+        assert page.move_btn.text() == "Clean this group..."
         assert page.single_set_btn.isVisible()
-        assert "This set only:" in page.selection_note.text()
+        assert "Ticked:" in page.selection_note.text()
         for pane in page.panes[:2]:
             assert pane.preview.width() <= pane.preview_scroll.viewport().width()
             assert pane.preview.image.geometry().bottom() < pane.preview.open_btn.mapTo(
@@ -250,7 +250,7 @@ def test_group_and_explicit_set_actions_have_distinct_scopes(library, monkeypatc
                     pane.remove_check.setChecked(False)
             _idle(app, window)
             assert page.move_btn.isEnabled() and not page.single_set_btn.isEnabled()
-            assert "other sets" in page.selection_note.text()
+            assert "other files" in page.selection_note.text()
             page.move_btn.click()
         _idle(app, window)
         assert not errors and len(confirmations) == 1, errors
@@ -294,12 +294,10 @@ def test_linked_bulk_review_handles_the_entire_scope_in_one_batch(library, tmp_p
         def exec(self):
             self.show()
             app.processEvents()
-            assert not self.plan.actions and self.plan.linked_skipped > 0
-            assert not self.go_btn.isEnabled()
-            self.include_linked.setChecked(True)
-            _idle(app, window)
-            assert self._valid and not self._loading, self.status.text()
+            assert not self.strict.actions and self.strict.linked_skipped > 0
+            assert not self.strict_option.isEnabled() and self.include_linked.isChecked()
             assert len(self.plan.actions) == (8 if all_groups else 4)
+            assert self.tree.topLevelItemCount() == len(self.plan.actions)  # never an empty review
             unmatched = [part for part in self.plan.review_parts if part["unmatched"]]
             assert len(unmatched) == (4 if all_groups else 2)
             assert not self.go_btn.isEnabled() and self.ack.isVisible()
@@ -339,6 +337,39 @@ def test_linked_bulk_review_handles_the_entire_scope_in_one_batch(library, tmp_p
         app.processEvents()
 
 
+def test_mixed_scope_defaults_to_verified_duplicates_only(library, monkeypatch):
+    from memoria.ui import duplicate_cleanup_review as review_ui
+    from memoria.ui.pages import base
+    (library.root / "Camera" / "trip.AAE").write_bytes(b"edit one")
+    (library.root / "Backup" / "trip copy.AAE").write_bytes(b"edit two")
+    scanner.index(library)
+    app, window, page = _window(library)
+    shown, confirmations = [], []
+    class Review(review_ui.CleanupReviewDialog):
+        def exec(self):
+            self.show()
+            assert self.strict.actions and self.strict_option.isChecked() and self.go_btn.isEnabled()
+            assert not self.ack.isVisible()
+            options = {self.tree.topLevelItem(i).text(4) for i in range(self.tree.topLevelItemCount())}
+            assert options == {"Both options", "Option 2 only"}
+            shown.append(len(self.strict.actions))
+            self.go_btn.click()
+            return self.result()
+    monkeypatch.setattr(review_ui, "CleanupReviewDialog", Review)
+    monkeypatch.setattr(base, "confirm", lambda *args, **kwargs: confirmations.append(kwargs) or True)
+    before = _snapshot(library)
+    try:
+        page.clean_all_btn.click()
+        _idle(app, window)
+        assert len(shown) == 1 and len(confirmations) == 1
+        removed = set(before) - set(_snapshot(library))
+        assert removed and not any("trip" in path for path in removed)
+    finally:
+        window.close()
+        window.deleteLater()
+        app.processEvents()
+
+
 def test_empty_bulk_plan_explains_protected_sets_instead_of_silently_returning(library, monkeypatch):
     from memoria.ui.widgets import MessageDialog
     app, window, page = _window(library)
@@ -368,8 +399,7 @@ def test_cancelling_combined_linked_review_moves_nothing(library, monkeypatch):
     class CancelReview(review_ui.CleanupReviewDialog):
         def exec(self):
             self.show()
-            self.include_linked.setChecked(True)
-            _idle(app, window)
+            assert self.include_linked.isChecked()
             assert self.plan.actions and not self.go_btn.isEnabled()
             with pytest.raises(ValueError, match="Acknowledge"):
                 self.selected_plan()

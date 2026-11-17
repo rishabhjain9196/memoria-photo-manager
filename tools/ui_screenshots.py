@@ -258,10 +258,10 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
                         d = other / "Phone" / r["name"]
                         d.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(page.lib.abspath(r["rel_path"]), d)
-                page.path.setText(str(other))
+                page.paths[0].setText(str(other))
                 click_task(page.cmp_btn)
                 if os.environ.get("MEMORIA_SHOT_LABEL"):
-                    page.path.setText(r"E:\Photos Backup")
+                    page.paths[0].setText(r"E:\Photos Backup")
             elif key == "history" and os.environ.get("MEMORIA_SHOT_LABEL"):
                 original_short = page._short
                 page._short = lambda path, short=original_short: short(path).replace(

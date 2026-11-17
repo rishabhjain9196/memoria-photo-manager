@@ -68,14 +68,16 @@ the rendered page).
 - **Exact duplicates are proven**, not guessed: files are compared by full-content hash (xxh3-128). Normal removal
   verifies a surviving copy. Explicitly selecting **every copy** instead requires acknowledgement and still rechecks each
   reviewed file before moving it to Recovery.
-- **Simple duplicate comparison**: a group list on the left; two or three comparison panes, or a paged checkable
-  table for larger groups. Checked means move, unchecked means keep. Recommendations can be overridden.
-  Exact file sets are grouped by their containing folders by default, including repeats within one folder and
-  shared files between folders that also contain unique files. **Individual duplicate sets** remains available.
-  In a folder collection, the main **Move folder group to Recovery...** button handles every eligible set/page
-  in that group with one confirmation. **Move this set only...** is the explicit single-set alternative.
-  Outside a collection, **Move selected to Recovery** handles the displayed comparison.
-  **Clean all exact groups...** covers all groups; folder/all-group cleanup always keeps verified copies.
+- **Simple duplicate comparison** in three steps: **1** pick a group on the left (a *folder group* of duplicated
+  files shared by the same folders, *matching folders*, or a *single file*); **2** for a folder group, pick a file;
+  **3** tick the copies to move in two or three side-by-side panes (or a paged table for larger groups). Ticked means
+  move, unticked means keep; a copy to keep is suggested and can be overridden. The action bar names each scope:
+  **This file** (**Move checked copies...**, **Keep all copies**), **This folder group** (**Clean this group...**,
+  every file and page in the group) and **All groups** (**Clean all groups...**). Group-wide cleanup always keeps a
+  verified copy of every file. **One file at a time** remains available instead of **Group by folders**.
+  If some photos in a group-wide cleanup have Live Photo videos, RAW or edit files that are not identical, a review
+  lists every affected file and offers **1. move only verified duplicates** or **2. also move the linked parts**
+  (parts that may be unique need an explicit tick). It only appears when option 2 would move more.
   In a **subset** comparison the smaller folder is selected by default. Checking the larger folder removes only
   verified common files; its unique contents and folder stay. Checking both removes common copies on both sides.
   Shared files linked to unique/unreviewed parts are retained rather than splitting those assets.
@@ -83,13 +85,26 @@ the rendered page).
   Removing duplicates merges tags,
   static album membership and favourites into surviving copies; unset ratings/review states are filled and the
   keeper wins conflicts. Organisation Undo does not overwrite later manual edits.
-  **Keep these copies** (or **Keep this set** inside a collection) remembers unchanged sets; **Show kept groups** reveals them unchecked.
+  **Keep all copies** remembers unchanged sets; **Show kept groups** reveals them unchecked.
   Removal choices are never replayed automatically.
   Multi-group cleanup protects saved Keep choices and unchecked copies you reviewed. It retains a verified copy
   per content set even if every copy was checked individually. Strict cleanup keeps unique/unmatched linked parts.
-  If they block cleanup, a combined review lets you explicitly include linked parts that may be unique for the
-  entire folder/all-group scope, with a paged file list and mandatory acknowledgement. System leftovers and
-  folders are left alone. A fully excluded plan is explained visibly, not just a disappearing progress bar.
+  System leftovers and folders are left alone. A fully excluded plan is explained visibly, with the reasons.
+- **Compare & sync up to three libraries**: this library is **A**; add a phone backup, laptop folder or drive as
+  **B** and optionally **C**. A compatible Memoria catalogue in B/C is reused read-only (an incompatible or newer
+  one is ignored); other fingerprints are cached in a comparison index stored in the **master** library you choose,
+  so a repeat comparison only reads new or changed files. Only files whose size appears more than once are read.
+  A clickable **Venn diagram** and filters (everything, in all, in two or more, only in X, missing from X) drive
+  side-by-side panes; a folder whose files all match is shown as one row, and so is a parent whose subfolders all
+  match. **Folder mapping** pairs each folder with the folder holding most of the same photos. **Copy missing
+  files** is copy-only (never overwrites or deletes): one-way backup or two-way, merging into a matching folder
+  when at least half of the source folder is already there, otherwise recreating the source folder path, and
+  copying each content once. Before copying, **Review & choose files** shows every folder and file in a tree with
+  sizes, counts and destination; untick folders or single files (or *Untick all videos* / *Untick files over N MB*)
+  to keep them only where they are, and optionally remember that so they are not offered again for that pair.
+  **Remove duplicates** moves a library's files that also exist in another library into
+  that library's own Recovery folder (a Live Photo/RAW/edit set only as a whole), undoable from History. Save the
+  setup as a named relationship, e.g. *Phone -> Laptop (one-way backup)*.
 - **Simple Recovery**: one total, **Restore all...** and **Empty Recovery...**. Emptying fixes interrupted work and
   cleans up leftovers by itself, then asks once. It waits only for a disconnected drive or unreadable items, and
   says what to do. Restoring never overwrites; a name clash offers Keep both, Skip or Stop.
@@ -103,8 +118,10 @@ the rendered page).
 - **Batch actions** in Photos & videos: select many items, then move to Recovery, copy to a folder (verified), move
   within the library, compress, or send to the Story maker. All undoable.
 - **Light, dark or Match Windows** themes in a calm slate palette with one accent colour, plus subtle page, dialog and toast transitions (about 150 ms; **Settings ▸ Reduce motion** or the Windows animation setting turns them off). Keyboard shortcuts, a built-in viewer and thumbnail zoom.
-- **Progress for long operations**: percentage, elapsed time and time left where available, with cooperative Cancel
-  (Esc). Insights has a separate background loading indicator.
+- **Progress for long operations**: files processed of total, data copied/moved of total, percentage and bar,
+  speed (MB/s, files/s), elapsed time (pauses excluded) and estimated time left, with **Pause/Resume** at the
+  next safe point (between files or 4 MB copy chunks) and cooperative **Cancel** (Esc), also while paused. A
+  stopped copy never leaves a partial file. Insights has a separate background loading indicator.
 - **Key-event notifications**: desktop messages only while Memoria is backgrounded/minimised by default. Indexing,
   file operations, exports, warnings, health problems and cancellation are covered. **Notifications** in the sidebar
   offers per-device delivery/category settings and up to 50 recent events. Messages never include filenames or paths;
@@ -197,7 +214,7 @@ Existing installations need one manual pull/restart to receive the new Updates s
 | **Story maker** | Instagram stories, carousels and story videos with a live preview. | Writes new files to an output folder |
 | **Video compressor** | Smaller copies of videos for sharing, using presets or a target size, with verification and a quality score. | Writes new files to an output folder |
 | **Health check** | Records a fingerprint of every file, then flags *possibly damaged*, *can't be opened* and *missing* files on later checks. | Nothing (catalogue only) |
-| **Compare & sync** | Compares the library with a backup by content, so renamed copies still match. Copies what's missing in either direction. | Writes verified copies |
+| **Compare & sync** | Compares this library with up to two others (phone backup, laptop, drive) by content. Venn overview, grouped side-by-side panes (union, intersection, only/missing per library), folder mapping, saved relationships. One-way backup or two-way copy of only the missing files, merging into matching folders. Removes cross-library duplicates. | Writes verified copies; removals go to the owning library's Recovery with Undo |
 | **History & recovery** | Paged changes with Undo, one Recovery total, Restore all (never overwrites) and self-fixing Empty Recovery. | Restore never overwrites originals; Empty Recovery permanently deletes stored originals |
 
 The [Features guide](docs/features.html) explains every option, including the sidebar's **Library ▸ Storage & reset** controls.
@@ -285,7 +302,7 @@ memoria-photo-manager/
 │   │   ├── diagnostics.py      allowlisted aggregate reports and bounded performance metrics
 │   │   ├── scanner.py          incremental scan + parallel analysis
 │   │   ├── media.py · ffmpeg.py · hashing.py · config.py · progress.py
-│   │   ├── duplicates.py · similar.py · videosim.py · organize.py · tidy.py · health.py · compare.py
+│   │   ├── duplicates.py · similar.py · videosim.py · organize.py · tidy.py · health.py · compare.py · libsync.py
 │   │   ├── faces.py · albums.py · places.py
 │   │   ├── data/               face models + licences · GeoNames places · Natural Earth map + credits
 │   │   └── batch.py · checkup.py · photoedit.py · videoedit.py · story.py · videotools.py
@@ -336,7 +353,8 @@ These are generated and not committed: `.venv/`, `dist/`, `build/`, `test-librar
 | `tests/test_storage.py` | 14 | Safe/custom/hard reset, retained media/Undo and duplicate choices, rollback, interruption, cancellation/retry and low-space compaction. |
 | `tests/test_duplicate_choices.py` | 16 | Adaptive pane/table selections, current-group-only removal, subset shared-only behavior, actual refresh/Undo, quick consent, changed-file protection, remembered choices and migration. |
 | `tests/test_duplicate_cleanup.py` | 57 | Same-folder/partial-overlap collections, 100k grouping, strict/explicit linked review, global keep-one and saved/user protections, source/keeper checks, cancellation and exact Undo. |
-| `tests/test_duplicate_bulk_ui.py` | 9 | Whole-group versus set-only actions, combined linked-part acknowledgement/cancellation, visible no-op explanation, protected/hidden-copy scope and actual filesystem/Undo results. |
+| `tests/test_duplicate_bulk_ui.py` | 10 | Whole-group versus set-only actions, two-option linked-part review (never empty, only when it adds files; acknowledgement/cancellation), visible no-op explanation, protected/hidden-copy scope and actual filesystem/Undo results. |
+| `tests/test_libsync.py` | 12 | Three-way Venn regions by content, master-stored fingerprint index and read-only catalogue reuse (newer catalogues ignored), grouped folder trees, folder mapping and merge/mirror placement, one-copy-per-content delta and two-way copies without overwrite, cross-library removal into the owner's Recovery with guard checks and Undo, linked-asset protection, profiles. |
 | `tests/test_app_updates.py` | 52 | Disposable local Git repositories: upstream checks, fast-forward and race guards, dirty/ahead/diverged refusals, dependency setup/failures, exact-parent exit waiting and restart readiness. |
 | `tests/test_updates_ui.py` | 8 | Opt-in startup/manual checking, active-work gates, explicit restart consent, helper-ready-before-close and visible failure/cancellation handling. |
 | `tests/test_folder_comparison.py` | 6 | Either/both subset sides, preserved unique content and linked parts, snapshot-only selection, changed-file guards and Undo. |

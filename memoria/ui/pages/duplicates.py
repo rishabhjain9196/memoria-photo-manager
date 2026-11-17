@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHeaderView, QListW
 from ...engine import assets, catalogue, duplicate_cleanup, duplicates
 from .. import theme
 from ..tasks import LatestCall
-from ..widgets import (Banner, ConfirmDialog, MessageDialog, PhotoGrid, Preview, Viewer, button, fmt_n,
+from ..widgets import (Banner, Card, ConfirmDialog, MessageDialog, PhotoGrid, Preview, Viewer, button, fmt_n,
                        fmt_size, hbox, label, scroll, vbox)
 from .base import Page, recovery_note, recycle_summary
 
@@ -44,6 +44,10 @@ class ComparisonPane(QFrame):
         self.preview.image.setMinimumHeight(140)
         self.preview.image.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.preview.title.hide()
+        for action in (self.preview.open_btn, self.preview.show_btn):
+            # Let the button row shrink with narrow panes (large text scaling) instead of widening the card.
+            action.setMinimumWidth(48)
+            action.setToolTip(action.text())
         self.preview_scroll = scroll(self.preview)
         self.preview_scroll.setMinimumHeight(160)
         self.preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -111,8 +115,8 @@ class ComparisonPane(QFrame):
 
 class DuplicatesPage(Page):
     title = "Duplicates"
-    subtitle = ("Review exact copies by folder or individually. Group cleanup keeps a verified copy; "
-                "selected-copy removal affects only the comparison shown.")
+    subtitle = ("Find byte-identical copies, choose which copies to keep, and move the rest to Recovery - "
+                "one file, one folder group or everything at once.")
 
     def __init__(self, ctx):
         super().__init__(ctx)
@@ -134,22 +138,27 @@ class DuplicatesPage(Page):
         self.header_actions.addWidget(self.find_btn)
         self.header_actions.addWidget(self.show_previous)
         self.grouping = QComboBox()
-        self.grouping.addItem("Group exact files by folders", "folders")
-        self.grouping.addItem("Individual duplicate sets", "individual")
-        self.grouping.setToolTip("Folder grouping includes partial overlap and repeated files within one folder; "
-                                 "it does not treat different-looking files as duplicates.")
+        self.grouping.addItem("Group by folders", "folders")
+        self.grouping.addItem("One file at a time", "individual")
+        self.grouping.setToolTip("Group by folders collects duplicated files that live in the same folders, so you "
+                                 "can clean them together. Only byte-identical files are ever grouped.")
         self.grouping.currentIndexChanged.connect(lambda _: self._show(self.report) if self.report is not None else None)
+        legend = label("<b>Folder group</b>: several duplicated files shared by the same folders.<br>"
+                       "<b>Matching folders</b>: whole folders with the same content.<br>"
+                       "<b>Single file</b>: one file with copies.", "small", wrap=True)
+        legend.setTextFormat(Qt.TextFormat.RichText)
 
         self.list = QListWidget()
-        self.list.setMinimumWidth(220)
-        self.list.setMaximumWidth(310)
         self.list.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         self.list.currentRowChanged.connect(self._select_group)
         self.group_scope = label("", "small", wrap=True)
-        self.group_previous = button("Previous", on_click=lambda: self._group_step(-1))
-        self.group_next = button("Next", on_click=lambda: self._group_step(1))
+        self.group_previous = button("Previous page", on_click=lambda: self._group_step(-1))
+        self.group_next = button("Next page", on_click=lambda: self._group_step(1))
         left = QWidget()
-        left.setLayout(vbox(self.grouping, self.list, self.group_scope, hbox(self.group_previous, self.group_next), spacing=6))
+        left.setMinimumWidth(220)
+        left.setMaximumWidth(320)
+        left.setLayout(vbox(self._step_title("1", "Pick a group"), self.grouping, legend, self.list,
+                            self.group_scope, hbox(self.group_previous, None, self.group_next), spacing=6))
 
         self.case_title = label("Find duplicates to begin", "h2", wrap=True)
         self.case_note = label("", "muted", wrap=True)
@@ -183,55 +192,84 @@ class DuplicatesPage(Page):
         self.many_view.setStretchFactor(0, 2)
         self.many_view.setStretchFactor(1, 1)
         self.detail.addWidget(self.many_view)
+
         self.collection_title = label("", "h2", wrap=True)
+        self.collection_folders = label("", "small", wrap=True)
+        self.collection_folders.setTextFormat(Qt.TextFormat.PlainText)
         self.collection_scope = label("", "small", wrap=True)
         self.sets = QTreeWidget()
-        self.sets.setHeaderLabels(["Exact duplicate set", "Copies", "Redundant size"])
+        self.sets.setHeaderLabels(["File", "Copies", "Your choice"])
         self.sets.setRootIsDecorated(False)
+        self.sets.header().setStretchLastSection(False)
         self.sets.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.sets.setMaximumHeight(110)
+        for column in (1, 2):
+            self.sets.header().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.sets.currentItemChanged.connect(self._select_set)
-        self.set_previous = button("Previous sets", on_click=lambda: self._set_step(-1))
-        self.set_next = button("Next sets", on_click=lambda: self._set_step(1))
+        self.set_previous = button("Previous page", on_click=lambda: self._set_step(-1))
+        self.set_next = button("Next page", on_click=lambda: self._set_step(1))
         self.collection_panel = QWidget()
-        collection_header = hbox(self.collection_title, None)
-        collection_header.setStretch(0, 1)
-        collection_footer = hbox(self.collection_scope, None, self.set_previous, self.set_next)
-        collection_footer.setStretch(0, 1)
-        self.collection_panel.setLayout(vbox(collection_header, self.sets, collection_footer, spacing=4))
+        self.collection_panel.setMinimumWidth(230)
+        self.collection_panel.setMaximumWidth(360)
+        self.collection_panel.setLayout(vbox(
+            self._step_title("2", "Pick a file in this group"), self.collection_title, self.collection_folders,
+            self.sets, self.collection_scope, hbox(self.set_previous, None, self.set_next), spacing=6))
         self.collection_panel.hide()
-        self.single_set_btn = button("Move this set only...", on_click=self._apply_current_set,
-                                     tip="Move checked copies from only the highlighted set, not the other sets in this folder group.")
-        self.single_set_btn.hide()
-        comparison_header = hbox(self.case_title, None, self.single_set_btn)
-        comparison_header.setStretch(0, 1)
+
+        self.compare_step = self._step_title("2", "Tick the copies to move")
         right = QWidget()
-        right.setLayout(vbox(self.collection_panel, comparison_header, self.case_note, self.detail, spacing=6))
+        right.setLayout(vbox(self.compare_step, self.case_title, self.case_note, self.detail, spacing=6))
         split = QSplitter()
         split.addWidget(left)
+        split.addWidget(self.collection_panel)
         split.addWidget(right)
-        split.setStretchFactor(1, 1)
+        split.setStretchFactor(2, 1)
         split.setChildrenCollapsible(False)
+        split.setSizes([250, 270, 1000])
 
-        self.selection_note = label("Nothing selected.", "", wrap=True)
+        self.selection_note = label("Nothing selected.", "small", wrap=True)
         self.action_note = label("", "small", wrap=True)
-        self.move_btn = button("Move selected to Recovery", "primary", self.apply)
-        self.clean_all_btn = button("Clean all exact groups...", on_click=self.clean_all)
-        self.clean_all_btn.setToolTip("Review one combined plan across every page. Always keeps a verified copy "
-                                     "and respects kept groups; never deletes every copy.")
-        self.keep_all = button("Keep these copies", on_click=self.keep)
+        self.keep_all = button("Keep all copies", on_click=self.keep,
+                               tip="Remember that you want to keep every copy. The group is hidden until you "
+                                   "tick Show kept groups.")
+        self.single_set_btn = button("Move checked copies...", "primary", self._apply_current_set,
+                                     tip="Move the checked copies of the selected file only.")
+        self.move_btn = button("Move checked copies...", "primary", self.apply)
+        self.clean_all_btn = button("Clean all groups...", on_click=self.clean_all)
+        self.clean_all_btn.setToolTip("One combined plan for every duplicate group on every page. Always keeps a "
+                                     "verified copy of each file and respects kept groups.")
         self.quick_remove = QCheckBox("Quick remove")
         self.quick_remove.setToolTip("Optional, this window only. Linked parts and subset-side changes still require review.")
         self.quick_remove.toggled.connect(self._quick_changed)
         self.quick_warning = label("Quick remove is on. Ordinary exact-copy selections act without another popup.",
                                    "small", wrap=True)
         self.quick_warning.hide()
-        self.body.addWidget(Banner("Checked = move to Recovery. Unchecked = keep. Recommendations are optional.", "info"))
+
+        self.file_scope = label("This file", "h2")
+        self.file_actions = hbox(self.keep_all, self.single_set_btn)
+        self.file_actions.addStretch(1)
+        file_box = QWidget()
+        file_box.setLayout(vbox(self.file_scope, self.selection_note, self.file_actions, spacing=4))
+        self.group_scope_title = label("This folder group", "h2")
+        self.group_scope_note = label("", "small", wrap=True)
+        self.group_buttons = hbox(None)
+        self.group_box = QWidget()
+        self.group_box.setLayout(vbox(self.group_scope_title, self.group_scope_note, self.group_buttons, spacing=4))
+        all_box = QWidget()
+        all_box.setLayout(vbox(label("All groups", "h2"),
+                               label("Keeps one verified copy of every duplicated file in the library.", "small", wrap=True),
+                               hbox(self.clean_all_btn, None), spacing=4))
+        for box in (file_box, self.group_box, all_box):
+            box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._group_divider = self._divider()
+        self.action_bar = Card(hbox(file_box, self._group_divider, self.group_box, self._divider(), all_box, spacing=16))
+        self.body.addWidget(Banner(
+            "<b>How it works:</b> 1. pick a group, 2. tick the copies to move (unticked copies are kept; a copy to "
+            "keep is already suggested), 3. move them for <b>this file</b>, <b>this group</b> or <b>all groups</b>. "
+            "Nothing is deleted - files go to Recovery and can be undone.", "info"))
         self.body.addWidget(split, 1)
-        self.body.addWidget(self.selection_note)
-        self.body.addWidget(self.quick_warning)
-        self.body.addWidget(self.action_note)
-        self.body.addLayout(hbox(self.quick_remove, self.keep_all, None, self.clean_all_btn, self.move_btn))
+        self.body.addWidget(self.action_bar)
+        self.body.addLayout(hbox(self.quick_remove, self.quick_warning, None, self.action_note, spacing=12))
+        self._place_actions(False)
 
         self.groups_bg, self.detail_bg, self.plan_bg = LatestCall(self), LatestCall(self), LatestCall(self)
         self.groups_bg.result.connect(self._groups_ready)
@@ -250,6 +288,33 @@ class DuplicatesPage(Page):
         for pane in (*self.panes, self.many_preview):
             pane.clear()
         super()._mark_stale()
+
+    @staticmethod
+    def _step_title(number, text):
+        title = label(f"<span style='color:{theme.ACCENT}'>{number}</span>&nbsp; {text}", "h2")
+        title.setTextFormat(Qt.TextFormat.RichText)
+        return title
+
+    @staticmethod
+    def _divider():
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.VLine)
+        line.setStyleSheet(f"color:{theme.BORDER}")
+        return line
+
+    def _place_actions(self, collection, folders=False):
+        """Put the main move button under the scope it acts on: this group, or this file/these folders."""
+        for layout in (self.file_actions, self.group_buttons):
+            layout.removeWidget(self.move_btn)
+        if collection:
+            self.group_buttons.insertWidget(0, self.move_btn)
+        else:
+            self.file_actions.insertWidget(self.file_actions.indexOf(self.single_set_btn) + 1, self.move_btn)
+        self.single_set_btn.setVisible(collection)
+        self.group_box.setVisible(collection)
+        self._group_divider.setVisible(collection)
+        self.file_scope.setText("These folders" if folders else "This file")
+        self.keep_all.setText("Keep both folders" if folders else "Keep all copies")
 
     def shutdown(self):
         self._closed = True
@@ -282,17 +347,15 @@ class DuplicatesPage(Page):
         self.collection_panel.setEnabled(not busy and not self._loading)
         collection = self._current_collection is not None
         current_ready = self._selection_plan is not None and self._selection_plan["files"] > 0
-        self.single_set_btn.setVisible(collection)
         self.single_set_btn.setEnabled(not busy and not self._loading and current_ready)
         self.clean_all_btn.setEnabled(not busy and not self._loading and self.report is not None
                                       and bool(self.report.groups))
         self.keep_all.setEnabled(not busy and self._current_group is not None and not self._loading)
-        self.keep_all.setText("Keep this set" if collection else "Keep these copies")
-        self.move_btn.setText("Move folder group to Recovery..." if collection else "Move selected to Recovery")
+        self.move_btn.setText("Clean this group..." if collection else "Move checked copies...")
         self.move_btn.setToolTip(
-            "Review redundant copies across every set/page in this folder group. Keeps verified survivors; "
-            "saved keeps and unchecked copies are protected. Always confirms the combined total."
-            if collection else "Move only the checked copies in the comparison shown.")
+            "Keeps one verified copy of every file in this folder group and moves the other copies, across every "
+            "page. Kept groups and copies you unticked are protected. Always shows the combined total first."
+            if collection else "Move only the checked copies shown on the right.")
         self.move_btn.setEnabled(not busy and not self._loading and (collection or current_ready))
 
     @staticmethod
@@ -356,17 +419,21 @@ class DuplicatesPage(Page):
         for kind, group in self.entries:
             if kind == "folder":
                 names = " / ".join(folder.name for folder in group.folders[:2])
-                text = f"{names}\n{'Subset' if group.kind == 'inside' else 'Matching content'} - {len(group.folders)} folders"
+                text = (f"{names}\n{'Folder inside another' if group.kind == 'inside' else 'Matching folders'}"
+                        f" · {len(group.folders)} folders")
             elif kind == "collection":
                 names = [self.lib.display_path(path) or "Library root" for path in group.folders]
-                heading = "Within " + names[0] if len(names) == 1 else "Shared files: " + " / ".join(names[:2])
+                heading = names[0] if len(names) == 1 else " / ".join(names[:2])
                 if len(names) > 2:
                     heading += f" + {len(names) - 2} folders"
-                text = f"{heading}\n{len(group.groups):,} exact sets - {fmt_size(group.wasted)} redundant"
+                where = "inside one folder" if len(names) == 1 else f"in {len(names)} folders"
+                text = (f"{heading}\nFolder group · {fmt_n(len(group.groups), 'file')} {where} · "
+                        f"{fmt_size(group.wasted)} to free")
             else:
-                text = f"{group.files[0]['name']}\nExact duplicate files - {len(group.files)} copies"
+                text = (f"{group.files[0]['name']}\nSingle file · {len(group.files)} copies · "
+                        f"{fmt_size(group.wasted)} to free")
             if kind != "collection" and self._keys[self._group_key(kind, group)] in self.kept:
-                text += " - kept"
+                text += " · kept"
             item = QListWidgetItem(text)
             if kind == "collection":
                 item.setToolTip("\n".join(self.lib.display_path(path) or "Library root" for path in group.folders[:12])
@@ -377,12 +444,15 @@ class DuplicatesPage(Page):
         self.group_scope.setText(f"{self.group_offset + 1 if self.entries else 0}-{end} of {len(self.groups):,} groups")
         self.group_previous.setEnabled(self.group_offset > 0)
         self.group_next.setEnabled(end < len(self.groups))
+        for widget in (self.group_previous, self.group_next):
+            widget.setVisible(len(self.groups) > GROUP_PAGE)
         if self.entries:
             self.list.setCurrentRow(0)
         else:
             self._current_group = None
             self._current_collection = None
             self.collection_panel.hide()
+            self._place_actions(False)
             self._selection_plan = None
             self.members = []
             self.detail.setCurrentWidget(self.empty)
@@ -401,10 +471,20 @@ class DuplicatesPage(Page):
         kind, group = self.entries[index]
         self._current_collection = group if kind == "collection" else None
         self.collection_panel.setVisible(kind == "collection")
+        self._place_actions(kind == "collection", folders=kind == "folder")
+        self.compare_step.setText(self._step_title("3" if kind == "collection" else "2",
+                                                   "Tick the copies to move").text())
         if kind == "collection":
             self.set_offset = 0
-            self.collection_title.setText("Duplicates within one folder" if len(group.folders) == 1 else
-                                          "Shared exact files between folders")
+            folders = [self.lib.display_path(path) or "Library root" for path in group.folders]
+            self.collection_title.setText(
+                f"{fmt_n(len(group.groups), 'file')} with copies inside one folder" if len(folders) == 1 else
+                f"{fmt_n(len(group.groups), 'file')} that appear in each of these folders")
+            self.collection_folders.setText("\n".join(f"- {path}" for path in folders[:6])
+                                            + (f"\n+ {len(folders) - 6} more folders" if len(folders) > 6 else ""))
+            self.group_scope_note.setText(
+                f"Keeps one verified copy of each of the {fmt_n(len(group.groups), 'file')} and moves "
+                f"{fmt_size(group.wasted)} of extra copies. Your ticks are used where you changed them.")
             self._render_sets()
             return
         self._open_comparison(kind, group)
@@ -417,17 +497,26 @@ class DuplicatesPage(Page):
         self.sets.clear()
         shown = collection.groups[self.set_offset:self.set_offset + GROUP_PAGE]
         for group in shown:
-            item = QTreeWidgetItem([group.files[0]["name"], str(len(group.files)), fmt_size(group.wasted)])
+            item = QTreeWidgetItem([group.files[0]["name"], str(len(group.files)), self._choice_text(group)])
             item.setData(0, Qt.ItemDataRole.UserRole, group)
+            item.setToolTip(0, f"{fmt_size(group.wasted)} to free\n"
+                            + "\n".join(self.lib.display_path(row["rel_path"]) for row in group.files[:8]))
             self.sets.addTopLevelItem(item)
         self.sets.blockSignals(False)
         self.collection_scope.setText(
-            f"{self.set_offset + 1}-{self.set_offset + len(shown)} of {len(collection.groups):,} exact sets. "
-            "The main action cleans this whole folder group, across all pages, keeping verified copies.")
+            f"{self.set_offset + 1}-{self.set_offset + len(shown)} of {len(collection.groups):,} files. "
+            "Select one to compare its copies.")
         self.set_previous.setEnabled(self.set_offset > 0)
         self.set_next.setEnabled(self.set_offset + GROUP_PAGE < len(collection.groups))
+        for widget in (self.set_previous, self.set_next):
+            widget.setVisible(len(collection.groups) > GROUP_PAGE)
         if shown:
             self.sets.setCurrentItem(self.sets.topLevelItem(0))
+
+    def _choice_text(self, group):
+        if duplicates.file_review_key(group) in self.kept:
+            return "Keep all (saved)"
+        return "Your ticks" if group.hash in self.file_choices else "Suggested"
 
     def _select_set(self, current, previous):
         if current is not None:
@@ -458,8 +547,8 @@ class DuplicatesPage(Page):
                                          + group.reasons.get(row["id"], "Choose the location you prefer to keep.")
                                          .replace("Kept: ", "Recommendation: ", 1)}
                                for row in group.files]
-                    title = "Exact duplicate files"
-                    note = "Full-content hashes match. Keep the recommended copy, override it, or select every copy."
+                    title = f"{len(group.files)} identical copies of {group.files[0]['name']}"
+                    note = ("Byte-for-byte identical. The suggested copy to keep is unticked; change any tick.")
                 else:
                     members = []
                     for item in duplicates.folder_comparison(report, group):
@@ -496,7 +585,7 @@ class DuplicatesPage(Page):
         self.selected = (set() if self._signature in self.kept else set(choices) if choices is not None
                          else {m["key"] for m in members if not m["recommended"]})
         self.case_title.setText(title)
-        self.case_note.setText(note + " Checked means move; unchecked means keep.")
+        self.case_note.setText(note + " Ticked = move to Recovery; unticked = keep.")
         self._loading = False
         if len(members) <= 3:
             self.detail.setCurrentWidget(self.pane_view)
@@ -540,6 +629,8 @@ class DuplicatesPage(Page):
                                f"{len(self.members):,} copies. Checks persist across pages in this group only.")
         self.copy_previous.setEnabled(self.copy_offset > 0)
         self.copy_next.setEnabled(self.copy_offset + COPY_PAGE < len(self.members))
+        for widget in (self.copy_previous, self.copy_next):
+            widget.setVisible(len(self.members) > COPY_PAGE)
         if shown:
             self.copies.setCurrentItem(self.copies.topLevelItem(0))
 
@@ -567,6 +658,9 @@ class DuplicatesPage(Page):
             kind, group = self._current_group
             choices = self.file_choices if kind == "file" else self.folder_choices
             choices[group.hash if kind == "file" else group.id] = set(self.selected)
+            current = self.sets.currentItem()
+            if kind == "file" and current is not None and current.data(0, Qt.ItemDataRole.UserRole) is group:
+                current.setText(2, self._choice_text(group))
         self.copies.blockSignals(True)
         for index in range(self.copies.topLevelItemCount()):
             item = self.copies.topLevelItem(index)
@@ -591,15 +685,13 @@ class DuplicatesPage(Page):
         self.on_busy_changed(self.busy)
         if self._current_group is None or not self.selected:
             self.selection_note.setText(
-                "This set: nothing selected. The folder-group action can still clean other sets; "
-                "its combined total is confirmed first." if self._current_collection is not None else
-                "Nothing selected. No files will move.")
+                "Nothing ticked for this file. \"Clean this group\" can still clean the other files; "
+                "it shows the combined total first." if self._current_collection is not None else
+                "Nothing ticked. No files will move.")
             return
         kind, group = self._current_group
         chosen, lib, report = set(self.selected), self.lib, self.report
-        self.selection_note.setText("Calculating this set's preview, including linked components..." if
-                                    self._current_collection is not None else
-                                    "Calculating the complete move, including linked components...")
+        self.selection_note.setText("Calculating, including linked Live Photo, RAW and edit parts...")
         def work():
             try:
                 if kind == "file":
@@ -619,16 +711,13 @@ class DuplicatesPage(Page):
         if self._closed or plan["token"] != self._token or plan["generation"] != self.ctx.generation:
             return
         self._selection_plan = plan
-        text = ("This set only: " if self._current_collection is not None else "Planned move: ") + \
-            f"{fmt_n(plan['files'], 'file')} ({fmt_size(plan['bytes'])}) to Recovery."
+        text = f"Ticked: {fmt_n(plan['files'], 'file')} ({fmt_size(plan['bytes'])}) would move to Recovery."
         if plan["extra"]:
-            text += f" Includes {plan['extra']} linked component(s), not just the displayed photos."
+            text += f" Includes {plan['extra']} linked part(s) (Live Photo video, RAW or edit file)."
         if plan["unique"]:
             text += f" {plan['unique']} unique/unmatched file(s) in the larger folder stay untouched."
         if plan["retained"]:
             text += f" {plan['retained']} shared file(s) are kept with unique or unreviewed linked parts."
-        if self._current_collection is not None:
-            text += " The main action reviews the combined total for every set in this folder group."
         self.selection_note.setText(text)
         self.on_busy_changed(self.busy)
 
@@ -715,20 +804,31 @@ class DuplicatesPage(Page):
                     chosen.discard(group.keeper_id)
                 file_choices[group.hash] = chosen
         title = "Clean all exact duplicate groups" if hashes is None else "Clean this exact folder group"
+        scope = ("every exact duplicate group, across all pages" if hashes is None else
+                 f"this folder group ({fmt_n(len(hashes), 'duplicated file')})")
         def work(progress):
             try:
                 progress.update(0, 0, "Choosing verified survivors and protecting linked components...", force=True)
                 plan = duplicate_cleanup.plan_cleanup(lib, report, hashes=hashes, file_choices=file_choices,
                                                       folder_choices=folder_choices, progress=progress)
+                linked = None
+                if plan.linked_skipped:
+                    progress.update(0, 0, "Checking linked Live Photo, RAW and edit parts...", force=True)
+                    linked = duplicate_cleanup.plan_cleanup(
+                        lib, report, hashes=hashes, file_choices=file_choices, folder_choices=folder_choices,
+                        include_linked=True, progress=progress)
                 progress.check()
-                return plan
+                return plan, linked
             finally:
                 lib.close_thread()
-        def ready(plan):
+        def ready(plans):
+            plan, linked = plans
             include_linked = False
-            if plan.linked_skipped:
+            extra = linked is not None and bool(
+                {action.file_id for action in linked.actions} - {action.file_id for action in plan.actions})
+            if extra:
                 from ..duplicate_cleanup_review import CleanupReviewDialog
-                dialog = CleanupReviewDialog(self, self.ctx, report, hashes, file_choices, folder_choices, plan)
+                dialog = CleanupReviewDialog(self, self.ctx, plan, linked, scope)
                 try:
                     if dialog.exec() != dialog.DialogCode.Accepted:
                         self.action_note.setText("Cleanup cancelled. No files moved.")
@@ -736,19 +836,21 @@ class DuplicatesPage(Page):
                     plan = dialog.selected_plan()
                     include_linked = dialog.include_linked.isChecked()
                 except ValueError as error:
-                    MessageDialog(self, "Review the combined linked parts", str(error)).exec()
+                    MessageDialog(self, "Review the linked parts", str(error)).exec()
                     return
                 finally:
                     dialog.shutdown()
                     dialog.deleteLater()
             if not plan.actions:
+                reasons = (linked.linked_reasons if linked is not None else [])[:5]
                 message = (
                     f"No redundant copies can be removed with these choices. {plan.protected_groups} kept set(s); "
                     f"{plan.linked_skipped} linked asset(s) need individual review. Nothing moved.")
                 self.action_note.setText(message)
                 MessageDialog(self, "No copies are eligible for this cleanup", message,
                               "Saved Keep choices and unchecked reviewed copies are protected. "
-                              "No files were moved. Review those choices or find duplicates again.").exec()
+                              "No files were moved. Review those choices or find duplicates again."
+                              + ("\n\n" + "\n".join(reasons) if reasons else "")).exec()
                 return
             size = sum(action.size for action in plan.actions)
             details = [

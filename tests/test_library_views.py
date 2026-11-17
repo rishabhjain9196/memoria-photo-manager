@@ -88,11 +88,9 @@ def test_history_bounds_operations_and_pages_full_batch(tmp_path):
         lib.close()
 
 
-def test_health_and_compare_large_results_bound_widgets_and_keep_all_selection(tmp_path):
+def test_health_large_results_bound_widgets(tmp_path):
     from PySide6.QtCore import Qt
-    from memoria.engine.compare import CompareResult
     from memoria.engine.health import HealthReport
-    from memoria.ui.pages.compare import ComparePage
     from memoria.ui.pages.health import HealthPage
     from memoria.ui.tasks import TaskRunner
     from memoria.ui.widgets import AppContext
@@ -101,7 +99,6 @@ def test_health_and_compare_large_results_bound_widgets_and_keep_all_selection(t
     ctx = AppContext(TaskRunner())
     ctx.set_library(lib)
     health = HealthPage(ctx)
-    compare = ComparePage(ctx)
     try:
         health._show(HealthReport(counts={"edited": 100_000}, checked=100_000,
                                  problems=[{"rel_path": f"p{i}.jpg", "status": "edited", "detail": ""}
@@ -109,17 +106,92 @@ def test_health_and_compare_large_results_bound_widgets_and_keep_all_selection(t
         assert health.tree.topLevelItemCount() == 500
         health.next.click()
         assert health.tree.topLevelItem(0).data(1, Qt.ItemDataRole.UserRole) == "p500.jpg"
-        rows = [{"id": i + 1, "rel_path": f"p{i}.jpg", "size": 1} for i in range(100_000)]
-        compare._show(CompareResult(tmp_path / "backup", only_here=rows, bytes_only_here=100_000))
-        assert compare.here.topLevelItem(0).childCount() == 200
-        assert compare.here_pages.selected_count == 100_000
-        compare.here.topLevelItem(0).child(0).setCheckState(0, Qt.CheckState.Unchecked)
-        compare.here_pages.next.click()
-        assert compare.here_pages.selected_count == 99_999
-        compare.here_pages.previous.click()
-        assert compare.here.topLevelItem(0).child(0).checkState(0) == Qt.CheckState.Unchecked
     finally:
         health.deleteLater()
-        compare.deleteLater()
+        app.processEvents()
+        lib.close()
+
+
+def test_compare_page_shows_grouped_panes_and_copies_only_the_delta(tmp_path, monkeypatch):
+    from PySide6.QtCore import Qt
+    from memoria.engine import libsync, scanner
+    from memoria.ui.pages import compare as compare_ui
+    from memoria.ui.tasks import TaskRunner
+    from memoria.ui.widgets import AppContext
+    app = _app()
+    home, phone, drive = tmp_path / "laptop", tmp_path / "phone", tmp_path / "drive"
+    files = {home: {r"Backup\a.jpg": b"a", r"Backup\b.jpg": b"b"},
+             phone: {r"DCIM\a.jpg": b"a", r"DCIM\b.jpg": b"b", r"DCIM\new.jpg": b"new", r"Trip\t1.jpg": b"t1",
+                     r"Trip\t2.jpg": b"t2"},
+             drive: {r"Old\a.jpg": b"a", r"Old\x.jpg": b"xx"}}
+    for root, content in files.items():
+        for name, data in content.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_bytes(data)
+    lib = Library(home)
+    scanner.scan(lib)
+    runner = TaskRunner()
+    ctx = AppContext(runner)
+    ctx.set_library(lib)
+    page = compare_ui.ComparePage(ctx)
+    page.resize(1500, 950)
+    errors = []
+    runner.error.connect(lambda *args: errors.append(args))
+    monkeypatch.setattr(compare_ui.PlanReviewDialog, "exec", lambda self: self.DialogCode.Accepted)
+    try:
+        page.show()
+        page.paths[0].setText(str(phone))
+        page.add_c.click()
+        page.paths[1].setText(str(drive))
+        page.cmp_btn.click()
+        _wait(app, lambda: page.result is not None and not runner.busy)
+        assert not errors and page.result.count == 3
+        assert all(pane.isVisible() for pane in page.panes)
+        only_b = next(i for i in range(page.filters.count())
+                      if page.filters.item(i).data(Qt.ItemDataRole.UserRole) == ("only", 1))
+        page.filters.setCurrentRow(only_b)
+        tree = page.panes[1].tree
+        top = {tree.topLevelItem(i).text(0): tree.topLevelItem(i).text(1) for i in range(tree.topLevelItemCount())}
+        assert top["Trip"].startswith("all 2") and top["DCIM"].startswith("1 of 3")
+        assert page.panes[0].tree.topLevelItemCount() == 0
+        page.venn.region_clicked.emit(0b011)
+        assert page.view == ("region", 0b011) and "not in C" in page.view_title.text()
+
+        page.source.setCurrentIndex(page.source.findData(1))
+        page.target.setCurrentIndex(page.target.findData(0))
+        assert "3 files" in page.copy_summary.text()
+        from memoria.ui import sync_review
+
+        def choose(dialog):
+            dialog.show()
+            top = dialog.tree.topLevelItem(0)
+            folders = {top.child(i).text(0): top.child(i) for i in range(top.childCount())}
+            assert set(folders) == {"DCIM", "Trip"} and folders["Trip"].text(2) == "2"
+            folders["Trip"].setCheckState(0, Qt.CheckState.Unchecked)   # keep the trip only on the phone
+            assert top.checkState(0) == Qt.CheckState.PartiallyChecked and top.text(2) == "1 of 3"
+            folders["DCIM"].setExpanded(True)
+            assert folders["DCIM"].child(0).text(0) == "new.jpg" and "Backup" in folders["DCIM"].child(0).text(3)
+            assert dialog.remember.isChecked() and dialog.ok.text() == "Copy 1 file"
+            return dialog.DialogCode.Accepted
+        monkeypatch.setattr(sync_review.CopyReviewDialog, "exec", choose)
+        page.copy_btn.click()
+        _wait(app, lambda: (home / "Backup" / "new.jpg").exists() and not runner.busy)
+        assert not (home / "Trip").exists() and (phone / "DCIM" / "new.jpg").exists() and not errors
+        _wait(app, lambda: page.result is not None and not runner.busy and "Nothing new to copy" in page.copy_summary.text())
+        assert "2 files" in page.copy_summary.text() and "keep only where they are" in page.copy_summary.text()
+
+        page.remove_from.setCurrentIndex(page.remove_from.findData(2))
+        assert "1 file" in page.remove_summary.text()
+        page.remove_btn.click()
+        _wait(app, lambda: not (drive / "Old" / "a.jpg").exists() and not runner.busy)
+        assert (drive / "Old" / "x.jpg").exists() and list((drive / ".memoria" / "recovery").rglob("a.jpg"))
+
+        monkeypatch.setattr(compare_ui.QInputDialog, "getText", lambda *args, **kwargs: ("Phone backup", True))
+        page.save_profile.click()
+        saved = libsync.load_profiles(lib)
+        assert saved[0]["name"] == "Phone backup" and saved[0]["others"] == [str(phone), str(drive)]
+    finally:
+        page.close()
+        page.deleteLater()
         app.processEvents()
         lib.close()

@@ -10,12 +10,13 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, QTimer, Qt, Signal
 from PySide6.QtGui import QActionGroup, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
-                               QMenu, QProgressBar, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
+                               QMenu, QProgressBar, QPushButton, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import __version__
 from ..engine import actions, recovery, scanner, storage
 from ..engine.db import Library, LibraryInUse, LibraryTooNew
 from . import motion, theme
+from .task_stats import TaskStats
 from .tasks import TaskRunner
 from .widgets import (AppContext, Banner, ConfirmDialog, MessageDialog, Toast, button, fmt_date, fmt_n,
                       glyph_label, hbox, icon_family, label, scroll, vbox)
@@ -164,7 +165,9 @@ class MainWindow(QMainWindow):
         self.diagnostics.problem.connect(lambda _: self.ctx.notification_requested.emit("diagnostics_failed", 0))
         self._shortcuts()
         self.runner.started.connect(self._task_started)
+        self.runner.detailed.connect(self._task_detail)
         self.runner.progressed.connect(self._task_progress)
+        self.runner.paused_changed.connect(self._task_paused)
         self.runner.finished.connect(self._task_finished)
         self.runner.error.connect(self._task_error)
         self.runner.busy_changed.connect(lambda busy: self.appearance_menu.setEnabled(not busy))
@@ -283,16 +286,28 @@ class MainWindow(QMainWindow):
         self.task_title = label("", "h2")
         self.task_msg = label("", "muted")
         self.task_msg.setMinimumWidth(80)
+        self.task_msg.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.task_pct = label("", "h2")
+        self.task_counts = label("", "small")
+        self.task_speed = label("", "small")
         self.task_eta = label("", "small")
         self.task_progress = QProgressBar()
         self.task_progress.setTextVisible(False)
-        self.task_progress.setFixedHeight(6)
+        self.task_progress.setFixedHeight(8)
+        self.pause_btn = button("Pause", on_click=self._toggle_pause,
+                                tip="Hold the task at the next safe point, between files or copy chunks.")
         self.cancel_btn = button("Cancel", on_click=self._cancel, tip="Esc")
-        tb = vbox(hbox(self.task_title, self.task_msg, None, self.task_eta, 10, self.task_pct, 10, self.cancel_btn),
-                  self.task_progress, spacing=6, margins=(28, 10, 28, 12))
+        top = hbox(self.task_title, self.task_msg, 10, self.task_pct, 10, self.pause_btn, self.cancel_btn)
+        top.setStretch(1, 1)
+        tb = vbox(top, self.task_progress,
+                  hbox(self.task_counts, None, self.task_speed, 16, self.task_eta),
+                  spacing=6, margins=(28, 10, 28, 12))
         self.task_bar.setLayout(tb)
         self.task_bar.hide()
+        self.task_stats = TaskStats()
+        self._task_tick = QTimer(self)
+        self._task_tick.setInterval(1000)
+        self._task_tick.timeout.connect(self._render_task_stats)
 
         right = QWidget()
         right.setObjectName("content")
@@ -754,35 +769,67 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------------------------- task bar
     def _task_started(self, title: str) -> None:
         self._task_started_at = time.monotonic()
+        self.task_stats.start()
         self.task_title.setText(title)
         self.task_msg.setText("Starting…")
         self.task_pct.setText("")
-        self.task_eta.setText("")
+        for widget in (self.task_counts, self.task_speed, self.task_eta):
+            widget.setText("")
         self.task_progress.setRange(0, 0)
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.setText("Cancel")
+        self.pause_btn.setEnabled(True)
+        self.pause_btn.setText("Pause")
+        self._task_tick.start()
         if self.task_bar.isHidden():
             self.task_bar.show()
             motion.fade_in(self.task_bar, motion.FAST)
 
+    def _task_detail(self, detail: dict) -> None:
+        self._pending_detail = detail
+
     def _task_progress(self, done: int, total: int, msg: str) -> None:
-        elapsed = time.monotonic() - self._task_started_at
+        detail, self._pending_detail = getattr(self, "_pending_detail", None), None
         if total > 0:
             frac = min(1.0, done / total)
             self.task_progress.setRange(0, 1000)
             self.task_progress.setValue(int(1000 * frac))
-            self.task_pct.setText(f"{frac:.0%}")
-            if 0.03 < frac < 0.995 and elapsed > 2:
-                self.task_eta.setText(f"{_fmt_secs(elapsed)} elapsed · about {_fmt_secs(elapsed * (1 - frac) / frac)} left")
-            else:
-                self.task_eta.setText(f"{_fmt_secs(elapsed)} elapsed" if elapsed > 2 else "")
         else:
+            frac = None
             self.task_progress.setRange(0, 0)
-            self.task_pct.setText("")
-            self.task_eta.setText(f"{_fmt_secs(elapsed)} elapsed" if elapsed > 2 else "")
-        self.task_msg.setText(msg)
+        self.task_stats.update(frac, detail)
+        self._task_message = msg
+        self._render_task_stats()
+
+    def _render_task_stats(self) -> None:
+        stats = self.task_stats
+        message = getattr(self, "_task_message", "")
+        self.task_msg.setText(("Paused — " + message) if stats.paused and message else
+                              "Paused" if stats.paused else message)
+        self.task_msg.setToolTip(message)
+        self.task_pct.setText("Paused" if stats.paused and stats.fraction is None else
+                              f"{stats.fraction:.0%}" if stats.fraction is not None else "")
+        self.task_counts.setText(stats.counts_text())
+        self.task_speed.setText(stats.speed_text())
+        self.task_eta.setText(stats.time_text())
+
+    def _toggle_pause(self) -> None:
+        if self.runner.paused:
+            self.runner.resume()
+        else:
+            self.runner.pause()
+
+    def _task_paused(self, paused: bool) -> None:
+        if paused:
+            self.task_stats.pause()
+        else:
+            self.task_stats.resume()
+        self.pause_btn.setText("Resume" if paused else "Pause")
+        self._render_task_stats()
 
     def _task_finished(self, outcome: str) -> None:
+        self._task_tick.stop()
+        self._task_message = ""
         self.task_bar.hide()
         was_indexing = self.ctx.indexing
         if was_indexing:
@@ -815,6 +862,7 @@ class MainWindow(QMainWindow):
     def _cancel(self) -> None:
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.setText("Stopping…")
+        self.pause_btn.setEnabled(False)
         self.runner.cancel()
 
     def closeEvent(self, e) -> None:

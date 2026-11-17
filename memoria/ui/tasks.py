@@ -18,19 +18,22 @@ from ..engine.diagnostics import OPERATIONS
 
 class _Worker(QThread):
     progressed = Signal(int, int, str)
+    detailed = Signal(object)
     succeeded = Signal(object)
     failed = Signal(str, str)
     was_cancelled = Signal()
 
-    def __init__(self, fn: Callable[[Progress], Any], cancel: threading.Event):
+    def __init__(self, fn: Callable[[Progress], Any], cancel: threading.Event, pause: threading.Event):
         super().__init__()
         self._fn = fn
         self._cancel = cancel
+        self._pause = pause
         self.wall_seconds = self.cpu_seconds = 0.0
         self.outcome = "failed"
 
     def run(self) -> None:
-        prog = Progress(lambda d, t, m: self.progressed.emit(d, t, m), self._cancel)
+        prog = Progress(lambda d, t, m: self.progressed.emit(d, t, m), self._cancel, pause=self._pause,
+                        detail_callback=lambda detail: self.detailed.emit(detail))
         wall, cpu = time.perf_counter(), time.process_time()
         result, error = None, None
         try:
@@ -54,6 +57,8 @@ class _Worker(QThread):
 class TaskRunner(QObject):
     started = Signal(str)
     progressed = Signal(int, int, str)
+    detailed = Signal(object)       # {"items": (done, total), "bytes": (done, total), "unit": "file"} or {}
+    paused_changed = Signal(bool)
     finished = Signal(str)          # outcome: "ok" | "failed" | "cancelled"
     error = Signal(str, str, str)   # title, message, details
     busy_changed = Signal(bool)
@@ -63,6 +68,7 @@ class TaskRunner(QObject):
         super().__init__(parent)
         self._worker: Optional[_Worker] = None
         self._cancel = threading.Event()
+        self._pause = threading.Event()
         self.title = ""
         self._diagnostic_key = "other"
         self._diagnostic_started = 0.0
@@ -71,6 +77,10 @@ class TaskRunner(QObject):
     @property
     def busy(self) -> bool:
         return self._worker is not None
+
+    @property
+    def paused(self) -> bool:
+        return self._pause.is_set()
 
     def run(self, title: str, fn: Callable[[Progress], Any],
             on_done: Optional[Callable[[Any], None]] = None,
@@ -84,9 +94,11 @@ class TaskRunner(QObject):
         self._measurement_reported = False
         self.title = title
         self._cancel = threading.Event()
-        w = _Worker(fn, self._cancel)
+        self._pause = threading.Event()
+        w = _Worker(fn, self._cancel, self._pause)
         self._worker = w
         w.progressed.connect(self.progressed)
+        w.detailed.connect(self.detailed)
 
         def done(result):
             self._finish("ok")
@@ -112,8 +124,25 @@ class TaskRunner(QObject):
 
     def cancel(self) -> None:
         self._cancel.set()
+        if self._pause.is_set():
+            self._pause.clear()
+            self.paused_changed.emit(False)
+
+    def pause(self) -> None:
+        """Hold the running task at its next safe point (between files or copy chunks)."""
+        if self.busy and not self._pause.is_set():
+            self._pause.set()
+            self.paused_changed.emit(True)
+
+    def resume(self) -> None:
+        if self._pause.is_set():
+            self._pause.clear()
+            self.paused_changed.emit(False)
 
     def _finish(self, outcome: str) -> None:
+        if self._pause.is_set():
+            self._pause.clear()
+            self.paused_changed.emit(False)
         w = self._worker
         if w is not None:
             w.wait(2000)

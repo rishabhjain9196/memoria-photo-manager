@@ -343,13 +343,13 @@ class _SubProgress(Progress):
     """Maps one file's 0..total progress onto a slice of a batch-wide Progress."""
 
     def __init__(self, parent: Progress, index: int, count: int, label: str):
-        super().__init__(None, parent.cancel_event)
+        super().__init__(None, parent.cancel_event, pause=parent.pause_event)
         self._parent, self._index, self._count, self._label = parent, index, count, label
 
-    def update(self, done: int, total: int, message: str = "", force: bool = False) -> None:
+    def update(self, done: int, total: int, message: str = "", force: bool = False, detail=None) -> None:
         frac = min(max(done / total, 0.0), 1.0) if total else 0.0
         self._parent.update(int((self._index + frac) * _TOTAL), self._count * _TOTAL,
-                            f"{self._label} ({self._index + 1}/{self._count}) — {message}", force)
+                            f"{self._label} ({self._index + 1}/{self._count}) — {message}", force, detail=detail)
 
 
 def compress_many(files: list[Path], out_dir: Path, settings: CompressSettings,

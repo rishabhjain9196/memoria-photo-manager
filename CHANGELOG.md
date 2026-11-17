@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Live task status with Pause
+- The task bar now shows files processed of total, data copied/moved of total, percentage and progress bar, speed
+  (MB/s and files/s over the last few seconds), time elapsed (pauses excluded) and estimated time left, plus the
+  file being copied, moved to Recovery or restored.
+- **Pause / Resume** holds any running task at its next safe point; **Cancel** works while paused. Large files are
+  copied in 4 MB chunks, so a multi-GB video shows live progress and can be paused or stopped mid-file; a stopped
+  copy never leaves a partial file.
+
+### Clearer checkboxes
+- Checkboxes, radio buttons and list/tree item checkboxes now use a themed, high-contrast box with an accent
+  fill and check mark in both light and dark themes (the native Windows 11 indicator was nearly invisible).
+
+### Duplicates: clearer steps and scopes
+- Three panes follow the steps: **1** pick a group (folder group, matching folders or single file, explained in a
+  legend), **2** pick a file in a folder group, **3** tick the copies to move. Paging buttons appear only when needed.
+- The action bar names each scope: **This file** (Move checked copies, Keep all copies), **This folder group**
+  (Clean this group) and **All groups** (Clean all groups).
+- Group-wide cleanup plans both options before asking. The linked-parts review appears only when including Live
+  Photo videos, RAW or edit files would move more, always lists the files, explains what linked parts are and
+  offers *move only verified duplicates* or *also move the linked parts*. It is never empty.
+
+### Compare & sync up to three libraries
+- Compare this library with one or two others (phone backup, laptop, external drive) by content, with a clickable
+  Venn diagram, union/intersection/only/missing filters, grouped side-by-side panes and a folder mapping.
+- Compatible Memoria catalogues are reused read-only; other fingerprints are cached in a comparison index in the
+  master library you choose, so repeat comparisons are fast.
+- Copy-only one-way backup or two-way sync of just the missing files, merging into matching folders or recreating
+  the source layout.
+- Before copying, a folder tree lists every folder and file with size, count and destination. Untick folders or
+  files (or untick all videos / files over a size) to keep them only in their library, e.g. large wedding videos
+  that belong on the drive; the choice can be remembered per library pair so they aren't offered again.
+- Remove cross-library duplicates into the owning library's Recovery with Undo; save named relationships.
+
 ### Professional look, smooth flow and a simpler sidebar
 - New slate-neutral light and dark palettes with one indigo-blue accent, muted status colours and dedicated solid
   danger fills. The result is calmer, more consistent buttons, softer card and menu radii, hover states on lists,
