@@ -2,7 +2,7 @@ import hashlib
 import os
 import plistlib
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -193,5 +193,76 @@ def test_library_import_skips_photos_already_in_the_library(tmp_path):
         names = sorted(p.name for p in dest.rglob("*") if p.is_file() and ".memoria" not in p.parts)
         assert names == ["IMG_0001.MOV", "escape.jpg", "img_0001.heic", "pic.jpg"]   # no Photos.sqlite/plist
         assert lib.file_by_rel("old copy.heic")["chash"] == full_hash(lib_root / "old copy.heic")
+    finally:
+        lib.close()
+
+def _photos_db(tmp_path: Path) -> bytes:
+    """A small Photos.sqlite with the iOS 16+ layout (numbered album join table)."""
+    path = tmp_path / "Photos.sqlite"
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE ZASSET (Z_PK INTEGER PRIMARY KEY, ZDIRECTORY TEXT, ZFILENAME TEXT, ZDATECREATED REAL,
+                             ZFAVORITE INTEGER, ZHIDDEN INTEGER, ZTRASHEDSTATE INTEGER);
+        CREATE TABLE ZADDITIONALASSETATTRIBUTES (Z_PK INTEGER PRIMARY KEY, ZASSET INTEGER, ZTIMEZONEOFFSET INTEGER);
+        CREATE TABLE ZGENERICALBUM (Z_PK INTEGER PRIMARY KEY, ZTITLE TEXT, ZKIND INTEGER, ZTRASHEDSTATE INTEGER);
+        CREATE TABLE Z_28ASSETS (Z_28ALBUMS INTEGER, Z_3ASSETS INTEGER, Z_FOK_3ASSETS INTEGER);
+    """)
+    taken = datetime(2019, 3, 4, 4, 50, 30, tzinfo=timezone.utc).timestamp() - iosbackup.APPLE_EPOCH
+    conn.executemany("INSERT INTO ZASSET VALUES (?,?,?,?,?,?,?)", [
+        (1, "DCIM/100APPLE", "IMG_0001.HEIC", taken, 1, 0, 0),
+        (2, "DCIM/100APPLE", "IMG_0002.JPG", taken, 0, 1, 0),
+        (3, "DCIM/100APPLE", "IMG_0003.JPG", taken, 0, 0, 1)])
+    conn.executemany("INSERT INTO ZADDITIONALASSETATTRIBUTES VALUES (?,?,?)", [(1, 1, 19800), (2, 2, 19800)])
+    conn.executemany("INSERT INTO ZGENERICALBUM VALUES (?,?,?,?)", [(1, "Trip", 2, 0), (2, "Recents", 1505, 0)])
+    conn.executemany("INSERT INTO Z_28ASSETS VALUES (?,?,?)", [(1, 1, 1), (2, 1, 1), (2, 2, 2)])
+    conn.commit()
+    conn.close()
+    return path.read_bytes()
+
+
+def test_library_import_keeps_iphone_favourites_albums_dates_and_skips_recently_deleted(tmp_path):
+    files = {("CameraRollDomain", "Media/DCIM/100APPLE/IMG_0001.HEIC"): b"heic-photo" * 1000,
+             ("CameraRollDomain", "Media/DCIM/100APPLE/IMG_0001.MOV"): b"live-video" * 3000,
+             ("CameraRollDomain", "Media/DCIM/100APPLE/IMG_0002.JPG"): b"hidden-photo" * 100,
+             ("CameraRollDomain", "Media/DCIM/100APPLE/IMG_0003.JPG"): b"deleted-photo" * 100,
+             ("CameraRollDomain", iosbackup.PHOTOS_DB): _photos_db(tmp_path)}
+    backup = iosbackup.read_backup(make_backup(tmp_path / "Backups", files))
+    before = snapshot(backup.path)
+    lib_root = tmp_path / "Library"
+    lib_root.mkdir()
+    (lib_root / "old copy.heic").write_bytes(b"heic-photo" * 1000)
+    lib = Library(lib_root)
+    try:
+        scanner.scan(lib)
+        entries = iosbackup.list_files(backup)
+        photos = iosbackup.read_photos_library(backup, entries)
+        assert snapshot(backup.path) == before                    # read from a temporary copy
+        kept = [e for e in entries if not ((i := iosbackup.photo_info(e, photos)) and i.trashed)]
+        dest = iosbackup.default_library_folder(lib, backup)
+        result = iosbackup.extract(backup, dest, ["camera_roll"], media_only=True, library=lib, entries=kept)
+        assert sorted(p.name for p in dest.rglob("*") if p.is_file() and ".memoria" not in p.parts) == \
+            ["IMG_0001.MOV", "IMG_0002.JPG"]                        # HEIC already held; deleted one left out
+        scanner.scan(lib)
+        summary = iosbackup.apply_photos_details(lib, dest, kept, result, photos)
+        assert summary == {"favourites": 2, "albums": 2, "dates": 3}
+
+        def row(rel):
+            return lib.file_by_rel(rel)
+
+        def albums_of(rel):
+            return sorted(r[0] for r in lib.db.execute(
+                "SELECT a.name FROM albums a JOIN album_items i ON i.album_id=a.id WHERE i.file_id=?",
+                (row(rel)["id"],)))
+        live = lib.rel(dest / "Camera Roll" / "100APPLE" / "IMG_0001.MOV")
+        hidden = lib.rel(dest / "Camera Roll" / "100APPLE" / "IMG_0002.JPG")
+        assert albums_of("old copy.heic") == albums_of(live) == ["Trip"]   # smart albums are not copied
+        assert albums_of(hidden) == [iosbackup.HIDDEN_ALBUM]
+        fav = {r[0] for r in lib.db.execute("SELECT file_id FROM file_metadata WHERE favorite=1")}
+        assert fav == {row("old copy.heic")["id"], row(live)["id"]}
+        assert (row(hidden)["taken_at"], row(hidden)["date_source"]) == ("2019-03-04 10:20:30", "iphone")
+        scanner.analyze(lib)                                          # re-analysis keeps the Photos date
+        assert (row(hidden)["taken_at"], row(hidden)["date_source"]) == ("2019-03-04 10:20:30", "iphone")
+        iosbackup.apply_photos_details(lib, dest, kept, result, photos)   # repeating adds no albums
+        assert lib.db.execute("SELECT COUNT(*) FROM albums").fetchone()[0] == 2
     finally:
         lib.close()

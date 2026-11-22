@@ -23,12 +23,13 @@ import plistlib
 import re
 import shutil
 import sqlite3
+import tempfile
 import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -342,6 +343,10 @@ class ExtractResult:
     failed: int = 0
     size_mismatches: int = 0
     errors: list[str] = field(default_factory=list)
+    placed: dict[str, str] = field(default_factory=dict)    # backup file id → path under the destination
+    matched: dict[str, int] = field(default_factory=dict)   # backup file id → library file already holding it
+    recently_deleted: int = 0                                # left out: in the iPhone's Recently Deleted
+    details: Optional[dict[str, int]] = None                 # what apply_photos_details kept
 
     def note(self, message: str) -> None:
         if len(self.errors) < 200:
@@ -461,14 +466,14 @@ def _copy(src: Path, final: Path, expected: int, mtime: Optional[float], progres
     return copied, digest.hexdigest(), expected >= 0 and copied != expected
 
 
-def _library_matches(lib, backup: BackupInfo, entries: list[Entry], progress: Progress) -> set[str]:
-    """File ids whose exact content is already in ``lib`` (size match, then full-hash match)."""
+def _library_matches(lib, backup: BackupInfo, entries: list[Entry], progress: Progress) -> dict[str, int]:
+    """Backup file id → the library file that already holds its exact content (size, then full hash)."""
     by_size: dict[int, list] = defaultdict(list)
     for row in lib.readable_files("size > 0"):
         by_size[row["size"]].append(row)
     candidates = [e for e in entries if e.size > 0 and e.size in by_size]
     if not candidates:
-        return set()
+        return {}
     lib_todo = {row["id"]: row for e in candidates for row in by_size[e.size] if not row["chash"]}
     lib_hashes: dict[int, Optional[str]] = {row["id"]: row["chash"] for e in candidates for row in by_size[e.size]}
     src_gate = disk_speed.io_gate(backup.path)
@@ -486,7 +491,7 @@ def _library_matches(lib, backup: BackupInfo, entries: list[Entry], progress: Pr
             return e.file_id, full_hash(_source(backup, e))
 
     workers = max(1, min(config.WORKERS, disk_speed.detect_disk(backup.path)["workers"]))
-    found: set[str] = set()
+    found: dict[str, int] = {}
     with activity.pool("Comparing with library", workers), ThreadPoolExecutor(max_workers=workers) as pool:
         updates = []
         for fid, h in pool.map(lib_hash, sorted(lib_todo.values(), key=lambda r: r["rel_path"].lower())):
@@ -500,8 +505,9 @@ def _library_matches(lib, backup: BackupInfo, entries: list[Entry], progress: Pr
         sizes = {e.file_id: e.size for e in candidates}
         for file_id, h in pool.map(src_hash, candidates):
             done += 1
-            if h and any(lib_hashes.get(row["id"]) == h for row in by_size[sizes[file_id]]):
-                found.add(file_id)
+            match = next((row["id"] for row in by_size[sizes[file_id]] if h and lib_hashes.get(row["id"]) == h), None)
+            if match is not None:
+                found[file_id] = match
             progress.update(done, total, f"Checking which photos are already in the library… {done:,} of {total:,}")
     return found
 
@@ -538,17 +544,20 @@ def extract(backup: BackupInfo, destination: str | Path, categories: Iterable[st
                 if os.path.isfile(path) and os.path.getsize(path) == size:
                     skip.add(e.file_id)
                     result.resumed += 1
+                    result.placed[e.file_id] = rel
                 else:
                     finished.pop(e.file_id)  # deleted or changed since: copy again under the same rules
         todo = [e for e in todo if e.file_id not in skip]
         if library is not None and todo:
             in_library = _library_matches(library, backup, todo, progress.step(1, 3, "Comparing with your library"))
             result.already_in_library = len(in_library)
+            result.matched = in_library
             todo = [e for e in todo if e.file_id not in in_library]
         names, adopted = _plan_names(todo, dest, finished)
         for e in todo:
             if e.file_id in adopted:
                 state.add(e.file_id, names[e.file_id], e.size, None)
+                result.placed[e.file_id] = names[e.file_id]
         result.resumed += len(adopted)
         todo = [e for e in todo if e.file_id not in adopted]
         need = sum(max(0, e.size) for e in todo)
@@ -604,6 +613,7 @@ def extract(backup: BackupInfo, destination: str | Path, categories: Iterable[st
                         if names[e.file_id] != safe_relative(e.dest_rel):
                             result.renamed += 1
                         state.add(e.file_id, names[e.file_id], copied[0], copied[1])
+                        result.placed[e.file_id] = names[e.file_id]
                     if problem == "missing":
                         result.missing += 1
                         result.note(f"{e.domain}/{e.relative_path}: not present in the backup folder")
@@ -626,3 +636,178 @@ def extract(backup: BackupInfo, destination: str | Path, categories: Iterable[st
 def default_library_folder(lib, backup: BackupInfo) -> Path:
     """Where a library import goes: ``<library>/iPhone backups/<device> <date>``."""
     return Path(lib.root) / "iPhone backups" / backup.folder_name
+
+
+# --------------------------------------------------------------------------- iPhone Photos library
+# Photos.sqlite is Core Data: ZASSET (ZGENERICASSET before iOS 14) holds each photo, ZGENERICALBUM the
+# albums, and a join table whose number varies by iOS version (Z_26ASSETS, Z_28ASSETS…) links them.
+PHOTOS_DB = "Media/PhotoData/Photos.sqlite"
+APPLE_EPOCH = 978307200          # 2001-01-01 UTC, Core Data's time zero
+USER_ALBUM = 2                   # ZGENERICALBUM.ZKIND of albums the user made
+HIDDEN_ALBUM = "Hidden on iPhone"
+
+
+@dataclass(frozen=True)
+class PhotoInfo:
+    taken: Optional[datetime] = None
+    favorite: bool = False
+    hidden: bool = False
+    trashed: bool = False
+    albums: tuple[str, ...] = ()
+
+
+def _table_columns(conn, table: str) -> list[str]:
+    return [r[1] for r in conn.execute(f'PRAGMA table_info("{table}")')]
+
+
+def _apple_date(seconds, offset) -> Optional[datetime]:
+    from . import dates
+    if not isinstance(seconds, (int, float)):
+        return None
+    try:
+        utc = datetime.fromtimestamp(seconds + APPLE_EPOCH, timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+    # The phone's time zone when the photo was taken; otherwise this PC's.
+    if isinstance(offset, (int, float)) and abs(offset) <= 14 * 3600:
+        local = (utc + timedelta(seconds=offset)).replace(tzinfo=None)
+    else:
+        local = utc.astimezone().replace(tzinfo=None)
+    return dates._plausible(local.replace(microsecond=0))
+
+
+def _album_names(conn, tables: dict[str, str]) -> dict[int, list[str]]:
+    album = tables.get("ZGENERICALBUM")
+    if not album:
+        return {}
+    cols = {c.upper() for c in _table_columns(conn, album)}
+    if "ZTITLE" not in cols:
+        return {}
+    where = [w for c, w in (("ZKIND", f"ZKIND={USER_ALBUM}"), ("ZTRASHEDSTATE", "COALESCE(ZTRASHEDSTATE,0)=0"))
+             if c in cols]
+    titles = {pk: " ".join(str(t).split()) for pk, t in conn.execute(
+        f'SELECT Z_PK, ZTITLE FROM "{album}"' + (" WHERE " + " AND ".join(where) if where else ""))
+        if t and str(t).strip()}
+    for name in tables.values():
+        if not re.fullmatch(r"Z_\d+ASSETS", name, re.I):
+            continue
+        cols = _table_columns(conn, name)
+        albums_col = next((c for c in cols if re.fullmatch(r"Z_\d+ALBUMS", c, re.I)), None)
+        assets_col = next((c for c in cols if re.fullmatch(r"Z_\d+ASSETS", c, re.I)), None)
+        if albums_col and assets_col:
+            out: dict[int, list[str]] = defaultdict(list)
+            for album_pk, asset_pk in conn.execute(f'SELECT "{albums_col}", "{assets_col}" FROM "{name}"'):
+                if album_pk in titles:
+                    out[asset_pk].append(titles[album_pk])
+            return out
+    return {}
+
+
+def _read_photos(conn) -> dict[tuple[str, str], PhotoInfo]:
+    tables = {r[0].upper(): r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    asset = tables.get("ZASSET") or tables.get("ZGENERICASSET")
+    if not asset:
+        return {}
+    cols = {c.upper() for c in _table_columns(conn, asset)}
+    if not {"Z_PK", "ZDIRECTORY", "ZFILENAME"} <= cols:
+        return {}
+    offsets = {}
+    extra = tables.get("ZADDITIONALASSETATTRIBUTES")
+    if extra and {"ZASSET", "ZTIMEZONEOFFSET"} <= {c.upper() for c in _table_columns(conn, extra)}:
+        offsets = dict(conn.execute(f'SELECT ZASSET, ZTIMEZONEOFFSET FROM "{extra}" WHERE ZTIMEZONEOFFSET IS NOT NULL'))
+    albums_of = _album_names(conn, tables)
+    pick = ", ".join(c if c in cols else "NULL" for c in ("ZDATECREATED", "ZFAVORITE", "ZHIDDEN", "ZTRASHEDSTATE"))
+    out = {}
+    for pk, directory, filename, created, favorite, hidden, trashed in conn.execute(
+            f'SELECT Z_PK, ZDIRECTORY, ZFILENAME, {pick} FROM "{asset}"'):
+        if not directory or not filename:
+            continue
+        key = (str(directory).replace("\\", "/").strip("/").lower(), os.path.splitext(str(filename))[0].lower())
+        out[key] = PhotoInfo(_apple_date(created, offsets.get(pk)), bool(favorite), bool(hidden), bool(trashed),
+                             tuple(dict.fromkeys(albums_of.get(pk, ()))))
+    return out
+
+
+def read_photos_library(backup: BackupInfo, entries: list[Entry]) -> dict[tuple[str, str], PhotoInfo]:
+    """What the iPhone's Photos app knew about each camera-roll item: favourite, hidden, Recently Deleted,
+    albums and the date Photos shows. Read from a temporary copy (the backup is never opened for writing).
+    Empty when the backup has no readable Photos library."""
+    by_path = {e.relative_path: e for e in entries if e.domain == "CameraRollDomain"}
+    if PHOTOS_DB not in by_path:
+        return {}
+    with tempfile.TemporaryDirectory(prefix="memoria-photos-") as tmp:
+        for suffix in ("", "-wal"):
+            e = by_path.get(PHOTOS_DB + suffix)
+            src = _source(backup, e) if e is not None else None
+            if src is not None and os.path.isfile(config.longpath(src)):
+                shutil.copyfile(config.longpath(src), os.path.join(tmp, "Photos.sqlite" + suffix))
+        copy = os.path.join(tmp, "Photos.sqlite")
+        if not os.path.isfile(copy):
+            return {}
+        try:
+            conn = sqlite3.connect(copy)
+            try:
+                return _read_photos(conn)
+            finally:
+                conn.close()
+        except sqlite3.DatabaseError:
+            return {}
+
+
+def photo_info(entry: Entry, photos: dict[tuple[str, str], PhotoInfo]) -> Optional[PhotoInfo]:
+    """The Photos details for a camera-roll file; a Live Photo's video shares its photo's details."""
+    rel = entry.relative_path.replace("\\", "/")
+    if not photos or entry.domain != "CameraRollDomain" or not rel.startswith("Media/DCIM/") or "/" not in rel[11:]:
+        return None
+    folder, name = rel[len("Media/"):].rsplit("/", 1)
+    return photos.get((folder.lower(), os.path.splitext(name)[0].lower()))
+
+
+def apply_photos_details(lib, destination: str | Path, entries: list[Entry], result: ExtractResult,
+                         photos: dict[tuple[str, str], PhotoInfo]) -> dict[str, int]:
+    """Give imported photos (and library photos the import matched) their iPhone favourites, albums,
+    Hidden album and Photos date. Catalogue only; files are never edited. Needs a scan first so newly
+    copied files have catalogue rows. Safe to repeat: albums are reused by name, favourites only added."""
+    from . import albums as album_engine, organisation
+    dest = Path(destination).resolve()
+    favourites: list[int] = []
+    dated: list[tuple[str, int, int]] = []
+    grouped: dict[str, list[int]] = defaultdict(list)
+    for e in entries:
+        info = photo_info(e, photos)
+        if info is None or info.trashed:
+            continue
+        file_id, new = result.matched.get(e.file_id), False
+        if file_id is None and e.file_id in result.placed:
+            row = lib.file_by_rel(lib.rel(dest / result.placed[e.file_id]))
+            file_id, new = (row["id"] if row is not None else None), True
+        if file_id is None:
+            continue
+        if info.favorite:
+            favourites.append(file_id)
+        if info.taken:
+            dated.append((info.taken.isoformat(sep=" "), file_id, int(new)))
+        for name in info.albums:
+            grouped[name].append(file_id)
+        if info.hidden:
+            grouped[HIDDEN_ALBUM].append(file_id)
+    summary = {"favourites": 0, "albums": 0, "dates": 0}
+    if dated:
+        with lib.transaction() as db:
+            before = db.total_changes
+            # New copies take the Photos date; photos already in the library only replace a weak guess.
+            db.executemany("UPDATE files SET taken_at=?, date_source='iphone' WHERE id=? AND "
+                           "COALESCE(date_source,'') != 'manual' AND (? OR COALESCE(date_source,'modified') "
+                           "IN ('modified','filename','inferred'))", dated)
+            summary["dates"] = db.total_changes - before
+    if favourites:
+        summary["favourites"] = organisation.edit(lib, favourites, favorite=True)
+    existing = {r["name"].casefold(): r["id"] for r in lib.db.execute(
+        "SELECT id, name FROM albums WHERE kind='manual' AND rule_json IS NULL ORDER BY id DESC")}
+    for name, ids in grouped.items():
+        if name.casefold() in existing:
+            album_engine.add(lib, existing[name.casefold()], ids)
+        else:
+            existing[name.casefold()] = album_engine.create(lib, name, ids)
+        summary["albums"] += 1
+    return summary

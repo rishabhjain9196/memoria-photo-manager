@@ -18,7 +18,7 @@ from typing import Optional
 import numpy as np
 from PIL import Image
 
-from . import activity, config, media
+from . import activity, config, disk_speed, media
 from .db import Library
 from .progress import Progress
 
@@ -133,11 +133,12 @@ def _thumb(img: Image.Image, x: float, y: float, w: float, h: float) -> bytes:
     return buf.getvalue()
 
 
-def detect(path) -> list[Face]:
+def detect(path, data: Optional[bytes] = None) -> list[Face]:
     """Faces in one photo: the photo is looked at twice (small faces need more pixels, large faces
-    fewer), overlapping detections are merged, and each face gets its 128-number signature."""
+    fewer), overlapping detections are merged, and each face gets its 128-number signature.
+    ``data`` is the file already read into memory (so reading can be paced per drive)."""
     det, rec = _models()
-    img, _, _ = media.open_oriented(path, LOAD_SIZE)
+    img, _, _ = media.open_oriented(path, LOAD_SIZE, data=data)
     if max(img.size) > LOAD_SIZE:
         img.thumbnail((LOAD_SIZE, LOAD_SIZE), Image.Resampling.LANCZOS)
     img = img.convert("RGB")
@@ -217,27 +218,28 @@ def scan(lib: Library, progress: Optional[Progress] = None, chunk: int = 48) -> 
     _cleanup(lib)
     rows = [dict(r) for r in lib.readable_files("kind='image' AND error IS NULL AND size>0")]
     seen = {r[0]: (r[1], r[2]) for r in lib.db.execute("SELECT file_id, size, mtime FROM face_scans")}
-    todo = [r for r in rows if seen.get(r["id"]) != (r["size"], r["mtime"])]
+    todo = sorted((r for r in rows if seen.get(r["id"]) != (r["size"], r["mtime"])), key=lambda r: r["rel_path"].lower())
     res = ScanResult(photos=len(rows))
 
-    def work(r):
+    def work(r, gate):
         progress.check()
-        lib.check_path(lib.abspath(r["rel_path"]))
+        path = lib.abspath(r["rel_path"])
+        lib.check_path(path)
         try:
-            return r, detect(lib.abspath(r["rel_path"]))
+            return r, detect(path, disk_speed.read_original(path, gate))   # read paced, detect in parallel
         except Exception:
             return r, []          # unreadable: recorded as "no faces" until the file changes
 
     prev = cv2.getNumThreads()
     cv2.setNumThreads(1)          # parallel across photos instead of inside each model
     try:
-        with activity.pool("Face detection", config.WORKERS), ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
-            for start in range(0, len(todo), chunk):
-                part = list(pool.map(work, todo[start:start + chunk]))
-                _store(lib, part)
-                res.checked += len(part)
-                res.faces += sum(len(f) for _, f in part)
-                progress.update(res.checked, len(todo), f"Looking for faces… {res.checked:,} of {len(todo):,} photos")
+        for start in range(0, len(todo), chunk):
+            part = list(disk_speed.paced_map(work, todo[start:start + chunk], lambda r: lib.abspath(r["rel_path"]),
+                                             "Face detection", hold_gate=False))
+            _store(lib, part)
+            res.checked += len(part)
+            res.faces += sum(len(f) for _, f in part)
+            progress.update(res.checked, len(todo), f"Looking for faces… {res.checked:,} of {len(todo):,} photos")
     finally:
         cv2.setNumThreads(prev)
     progress.update(len(todo), len(todo), "Grouping faces into people…", force=True)

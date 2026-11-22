@@ -69,8 +69,9 @@ the rendered page).
   managed virtual environment. Startup checks never install automatically.
 - **Find → Review → Confirm → Apply → Undo** for file clean-up, with plain-language reasons for suggestions.
   Irreversible personal catalogue clearing has a separate acknowledgement.
-- **iPhone imports**: HEIC/HEIF photos and MOV videos are supported. Apple `.AAE` edit sidecars are protected from
-  Tidy up, not treated as junk. Matching same-folder names link image/video parts, RAW+JPEG and AAE/XMP sidecars for
+- **iPhone imports**: HEIC/HEIF photos and MOV videos are supported. Apple `.AAE` edit sidecars next to their photo
+  are protected from Tidy up, not treated as junk; `.AAE`/`.XMP` sidecars whose photo is no longer in the same
+  folder are offered as *Edit sidecars without their photo*. Matching same-folder names link image/video parts, RAW+JPEG and AAE/XMP sidecars for
   reviewed moves, archival copies and Recovery/Undo. These links are inferred, not proof of an Apple asset identity;
   Apple edit instructions are preserved as files, not applied to previews.
 - **Multi-folder libraries**: keep the current catalogue home and add other media folders/drives without copying
@@ -111,6 +112,10 @@ the rendered page).
   data) to any folder. The backup is opened read-only; copies keep each file's original date; files are written to
   `.part` and renamed only when complete; existing files are never replaced (clashes get " (2)"); an interrupted
   import resumes. Encrypted and unfinished backups are flagged. Also available as `tools/extract_ios_backup.py`.
+  Library imports also read the iPhone's Photos library (`Photos.sqlite`, from a temporary copy) to keep
+  favourites, your albums, the Hidden album (as *Hidden on iPhone*) and the date Photos shows, including for
+  matching photos the library already held, and leave out photos in Recently Deleted. Both are options; only the
+  catalogue changes.
 - **Compare & sync up to three libraries**: this library is **A**; add a phone backup, laptop folder or drive as
   **B** and optionally **C**. A compatible Memoria catalogue in B/C is reused read-only (an incompatible or newer
   one is ignored); other fingerprints are cached in a comparison index stored in the **master** library you choose,
@@ -232,7 +237,7 @@ Existing installations need one manual pull/restart to receive the new Updates s
 | **People** | Faces found offline and grouped by person. Name groups, join them, correct mistakes (*Not this person*), find look-alikes, hide strangers, make an album. Names are searchable in Photos & videos. | Nothing (catalogue only) |
 | **Duplicates** | Folder-grouped exact sets, adaptive comparisons, exact/subset labels and overridable keep recommendations. Current-comparison removal plus confirmed folder/all-group keep-one cleanup. | Moves reviewed redundant content to Recovery; multi-group cleanup retains verified copies and unique linked content |
 | **Similar & best shots** | Bursts, retakes and resized copies, with an explained best pick. The *Similar videos* tab finds re-encoded and trimmed copies. A *Blurry photos* tab has three sensitivities, and nothing is pre-ticked. | Moves ticked items to Recovery |
-| **Tidy up** | Thumbs.db, desktop.ini, .DS_Store, `._` files, partial downloads, empty files and folders. Unreadable media and stray documents start unticked. | Moves files to Recovery; removes empty folders (undo recreates them) |
+| **Tidy up** | Thumbs.db, desktop.ini, .DS_Store, `._` files, partial downloads, empty files and folders, and `.AAE`/`.XMP` sidecars whose photo is gone. Unreadable media and stray documents start unticked. | Moves files to Recovery; removes empty folders (undo recreates them) |
 | **Organise by date** | Moves files into `2024\2024-07`-style folders using the camera date, then a date in the file name. Files dated only by modified time are skipped unless you opt in. | Moves files inside the library |
 | **Albums** | Suggested/static albums plus saved-rule smart albums; bounded album/member pages, rule editing and verified exports. | Catalogue edits; export writes verified copies (undoable) |
 | **Editor** | Crop, rotate, flip, straighten, adjust, filter, resize, compress, split and join photos; trim, split, join, crop, rotate, adjust, change speed and mute videos. Live preview, batch apply. | Writes new files (never changes originals); undoable |
@@ -492,7 +497,7 @@ recoverable journal entries retained. Newly discovered parts are not silently ab
 
 **Review inferred links carefully.** A companion video or sidecar can be unique even when the photo is a duplicate.
 These operations require acknowledgement even with Quick remove enabled. Tidy will not remove linked assets or
-protected AAE files; review them from Photos & videos instead. This is not Apple-edit rendering, embedded-motion
+protected AAE files (those next to their photo); review them from Photos & videos instead. This is not Apple-edit rendering, embedded-motion
 playback, or content-identifier matching for arbitrarily renamed components.
 
 ## Tags, ratings and smart albums

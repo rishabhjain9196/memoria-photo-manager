@@ -14,7 +14,7 @@ from typing import Optional
 
 import numpy as np
 
-from . import activity, config, dates, media
+from . import activity, config, dates, disk_speed, media
 from .actions import Action
 from .db import Library
 from .progress import Progress
@@ -162,14 +162,19 @@ def _ensure_faces(lib: Library, rows: list[dict], progress: Progress) -> None:
     if not todo:
         return
 
-    def work(r):
-        return r["id"], media.count_faces(lib.abspath(r["rel_path"]))
+    def work(r, gate):
+        path = lib.abspath(r["rel_path"])
+        try:
+            data = disk_speed.read_original(path, gate)
+        except OSError:
+            data = None
+        return r["id"], media.count_faces(path, data)
 
     updates = []
-    with activity.pool("Face counting", config.WORKERS), ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
-        for i, (fid, n) in enumerate(pool.map(work, todo), 1):
-            progress.update(i, len(todo), f"Looking for faces… {i:,} of {len(todo):,}")
-            updates.append((n if n is not None else -1, fid))
+    for i, (fid, n) in enumerate(disk_speed.paced_map(work, todo, lambda r: lib.abspath(r["rel_path"]),
+                                                      "Face counting", hold_gate=False), 1):
+        progress.update(i, len(todo), f"Looking for faces… {i:,} of {len(todo):,}")
+        updates.append((n if n is not None else -1, fid))
     with lib.transaction() as db:
         db.executemany("UPDATE files SET faces=? WHERE id=?", updates)
     faces = {fid: n for n, fid in updates}

@@ -8,12 +8,14 @@ each file and compare:
 """
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-from . import activity, config, sniff
+import xxhash
+
+from . import config, disk_speed, sniff
 from .db import Library
 from .hashing import full_hash
 from .progress import Progress
@@ -38,11 +40,12 @@ class HealthReport:
     offline_roots: int = 0
 
 
-def _decode_ok(path) -> Optional[str]:
+def _decode_ok(path, data: Optional[bytes] = None) -> Optional[str]:
+    import io
     from PIL import Image
     try:
         from .config import longpath
-        with Image.open(longpath(path)) as im:
+        with Image.open(io.BytesIO(data) if data is not None else longpath(path)) as im:
             if im.format == "JPEG":
                 im.draft("RGB", (256, 256))
             im.load()
@@ -64,15 +67,31 @@ def run_health(lib: Library, progress: Optional[Progress] = None, decode_images:
     total = len(rows)
     total_bytes = sum(r["size"] for r in rows) or 1
 
-    def check(r):
+    def check(r, gate):
         p = lib.abspath(r["rel_path"])
         lib.check_path(p)
-        h = full_hash(p)
+        # One paced read per file: the same bytes are hashed and (for photos) test-decoded.
+        try:
+            data = disk_speed.read_original(p, gate)
+        except OSError:
+            return r, "unreadable", "File could not be read", None
+        if data is not None:
+            h = xxhash.xxh3_128(data).hexdigest()
+        else:
+            with gate or contextlib.nullcontext():
+                h = full_hash(p)
         if h is None:
             return r, "unreadable", "File could not be read", None
-        err = _decode_ok(p) if decode_images and r["kind"] == "image" else None
+        err = None
+        if decode_images and r["kind"] == "image":
+            if data is not None:
+                err = _decode_ok(p, data)
+            else:
+                with gate or contextlib.nullcontext():
+                    err = _decode_ok(p)
         if err:
-            err += sniff.tag(sniff.identify_file(p, r["ext"]))
+            err += sniff.tag(sniff.identify(data[:65536], len(data), r["ext"], data[-4096:]) if data is not None
+                             else sniff.identify_file(p, r["ext"]))
         elif r["error"] and r["kind"] == "video":
             diagnosis = sniff.identify_file(p, r["ext"])
             if diagnosis:
@@ -92,18 +111,17 @@ def run_health(lib: Library, progress: Optional[Progress] = None, decode_images:
 
     now = datetime.now().isoformat(sep=" ", timespec="seconds")
     updates, done_bytes = [], 0
-    with activity.pool("Health readers", max(2, config.WORKERS // 2)), \
-            ThreadPoolExecutor(max_workers=max(2, config.WORKERS // 2)) as pool:
-        for i, (r, status, detail, h) in enumerate(pool.map(check, rows), 1):
-            done_bytes += r["size"]
-            rep.counts[status] += 1
-            rep.checked += 1
-            if status in ("damaged", "unreadable", "edited"):
-                rep.problems.append({**r, "status": status, "detail": detail})
-            if h and status != "damaged":
-                # Keep the old fingerprint for damaged files so the problem stays visible.
-                updates.append((h, r["size"], r["mtime"], now, h, r["id"]))
-            progress.update(done_bytes, total_bytes, f"Checking files… {i:,} of {total:,}")
+    for i, (r, status, detail, h) in enumerate(disk_speed.paced_map(
+            check, rows, lambda r: lib.abspath(r["rel_path"]), "Health readers", hold_gate=False), 1):
+        done_bytes += r["size"]
+        rep.counts[status] += 1
+        rep.checked += 1
+        if status in ("damaged", "unreadable", "edited"):
+            rep.problems.append({**r, "status": status, "detail": detail})
+        if h and status != "damaged":
+            # Keep the old fingerprint for damaged files so the problem stays visible.
+            updates.append((h, r["size"], r["mtime"], now, h, r["id"]))
+        progress.update(done_bytes, total_bytes, f"Checking files… {i:,} of {total:,}")
     rep.bytes = done_bytes
     with lib.transaction() as db:
         db.executemany("UPDATE files SET baseline_hash=?, baseline_size=?, baseline_mtime=?, checked_at=?, "

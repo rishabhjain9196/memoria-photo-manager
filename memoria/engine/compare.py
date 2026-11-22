@@ -7,12 +7,11 @@ from __future__ import annotations
 
 import os
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from . import activity, config, roots
+from . import config, disk_speed, roots
 from .actions import Action
 from .db import Library, LibraryUnavailable
 from .hashing import full_hash
@@ -110,12 +109,12 @@ def _hash_ours(lib: Library, rows: list[dict], progress: Progress, total: int) -
         return r, full_hash(lib.abspath(r["rel_path"]))
 
     updates = []
-    with activity.pool("Hashing library", config.WORKERS), ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
-        for i, (r, h) in enumerate(pool.map(work, todo), 1):
-            r["chash"] = h
-            if h:
-                updates.append((r["id"], None, h))
-            progress.update(i, total, f"Reading library files… {i:,} of {len(todo):,}")
+    for i, (r, h) in enumerate(disk_speed.paced_map(work, todo, lambda r: lib.abspath(r["rel_path"]),
+                                                    "Hashing library"), 1):
+        r["chash"] = h
+        if h:
+            updates.append((r["id"], None, h))
+        progress.update(i, total, f"Reading library files… {i:,} of {len(todo):,}")
     lib.set_hashes(updates)
 
 
@@ -124,10 +123,8 @@ def _hash_theirs(root: Path, files: list[OtherFile], progress: Progress, offset:
         t.hash = full_hash(root / t.rel_path)
         return t
 
-    with activity.pool("Reading other folder", max(2, config.WORKERS // 2)), \
-            ThreadPoolExecutor(max_workers=max(2, config.WORKERS // 2)) as pool:
-        for i, _ in enumerate(pool.map(work, files), 1):
-            progress.update(offset + i, total, f"Reading files in the other folder… {i:,} of {len(files):,}")
+    for i, _ in enumerate(disk_speed.paced_map(work, files, lambda t: root / t.rel_path, "Reading other folder"), 1):
+        progress.update(offset + i, total, f"Reading files in the other folder… {i:,} of {len(files):,}")
 
 
 def plan_sync(lib: Library, result: CompareResult, to_other: list[dict], to_library: list[OtherFile]) -> list[Action]:

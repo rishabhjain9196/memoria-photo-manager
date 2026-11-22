@@ -332,3 +332,52 @@ def reset_cache() -> None:
         _cache.clear()
         _paths.clear()
         _gates.clear()
+
+
+def read_original(path, gate=None) -> Optional[bytes]:
+    """The whole file, read under ``gate``; None when it is larger than the in-memory limit."""
+    import contextlib
+    from . import config
+    p = config.longpath(path)
+    if os.path.getsize(p) > config.IN_MEMORY_READ_LIMIT:
+        return None
+    with gate or contextlib.nullcontext():
+        with open(p, "rb", buffering=0) as f:
+            return f.read()
+
+
+def paced_map(fn, items, path_of, name: str, *, hold_gate: bool = True, max_workers: Optional[int] = None):
+    """Yield ``fn`` results for ``items`` in folder order, with each drive's concurrent-read limit.
+
+    ``hold_gate=True``: ``fn(item)`` runs entirely inside the item's drive gate (for work that is
+    mostly reading, such as hashing). ``hold_gate=False``: ``fn(item, gate)`` gets the gate and holds
+    it only around its reads, so decoding and other CPU work keep every worker busy even on a hard disk.
+    """
+    import contextlib
+    from concurrent.futures import ThreadPoolExecutor
+    from . import activity, config
+    ordered = sorted(items, key=lambda item: str(path_of(item)).lower())
+    if not ordered:
+        return
+    by_folder: dict[str, _Gate] = {}
+
+    def gate_of(item) -> _Gate:
+        folder = os.path.dirname(str(path_of(item)))
+        gate = by_folder.get(folder)
+        if gate is None:
+            gate = by_folder[folder] = io_gate(folder or ".")
+        return gate
+
+    gates = [gate_of(item) for item in ordered]
+    readers = sum({id(g): g.plan["workers"] for g in gates}.values())
+    workers = max(1, min(max_workers or config.WORKERS, readers if hold_gate else config.WORKERS))
+
+    def run(pair):
+        item, gate = pair
+        if hold_gate:
+            with gate or contextlib.nullcontext():
+                return fn(item)
+        return fn(item, gate)
+
+    with activity.pool(name, workers), ThreadPoolExecutor(max_workers=workers) as pool:
+        yield from pool.map(run, zip(ordered, gates))

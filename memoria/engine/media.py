@@ -242,7 +242,7 @@ def load_for_display(path: str | Path, max_side: int) -> Image.Image:
 _FACE_LOCAL = threading.local()
 
 
-def count_faces(path: str | Path) -> Optional[int]:
+def count_faces(path: str | Path, data: Optional[bytes] = None) -> Optional[int]:
     """Frontal face count using OpenCV's bundled Haar cascade (None if unavailable)."""
     try:
         import cv2
@@ -250,7 +250,7 @@ def count_faces(path: str | Path) -> Optional[int]:
         if cascade is None:
             cascade = _FACE_LOCAL.cascade = cv2.CascadeClassifier(
                 cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        img, _, _ = open_oriented(path, target=640)
+        img, _, _ = open_oriented(path, target=640, data=data)
         img.thumbnail((640, 640))
         gray = np.asarray(img.convert("L"))
         faces = cascade.detectMultiScale(gray, scaleFactor=1.15, minNeighbors=6, minSize=(32, 32))

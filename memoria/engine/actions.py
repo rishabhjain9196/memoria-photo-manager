@@ -281,6 +281,7 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
     reserved, completed = set(), 0
     counted = {"items": 0, "bytes": 0}
     finished_bytes = 0
+    fingerprint = _Fingerprints()
 
     def report(message: str, extra: int = 0, force: bool = False) -> None:
         done_bytes = min(total_bytes, counted["bytes"] + extra)
@@ -292,6 +293,8 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
             progress.update(counted["items"], total, message, force,
                             detail={"items": (counted["items"], total), "unit": "file"})
     try:
+        fingerprint.prefetch([a.src for a in actions if a.op != "rmdir" and (a.hash or a.op != "copy")]
+                             + [g for a in actions for g, _ in a.guards], progress)
         for unit in units:
             counted["items"], counted["bytes"] = completed, finished_bytes
             name = Path(unit[0].src).name
@@ -319,11 +322,11 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
                         lib.check_path(guard)
                     if a.dst:
                         lib.check_path(a.dst)
-                    problem = _preflight(a, src, verified)
+                    problem = _preflight(a, src, verified, fingerprint)
                     if problem:
                         break
                     if a.op in ("move", "recycle") and not a.hash:
-                        a.hash = full_hash(src)
+                        a.hash = fingerprint(src)
                         if not a.hash:
                             raise OSError("Could not fingerprint the file for safe rollback")
                     if a.file_id is None and lib.contains(src) and a.op in ("move", "recycle"):
@@ -358,7 +361,7 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
                     if dst is not None:
                         lib.check_path(dst)
                     if a.asset_group:
-                        problem = _preflight(a, src)
+                        problem = _preflight(a, src, fingerprint=fingerprint)
                         if problem:
                             raise OSError(problem)
                     db.execute("UPDATE operations SET status='publishing' WHERE id=?", (op["id"],))
@@ -367,6 +370,7 @@ def apply(lib: Library, kind: str, title: str, actions: list[Action],
                         try:
                             if a.op in ("recycle", "move"):
                                 safe_move(src, dst)
+                                fingerprint.forget(src)
                             elif a.op == "copy":
                                 verified_copy(src, dst, a.hash)
                         finally:
@@ -501,16 +505,65 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
-def _preflight(a: Action, src: Path, verified: Optional[set] = None) -> Optional[str]:
+class _Fingerprints:
+    """Fingerprints for one batch, read once up front in folder order at each drive's pace.
+
+    Every check still happens at execution time: a cached fingerprint is reused only while the file's
+    size and modification time (to the nanosecond) are unchanged; otherwise the file is read again.
+    """
+
+    def __init__(self) -> None:
+        self._known: dict[str, tuple[int, int, str]] = {}
+
+    def prefetch(self, paths, progress: Progress) -> None:
+        from . import disk_speed
+        paths = sorted({str(p) for p in paths})
+        if len(paths) < 2:
+            return
+
+        def read(path):
+            progress.check()
+            try:
+                before = os.stat(L(path))
+                digest = full_hash(path)
+                after = os.stat(L(path))
+            except OSError:
+                return path, None
+            same = (before.st_size, before.st_mtime_ns) == (after.st_size, after.st_mtime_ns)
+            return path, (after.st_size, after.st_mtime_ns, digest) if digest and same else None
+
+        for index, (path, entry) in enumerate(disk_speed.paced_map(read, paths, lambda p: p, "Verifying"), 1):
+            if entry:
+                self._known[path] = entry
+            progress.update(index, len(paths), "Checking files before making changes",
+                            detail={"items": (index, len(paths)), "unit": "file"})
+
+    def forget(self, path) -> None:
+        self._known.pop(str(path), None)
+
+    def __call__(self, path) -> Optional[str]:
+        entry = self._known.get(str(path))
+        if entry:
+            try:
+                st = os.stat(L(path))
+            except OSError:
+                return None
+            if (st.st_size, st.st_mtime_ns) == entry[:2]:
+                return entry[2]
+        return full_hash(path)
+
+
+def _preflight(a: Action, src: Path, verified: Optional[set] = None, fingerprint=None) -> Optional[str]:
     if a.op not in ("copy", "move", "recycle", "rmdir"):
         return "unsupported file operation"
+    fingerprint = fingerprint or full_hash
     verified = verified if verified is not None else set()
     for gpath, ghash in a.guards:
         if (gpath, ghash) in verified:
             continue
         if not _ex(gpath):
             return f"the copy being kept ({Path(gpath).name}) is missing"
-        if full_hash(gpath) != ghash:
+        if fingerprint(gpath) != ghash:
             return f"the copy being kept ({Path(gpath).name}) has changed"
         verified.add((gpath, ghash))
     if a.op == "rmdir":
@@ -526,10 +579,10 @@ def _preflight(a: Action, src: Path, verified: Optional[set] = None) -> Optional
         return "file size changed since review"
     if a.mtime is not None and abs(st.st_mtime - a.mtime) > 0.001:
         return "file was modified since review"
-    if a.hash and full_hash(src) != a.hash:
+    if a.hash and fingerprint(src) != a.hash:
         return "file content changed since review"
     if a.op == "copy" and not a.hash:
-        a.hash = full_hash(src)
+        a.hash = fingerprint(src)
         if not a.hash:
             return "file could not be fingerprinted for a safe copy and Undo"
     return None

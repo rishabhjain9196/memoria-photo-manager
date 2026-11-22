@@ -174,6 +174,27 @@ def test_duplicate_removal_and_undo(library):
     assert actions.batches(library)[0]["status"] == "undone"
 
 
+def test_duplicate_removal_reads_each_file_once_and_rechecks_late_edits(library, monkeypatch):
+    groups = duplicates.find_duplicates(library)
+    plan = duplicates.plan_removal(library, groups)
+    reads = []
+    monkeypatch.setattr(actions, "full_hash", lambda p: reads.append(str(p)) or full_hash(p))
+    late = Path(plan[-1].src)
+    prefetch = actions._Fingerprints.prefetch
+
+    def then_edit(self, paths, progress):
+        prefetch(self, paths, progress)
+        with open(late, "r+b") as fh:                      # edited after the up-front read
+            fh.seek(10)
+            fh.write(b"late edit")
+    monkeypatch.setattr(actions._Fingerprints, "prefetch", then_edit)
+    res = actions.apply(library, "duplicates", "Remove duplicates", plan)
+    assert res.done == len(plan) - 1 and late.exists()
+    assert any("modified since review" in m for m in res.messages)
+    involved = {a.src for a in plan} | {g for a in plan for g, _ in a.guards}
+    assert len(reads) == len(involved)                     # one read per file, keepers included
+
+
 def test_duplicate_removal_skips_changed_files(library):
     groups = duplicates.find_duplicates(library)
     g0, g1 = groups[0], groups[1]
@@ -300,8 +321,10 @@ def test_tidy_apply_and_undo(library):
 def test_tidy_protects_apple_sidecars_and_healthy_heif(library, expected):
     if not expected["heic"]:
         pytest.skip("HEIF encoder unavailable for the generated fixture")
-    protected = ("iPhone Edits\\IMG_1.AAE", "iPhone Edits\\IMG_2.aAe", "Only edits\\empty.aae")
-    for rel, data in zip(protected, (b"<plist>edit one</plist>", b"<plist>edit two</plist>", b"")):
+    protected = ("iPhone Edits\\IMG_1.AAE", "iPhone Edits\\IMG_E1.xmp")
+    orphans = ("iPhone Edits\\IMG_2.aAe", "Only edits\\empty.aae", "Only edits\\IMG_9.JPG.xmp")
+    for rel, data in zip((*protected, *orphans), (b"<plist>edit one</plist>", b"<x/>", b"<plist>edit two</plist>",
+                                                   b"", b"<x/>")):
         path = library.abspath(rel)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
@@ -312,18 +335,19 @@ def test_tidy_protects_apple_sidecars_and_healthy_heif(library, expected):
     assert row["kind"] == "image" and row["error"] is None and library.thumbnail(row["id"])
     before = tree_snapshot(library.root)
     report = tidy.find_tidy(library)
-    assert report.protected_sidecars == 3
-    candidates = {r["rel_path"] for rows in report.items.values() for r in rows}
-    assert not candidates.intersection((*protected, heif, *expected["heic"]))
-    assert "Only edits" not in {r["rel_path"] for r in report.items["folders"]}
-    for rel in protected:
-        with pytest.raises(ValueError, match="AAE.*protected"):
-            tidy.plan_actions(library, report, {"other": [dict(library.file_by_rel(rel))]})
+    assert report.protected_sidecars == 1
+    assert sorted(r["rel_path"] for r in report.items["orphan_sidecars"]) == sorted(orphans)
+    candidates = {r["rel_path"] for c, rows in report.items.items() if c != "orphan_sidecars" for r in rows}
+    assert not candidates.intersection((*protected, *orphans, heif, *expected["heic"]))
+    assert "Only edits" in {r["rel_path"] for r in report.items["folders"]}
+    with pytest.raises(ValueError, match="AAE.*protected"):
+        tidy.plan_actions(library, report, {"other": [dict(library.file_by_rel(protected[0]))]})
     result = actions.apply(library, "tidy", "Review all cleanup categories",
                            tidy.plan_actions(library, report, report.items))
     assert result.ok
     for rel in (*protected, heif, *expected["heic"]):
         assert full_hash(library.abspath(rel)) == before[rel]
+    assert not any(library.abspath(rel).exists() for rel in orphans)
     assert actions.undo(library, result.batch_id).ok
     assert tree_snapshot(library.root) == before
 
@@ -430,10 +454,19 @@ def test_reconcile_interrupted_batch(library):
 def test_cancel_stops_cleanly(library):
     groups = duplicates.find_duplicates(library)
     plan = duplicates.plan_removal(library, groups)
-    prog = Progress(callback=lambda d, t, m: prog.cancel_event.set() if d >= 1 else None, interval=0)
+    prog = Progress(callback=lambda d, t, m: prog.cancel_event.set() if d >= 1 and not m.startswith("Checking")
+                    else None, interval=0)
     res = actions.apply(library, "duplicates", "Remove", plan, prog)
     assert res.cancelled and 0 < res.done < len(plan)
     assert actions.undo(library, res.batch_id).ok
+
+
+def test_cancel_while_checking_changes_nothing(library):
+    before = tree_snapshot(library.root)
+    plan = duplicates.plan_removal(library, duplicates.find_duplicates(library))
+    prog = Progress(callback=lambda d, t, m: prog.cancel_event.set(), interval=0)
+    res = actions.apply(library, "duplicates", "Remove", plan, prog)
+    assert res.cancelled and res.done == 0 and tree_snapshot(library.root) == before
 
 
 def test_empty_recovery_is_explicit(library):

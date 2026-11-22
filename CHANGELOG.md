@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### iPhone favourites, albums and dates
+- Importing an iPhone backup into the library now reads the phone's Photos library (from a temporary copy; the
+  backup is never changed) and keeps favourites, your albums, the Hidden album (as *Hidden on iPhone*) and the date
+  Photos shows (a new *iPhone Photos date* source that rescans keep). It also applies to matching photos the
+  library already held. Photos in Recently Deleted are left out. Both are options in the import dialog.
+
+### Leftover edit sidecars in Tidy up
+- New category **Edit sidecars without their photo**: `.AAE`/`.XMP` files whose photo or video is no longer in the
+  same folder (left behind by moves or duplicate clean-up). Ticked by default, moved to Recovery, undoable.
+  Sidecars next to their photo (including `IMG_E1234` edited renders) stay protected.
+
+### Faster on hard disks
+- Bulk changes (duplicate clean-up, Tidy, Compare actions) read every file they check once, in folder order and at
+  each drive's pace, before moving anything; a kept copy shared by many duplicates is no longer re-read for each
+  one. Files are still checked again just before each change.
+- People, Similar videos, Health check, Compare and library comparisons pace their reads per drive and read in
+  folder order; Health check reads each file once to both fingerprint and decode it.
+
 ### Compare & sync: act on any part of the Venn diagram
 - Clicking a file in a pane now shows the photo (or a video frame) with its size, date and where each copy lives,
   plus Open and Show in folder.

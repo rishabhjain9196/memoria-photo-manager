@@ -175,7 +175,7 @@ def _scan_root(lib: Library, source: dict, progress: Progress) -> ScanResult:
             db.execute("DELETE FROM missing_files WHERE file_id=?", (row["id"],))
         db.executemany("INSERT INTO files (rel_path, folder, name, ext, kind, size, mtime, root_id) "
                        "VALUES (?,?,?,?,?,?,?,?)", new_rows)
-        reset = ", ".join(f"{c}=CASE WHEN date_source='manual' THEN {c} END" if c in ("taken_at", "date_source")
+        reset = ", ".join(f"{c}=CASE WHEN date_source IN {dates.KEPT} THEN {c} END" if c in ("taken_at", "date_source")
                           else f"{c}=NULL" for c in DERIVED if c != "analyzed")
         db.executemany(f"UPDATE files SET size=?, mtime=?, analyzed=0, {reset} WHERE id=?", changed_ids)
     lib.mark_missing(removed)
@@ -257,9 +257,9 @@ def _analyze_one(path: Path, kind: str, name: str, mtime: float, size: int = -1,
 _COLS = ("width", "height", "taken_at", "date_source", "camera", "lat", "lon", "duration", "dhash",
          "sharpness", "brightness", "contrast", "clipped", "error", "fps", "video_codec", "audio_codec",
          "iso", "aperture", "exposure_seconds", "focal_length_mm", "lens")
-# A date the user set in Memoria survives re-analysis (SQLite evaluates CASE against the old row).
-_KEEP_MANUAL = {"taken_at": "taken_at=CASE WHEN date_source='manual' THEN taken_at ELSE ? END",
-                "date_source": "date_source=CASE WHEN date_source='manual' THEN date_source ELSE ? END"}
+# A date the user chose (in Memoria or iPhone Photos) survives re-analysis (SQLite evaluates CASE against the old row).
+_KEEP_MANUAL = {"taken_at": f"taken_at=CASE WHEN date_source IN {dates.KEPT} THEN taken_at ELSE ? END",
+                "date_source": f"date_source=CASE WHEN date_source IN {dates.KEPT} THEN date_source ELSE ? END"}
 _ANALYSIS_SET = ", ".join(_KEEP_MANUAL.get(c, f"{c}=?") for c in _COLS)
 DATES_MARKER = "dates-v2.done"
 

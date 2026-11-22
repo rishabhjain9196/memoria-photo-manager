@@ -83,7 +83,8 @@ class TidyPage(Page):
             f"Protected: {fmt_n(report.protected_sidecars, 'Apple .AAE edit sidecar')} left untouched. "
             "These can preserve Apple photo edits; Memoria does not apply those edits.")
         self.sidecar_note.setVisible(report.protected_sidecars > 0)
-        self.ctx.set_badge("tidy", report.count("junk") + report.count("empty") + report.count("folders"))
+        self.ctx.set_badge("tidy", report.count("junk") + report.count("empty") + report.count("folders")
+                           + report.count("orphan_sidecars"))
         groups = []
         for cat, (title, desc, default) in tidy.CATEGORIES.items():
             items = self.report.items.get(cat, [])
@@ -143,7 +144,7 @@ class TidyPage(Page):
             return
         sel = self._selected()
         if any(tidy.is_apple_edit_sidecar(row["rel_path"])
-               for category, rows in sel.items() if category != "folders" for row in rows):
+               for category, rows in sel.items() if category not in ("folders", "orphan_sidecars") for row in rows):
             MessageDialog(self, "Tidy selection needs review",
                           "Apple .AAE edit sidecars are protected from Tidy up. "
                           "Keep them with your photos. Nothing was moved.").exec()

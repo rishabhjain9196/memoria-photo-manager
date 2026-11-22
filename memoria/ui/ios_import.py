@@ -53,6 +53,14 @@ class IosImportDialog(Dialog):
             self.boxes[key] = box
             cat_layout.addWidget(box)
         cats.setLayout(cat_layout)
+        self.keep_details = QCheckBox("Keep iPhone favourites, albums and dates")
+        self.keep_details.setToolTip("Reads the iPhone's Photos library from the backup: favourites, your albums, "
+                                     "the Hidden album and the date Photos shows. Applied to the copies and to "
+                                     "matching photos already in this library. Files are never edited.")
+        self.skip_deleted = QCheckBox("Skip photos in Recently Deleted")
+        self.skip_deleted.setToolTip("Photos you deleted on the iPhone that it still kept for 30 days.")
+        for box in (self.keep_details, self.skip_deleted):
+            box.setChecked(True)
         self.total = label("", "small", wrap=True)
         self.go_btn = button("Import", "primary", self.accept)
 
@@ -63,7 +71,7 @@ class IosImportDialog(Dialog):
                    hbox(self.picker, button("Other backup folder…", on_click=self._choose_backup)),
                    self.state, self.to_library, self.to_folder,
                    hbox(20, self.folder, self.browse_folder),
-                   label("What to copy"), cats, self.total,
+                   label("What to copy"), cats, self.keep_details, self.skip_deleted, self.total,
                    hbox(None, button("Cancel", on_click=self.reject), self.go_btn),
                    spacing=10, margins=(22, 18, 22, 18))
         self.setLayout(lay)
@@ -154,6 +162,10 @@ class IosImportDialog(Dialog):
         library_mode = self.to_library.isChecked()
         self.folder.setEnabled(not library_mode)
         self.browse_folder.setEnabled(not library_mode)
+        camera = self.boxes["camera_roll"].isChecked()
+        self.keep_details.setVisible(library_mode)
+        self.keep_details.setEnabled(camera)
+        self.skip_deleted.setEnabled(camera)
         if self.entries is not None:
             self._summary = iosbackup.summarize(self.entries, media_only=library_mode)
         files = size = 0
@@ -181,4 +193,6 @@ class IosImportDialog(Dialog):
         destination = (iosbackup.default_library_folder(self.library, self.backup) if library_mode
                        else Path(self.folder.text().strip()))
         return {"backup": self.backup, "entries": self.entries, "categories": categories,
-                "destination": destination, "library_mode": library_mode}
+                "destination": destination, "library_mode": library_mode,
+                "keep_details": library_mode and self.keep_details.isChecked() and self.keep_details.isEnabled(),
+                "skip_deleted": self.skip_deleted.isChecked() and self.skip_deleted.isEnabled()}

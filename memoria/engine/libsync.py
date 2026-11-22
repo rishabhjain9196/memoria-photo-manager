@@ -23,12 +23,11 @@ import os
 import re
 import sqlite3
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
-from . import activity, assets, config
+from . import assets, config, disk_speed
 from .actions import Action
 from .db import SCHEMA_VERSION, Library, LibraryUnavailable
 from .hashing import full_hash
@@ -643,6 +642,8 @@ def compare(lib: Library, others: list[str | Path], master: int = 0, media_only:
 
 
 def _fingerprint(todo: list[Entry], progress: Progress) -> None:
+    """Hash files folder by folder within each drive's read limit (an external hard disk reads one file
+    at a time instead of seeking between several)."""
     if not todo:
         return
     total = len(todo)
@@ -652,10 +653,8 @@ def _fingerprint(todo: list[Entry], progress: Progress) -> None:
         entry.hash = full_hash(entry.path)
         return entry
 
-    with activity.pool("Fingerprinting", max(2, config.WORKERS // 2)), \
-            ThreadPoolExecutor(max_workers=max(2, config.WORKERS // 2)) as pool:
-        for number, _ in enumerate(pool.map(work, todo), 1):
-            progress.update(number, total, f"Fingerprinting files that could match... {number:,} of {total:,}")
+    for number, _ in enumerate(disk_speed.paced_map(work, todo, lambda e: e.path, "Fingerprinting"), 1):
+        progress.update(number, total, f"Fingerprinting files that could match... {number:,} of {total:,}")
 
 
 # saved relationships ----------------------------------------------------------------------

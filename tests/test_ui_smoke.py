@@ -138,7 +138,7 @@ def test_tidy_protects_sidecars_and_explains_analysis_errors(tmp_path, monkeypat
     app = QApplication.instance() or QApplication([])
     root = tmp_path / "library"
     root.mkdir()
-    (root / "IMG_1.AAE").write_bytes(b"<plist>Apple editing instructions</plist>")
+    (root / "IMG_2.AAE").write_bytes(b"<plist>Apple editing instructions</plist>")
     (root / "IMG_2.HEIF").write_bytes(b"incomplete test photo")
     lib = Library(root)
     runner = TaskRunner()
@@ -169,11 +169,11 @@ def test_tidy_protects_sidecars_and_explains_analysis_errors(tmp_path, monkeypat
         assert page.grab().save(str(tmp_path / "tidy-sidecars.png"))
         notices = []
         monkeypatch.setattr(MessageDialog, "exec", lambda self: notices.append(self.windowTitle()) or 0)
-        monkeypatch.setattr(page, "_selected", lambda: {"other": [dict(lib.file_by_rel("IMG_1.AAE"))]})
+        monkeypatch.setattr(page, "_selected", lambda: {"other": [dict(lib.file_by_rel("IMG_2.AAE"))]})
         page.apply()
         assert notices == ["Tidy selection needs review"]
         assert not runner.active
-        assert (root / "IMG_1.AAE").read_bytes() == b"<plist>Apple editing instructions</plist>"
+        assert (root / "IMG_2.AAE").read_bytes() == b"<plist>Apple editing instructions</plist>"
         assert (root / "IMG_2.HEIF").read_bytes() == b"incomplete test photo"
     finally:
         page.close()

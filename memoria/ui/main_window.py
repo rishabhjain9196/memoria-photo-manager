@@ -768,12 +768,32 @@ class MainWindow(QMainWindow):
         if not choices:
             return
         library_mode = choices["library_mode"]
+        keep_details, skip_deleted = choices.get("keep_details"), choices.get("skip_deleted")
 
         def work(prog):
+            from ..engine import scanner
             try:
-                return iosbackup.extract(choices["backup"], choices["destination"], choices["categories"],
-                                         progress=prog, media_only=library_mode,
-                                         library=lib if library_mode else None, entries=choices["entries"])
+                entries, photos, deleted = choices["entries"], {}, 0
+                if keep_details or skip_deleted:
+                    prog.update(0, 1, "Reading the iPhone Photos library…")
+                    photos = iosbackup.read_photos_library(choices["backup"], entries)
+                if skip_deleted and photos:
+                    kept = [e for e in entries if not ((info := iosbackup.photo_info(e, photos)) and info.trashed)]
+                    deleted = sum(1 for e in entries if e.category in choices["categories"]) - sum(
+                        1 for e in kept if e.category in choices["categories"])
+                    entries = kept
+                details_step = keep_details and bool(photos)
+                result = iosbackup.extract(choices["backup"], choices["destination"], choices["categories"],
+                                           progress=prog.step(0, 2, "Copying") if details_step else prog,
+                                           media_only=library_mode,
+                                           library=lib if library_mode else None, entries=entries)
+                result.recently_deleted = deleted
+                if details_step and (result.placed or result.matched):
+                    step = prog.step(1, 2, "Adding iPhone favourites, albums and dates")
+                    scanner.scan(lib, step)
+                    result.details = iosbackup.apply_photos_details(lib, choices["destination"], entries,
+                                                                    result, photos)
+                return result
             finally:
                 if library_mode:
                     lib.close_thread()
@@ -782,6 +802,14 @@ class MainWindow(QMainWindow):
             parts = [f"Copied {fmt_n(result.copied, 'file')} ({fmt_size(result.copied_bytes)})"]
             if result.already_in_library:
                 parts.append(f"{fmt_n(result.already_in_library, 'file')} already in the library")
+            if result.recently_deleted:
+                parts.append(f"{fmt_n(result.recently_deleted, 'file')} in Recently Deleted skipped")
+            if result.details:
+                d = result.details
+                bits = [fmt_n(d[k], noun) for k, noun in (("favourites", "favourite"), ("albums", "album"),
+                                                         ("dates", "iPhone date")) if d[k]]
+                if bits:
+                    parts.append("kept " + ", ".join(bits))
             if result.resumed:
                 parts.append(f"{fmt_n(result.resumed, 'file')} copied earlier")
             if result.renamed:
@@ -797,6 +825,8 @@ class MainWindow(QMainWindow):
                 self.toast.show_message(message, seconds=8)
             if library_mode and result.copied:
                 QTimer.singleShot(0, self.index_library)
+            elif library_mode and result.details:
+                self.ctx.library_modified.emit()
             elif not library_mode:
                 show_in_explorer(result.destination)
 

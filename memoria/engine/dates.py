@@ -20,15 +20,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
-LABELS = {"manual": "Set in Memoria", "exif": "Camera date", "metadata": "Embedded date", "sidecar": "Sidecar file",
+LABELS = {"manual": "Set in Memoria", "iphone": "iPhone Photos date", "exif": "Camera date",
+          "metadata": "Embedded date", "sidecar": "Sidecar file",
           "filename": "Date in file name", "inferred": "From matching file", "modified": "File modified date (less reliable)"}
-SHORT_LABELS = {"manual": "set in Memoria", "exif": "camera", "metadata": "embedded metadata", "sidecar": "sidecar file",
+SHORT_LABELS = {"manual": "set in Memoria", "iphone": "iPhone Photos", "exif": "camera", "metadata": "embedded metadata",
+                "sidecar": "sidecar file",
                 "filename": "file name", "inferred": "matching file", "modified": "file date — may be inaccurate"}
 SOURCES = frozenset(LABELS)
 # Precise enough to group bursts (seconds matter).
-PRECISE = ("exif", "metadata", "sidecar", "manual")
+PRECISE = ("exif", "metadata", "sidecar", "manual", "iphone")
 # Good enough for albums, timelines and organising by date.
-RELIABLE = ("exif", "metadata", "sidecar", "filename", "inferred", "manual")
+RELIABLE = ("exif", "metadata", "sidecar", "filename", "inferred", "manual", "iphone")
+# Chosen by the user (in Memoria or in iPhone Photos): re-analysis keeps these.
+KEPT = ("manual", "iphone")
 
 _MIN_YEAR = 1990
 
