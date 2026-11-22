@@ -500,9 +500,11 @@ explain what each tool would do for this library.</figcaption></figure>
 
 <section id="performance">
 <h2>Performance as a design requirement</h2>
-<p>The target is responsive browsing of a 200–300 GB library without needing a duplicate library to test it.
+<p>The target is responsive use of a ~500 GB library (in practice ~90,000 files / 420 GB is used daily) and correct,
+if slower, operation up to about a million files, without needing a duplicate library to test it.
 File count, codecs, drive speed and matching density matter more than GB alone. Responsiveness is a target, not a
-guarantee on arbitrary drives or files.</p>
+guarantee on arbitrary drives or files. Look-alike photo matching is the one quadratic step (about 7 minutes for a
+million photos); everything else grows linearly.</p>
 <ul>
   <li>Incremental scan: unchanged files (same size and modified time) are skipped — a rescan of 1,000 photos takes 0.01 s.</li>
   <li>JPEG decoding at reduced resolution and parallel analysis (≈180 photos/s on the benchmark machine).</li>

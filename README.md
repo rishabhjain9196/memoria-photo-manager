@@ -48,6 +48,9 @@ the rendered page).
 
 ## Highlights
 
+- **Built for big libraries**: used on ~90,000 files / 420 GB, so ~500 GB libraries work well; up to ~1 million
+  files are supported. Photos are read once while indexing, reads are paced for hard disks, and Find duplicates
+  reuses the saved fingerprints. See [Performance](#library-size-what-works-well) for measured limits.
 - **15 focused pages** replace the 20 commands of the old command-line tool, plus **Check everything**: one read-only
   pass that runs every finder and puts count badges in the sidebar.
 - **Updates**: opt into an upstream check when the app opens, or check manually. Source checkouts can pull a
@@ -495,7 +498,42 @@ not subsequently changed; explicit organisation/album resets cannot be undone th
 
 ## Performance
 
-### Libraries around 200-300 GB
+### Library size: what works well
+
+Memoria is used day to day on real libraries of **about 90,000 files and 420 GB** (82,000 photos, 4,000 videos,
+on a 16 GB RAM PC), so **libraries around 500 GB work well**. What matters is the **number of files**, not total
+gigabytes: a 2 TB library of long videos is lighter work than 500 GB of phone photos.
+
+Measured on that library (local diagnostic reports): rescanning for changes took 1-49 s, Find duplicates 5-17 s once
+photos were fingerprinted, and the app's peak memory stayed under 4 GB.
+
+How each part grows with the library, measured on synthetic catalogues (12 worker threads):
+
+| Part | Grows with | 100k files | 400k files | 1M files (estimate) |
+|---|---|---|---|---|
+| Find duplicates (fingerprints saved) | files, linear | 3.6 s · 0.13 GB RAM | 13 s · 0.5 GB | ~35 s · ~1.3 GB |
+| Similar photos (look-alike comparison) | photos², quadratic | 4 s | 64 s | ~7 min |
+| Catalogue database | files, linear | ~25-50 MB | ~100-200 MB | ~0.25-0.5 GB |
+| Thumbnails | photos, linear | ~0.5-1.5 GB | ~2-6 GB | ~5-15 GB |
+
+The first full index is limited by the drive, because every photo is read once (videos are only sampled). That
+read also stores the content fingerprints, so later duplicate searches don't touch the disk again. As a rough guide
+for 500 GB of typical phone media (about 40% of it photos): **10-20 minutes on an SSD, 30-60 minutes on a hard
+disk**; the drive type is detected and reads are paced to suit it. Later rescans only read new or changed files.
+
+**Practical limits**
+- **Up to ~250,000 files** (roughly 1-2 TB of photos): everything is interactive; the slowest step, Similar photos,
+  takes well under a minute.
+- **Up to ~1,000,000 files**: works, but Similar photos takes several minutes and finding duplicates needs a
+  couple of GB of RAM. Thumbnails need 5-15 GB of free space next to the library.
+- **Beyond ~1,000,000 files**: Similar photos grows with the square of the photo count (2M photos ≈ 30 min), so
+  split the collection into several libraries (for example per decade or per person). Everything else keeps
+  scaling linearly; the SQLite catalogue itself has no practical size limit here.
+
+These figures depend on the CPU, the drive and the media mix. Turn on [local diagnostics](#local-diagnostics) to
+record timings for your own library.
+
+### Memory and disk use
 
 Indexing reads originals in place; it does not make a second copy of the library. It does need
 space for the catalogue and thumbnails. Analysis has a bounded queue of pending jobs, and the
