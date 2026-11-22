@@ -69,7 +69,7 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
         quiet_since = None
         while time.monotonic() < end:
             app.processEvents()
-            busy = win.runner.busy or any(
+            busy = win.runner.busy or bool(win.ctx.parallel.tasks) or any(
                 worker.running for worker in win.findChildren(QObject)
                 if isinstance(worker, (BackgroundCall, LatestCall)))
             if busy:
@@ -85,7 +85,7 @@ def run(library: str, out: str, interactive_flows: bool = True) -> list[str]:
         if not control.isVisible() or not control.isEnabled():
             raise RuntimeError(f"Task button is unavailable: {control.text()}")
         control.click()
-        if not win.runner.busy:
+        if not win.runner.busy and not win.ctx.parallel.tasks:
             raise RuntimeError(f"Button did not start a task: {control.text()}")
         idle()
 

@@ -122,7 +122,7 @@ def test_live_photos_before_completion_keep_view_stable_and_actions_locked(tmp_p
         if cancel:
             window.runner.cancel()
         release.set()
-        wait_for(lambda: not window.runner.busy and not window.ctx.indexing)
+        wait_for(lambda: not window.runner.active and not window.ctx.indexing)
         assert not errors
         assert page.selected()[0]["id"] == selected and page.preview.row is preview
         assert page._live_deferred and page.update_view.isVisible()
@@ -130,7 +130,7 @@ def test_live_photos_before_completion_keep_view_stable_and_actions_locked(tmp_p
         assert catalogue.browse_progress(window.ctx.library)["ready"] >= 1
         if cancel:
             window.index_library()
-            wait_for(lambda: not window.runner.busy and not window.ctx.indexing)
+            wait_for(lambda: not window.runner.active and not window.ctx.indexing)
         page.update_view.click()
         wait_for(lambda: not page._query.running)
         assert {row["name"] for row in page.grid.items()} == {"0.jpg", "1.jpg"}

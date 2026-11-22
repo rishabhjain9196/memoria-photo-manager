@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .. import __version__
-from . import catalogue, config
+from . import catalogue, config, dates
 from .db import METADATA_VERSION, SCHEMA_VERSION, Library
 from .progress import Cancelled
 
@@ -218,7 +218,7 @@ def build_report(lib: Library, metrics: Metrics, revision=None, active_task=None
             "formats": _safe_groups(db, "ext", frozenset(FORMATS)),
             "video_codecs": _safe_groups(db, "video_codec", VIDEO_CODECS, "kind='video'"),
             "audio_codecs": _safe_groups(db, "audio_codec", AUDIO_CODECS, "kind='video'", audio=True),
-            "date_sources": _safe_groups(db, "date_source", frozenset(("exif", "metadata", "filename", "modified"))),
+            "date_sources": _safe_groups(db, "date_source", dates.SOURCES),
             "file_size": _histogram(db, "f.size", (1024**2, 10*1024**2, 100*1024**2, 1024**3),
                                     ("under_1_MiB", "1_to_10_MiB", "10_to_100_MiB", "100_MiB_to_1_GiB", "1_GiB_or_more")),
             "megapixels": _histogram(db, catalogue.METRICS["megapixels"], (1, 4, 12, 24, 48),

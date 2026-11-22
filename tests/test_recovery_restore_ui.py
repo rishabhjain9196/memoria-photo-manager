@@ -280,11 +280,11 @@ def test_history_restore_button_restores_logged_and_unlogged_files_with_folder_c
         assert page.restore_rec.isEnabled()
         page.restore_rec.click()
         deadline = time.monotonic() + 15
-        while (ctx.runner.busy or page.bg.running or page.op_bg.running) and time.monotonic() < deadline:
+        while (ctx.runner.active or page.bg.running or page.op_bg.running) and time.monotonic() < deadline:
             app.processEvents()
             time.sleep(.005)
         app.processEvents()
-        assert not ctx.runner.busy and not errors, errors
+        assert not ctx.runner.active and not errors, errors
         assert len(dialogs) == 1
         assert original.read_bytes() == b"existing photo must stay"
         assert (trip / "extra.jpg").read_bytes() == b"existing extra must stay"

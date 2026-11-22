@@ -74,7 +74,7 @@ class TidyPage(Page):
         def done(report):
             if (lib, generation) == (self.lib, self.ctx.generation):
                 self._show(report)
-        if not self.run("Looking for leftovers", work, done):
+        if not self.run("Looking for leftovers", work, done, read_only=True):
             self.stale = True
 
     def _show(self, report: tidy.TidyReport) -> None:

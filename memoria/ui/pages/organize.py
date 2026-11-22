@@ -24,7 +24,8 @@ class OrganizePage(Page):
         super().__init__(ctx)
         self.pattern = QComboBox()
         for key, (_, example) in organize.PATTERNS.items():
-            self.pattern.addItem(f"{example}\\photo.jpg", key)
+            self.pattern.addItem(f"{example}\\photo.jpg" + ("   (events and trips, named by place)"
+                                                              if key == "events" else ""), key)
         self.uncertain = QCheckBox("Also move files whose only date is the file's modified date (often wrong for copies)")
         self.cleanup = QCheckBox("Remove folders that end up empty")
         self.cleanup.setChecked(True)
@@ -92,7 +93,7 @@ class OrganizePage(Page):
             if (lib, generation) == (self.lib, self.ctx.generation):
                 self._show(plan)
         self.run("Planning date folders",
-                 work, done)
+                 work, done, read_only=True)
 
     def _show(self, plan) -> None:
         self.plan = plan

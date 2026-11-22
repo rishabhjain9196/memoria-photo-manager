@@ -5,17 +5,19 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QImage, QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QHeaderView, QInputDialog,
-                               QLineEdit, QListWidget, QListWidgetItem, QRadioButton, QSizePolicy, QSplitter,
+                               QLabel, QLineEdit, QListWidget, QListWidgetItem, QRadioButton, QSizePolicy, QSplitter,
                                QStackedWidget, QTabWidget, QTreeWidget, QTreeWidgetItem, QWidget)
 
 from ...engine import libsync
 from .. import theme
 from ..motion import Dialog
 from ..review_pages import ReviewGroup, ReviewPages
+from ..tasks import LatestCall
 from ..venn import VennWidget, side_colors
-from ..widgets import Banner, Card, EmptyState, HelpToggle, MessageDialog, button, fmt_n, fmt_size, hbox, label, scroll, vbox
+from ..widgets import (Banner, Card, EmptyState, HelpToggle, MessageDialog, button, fmt_date, fmt_n, fmt_size, hbox,
+                       label, open_path, scroll, show_in_explorer, vbox)
 from .base import Page
 
 FILES_PER_FOLDER = 400
@@ -27,6 +29,25 @@ LAZY_ROLE = Qt.ItemDataRole.UserRole + 2
 def _also_in(entry: libsync.Entry, count: int) -> str:
     others = [libsync.letter(side) for side in libsync.bits(entry.mask) if side != entry.side and side < count]
     return ", ".join(others) if others else "-"
+
+
+def _preview_image(path, kind: str):
+    """A small QImage of a photo or a video frame, read off the UI thread; None if it can't be shown."""
+    try:
+        if kind == "photo":
+            from ...engine.media import load_for_display
+            img = load_for_display(path, 440)
+            try:
+                return QImage(img.tobytes(), img.width, img.height, img.width * 3, QImage.Format.Format_RGB888).copy()
+            finally:
+                img.close()
+        if kind == "video":
+            from ...engine import ffmpeg
+            frame = ffmpeg.video_frame(path, 1.0, 440)
+            return QImage.fromData(frame) if frame else None
+    except Exception:
+        return None
+    return None
 
 
 class SidePane(QFrame):
@@ -203,6 +224,8 @@ class ComparePage(Page):
         self.venn.region_clicked.connect(lambda mask: self._set_view(("region", mask)))
         self.filters = QListWidget()
         self.filters.setMinimumHeight(200)
+        self.filters.setWordWrap(True)
+        self.filters.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.filters.currentItemChanged.connect(self._filter_chosen)
         overview = QWidget()
         overview.setLayout(vbox(label("Overview", "h2"), self.venn,
@@ -217,10 +240,24 @@ class ComparePage(Page):
         self.panes = [SidePane(self, side) for side in range(libsync.MAX_LIBRARIES)]
         pane_row = QWidget()
         pane_row.setLayout(hbox(*self.panes, spacing=8))
-        self.entry_info = label("Select a file to see where each copy lives.", "small", wrap=True)
-        self.entry_info.setTextFormat(Qt.TextFormat.PlainText)
+        self.entry_info = label("Select a file to see it and where each copy lives.", "small", wrap=True)
+        self.entry_info.setTextFormat(Qt.TextFormat.RichText)
+        self.preview_img = QLabel()
+        self.preview_img.setFixedSize(220, 165)
+        self.preview_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_img.setStyleSheet(f"background:{theme.PREVIEW_BG}; border-radius:8px; color:{theme.MUTED};")
+        self.preview_open = button("Open", on_click=lambda: self._open_entry(False))
+        self.preview_show = button("Show in folder", on_click=lambda: self._open_entry(True))
+        self._preview_entry = None
+        for b in (self.preview_open, self.preview_show):
+            b.setEnabled(False)
+        preview_card = Card(hbox(self.preview_img, vbox(self.entry_info, None, hbox(self.preview_open,
+                                                                                    self.preview_show, None)),
+                                 spacing=12))
+        self.preview_bg = LatestCall(self)
+        self.preview_bg.result.connect(self._preview_loaded)
         files_tab = QWidget()
-        files_tab.setLayout(vbox(self.view_title, pane_row, self.entry_info, spacing=6, margins=(0, 8, 0, 0)))
+        files_tab.setLayout(vbox(self.view_title, pane_row, preview_card, spacing=6, margins=(0, 8, 0, 0)))
         self.map_from, self.map_to = QComboBox(), QComboBox()
         self.map_from.currentIndexChanged.connect(self._render_mapping)
         self.map_to.currentIndexChanged.connect(self._render_mapping)
@@ -241,14 +278,40 @@ class ComparePage(Page):
         self.tabs.addTab(files_tab, "Files side by side")
         self.tabs.addTab(mapping_tab, "Folder mapping")
 
-        # actions ------------------------------------------------------------------------
-        self.mode = QComboBox()
-        self.mode.addItem("One-way backup", "one-way")
-        self.mode.addItem("Two-way sync", "two-way")
-        self.mode.setToolTip("One-way copies what the destination is missing. Two-way also copies back what the "
-                             "source is missing. Neither removes or overwrites files.")
-        self.source, self.target = QComboBox(), QComboBox()
-        self.source_label, self.target_label = label("From", "small"), label("To", "small")
+        # actions: one panel acting on the selected region ------------------------------------
+        self.sel_title = label("", "h2", wrap=True)
+        self.sel_counts = label("", "small", wrap=True)
+        self.side_group = QButtonGroup(self)
+        self.side_buttons = [QRadioButton() for _ in range(libsync.MAX_LIBRARIES)]
+        side_row = QWidget()
+        side_layout = vbox(spacing=2)
+        for side, radio in enumerate(self.side_buttons):
+            self.side_group.addButton(radio, side)
+            radio.toggled.connect(self._update_actions)
+            side_layout.addWidget(radio)
+        side_row.setLayout(side_layout)
+        self.type_boxes: dict[str, QCheckBox] = {}
+        types_row = QWidget()
+        from PySide6.QtWidgets import QGridLayout
+        types_layout = QGridLayout()
+        types_layout.setContentsMargins(0, 0, 0, 0)
+        types_layout.setHorizontalSpacing(10)
+        types_layout.setVerticalSpacing(2)
+        for index, (kind, title, tip) in enumerate((
+                ("photo", "Photos", ""), ("video", "Videos", ""),
+                ("sidecar", "Sidecars", "Small edit/metadata files next to photos (.AAE, .XMP…). Apple .AAE files "
+                 "hold Photos-app edits; they are often only on the phone backup."),
+                ("other", "Other files", ""))):
+            box = QCheckBox(title)
+            box.setChecked(True)
+            box.setToolTip(tip)
+            box.toggled.connect(self._update_actions)
+            self.type_boxes[kind] = box
+            types_layout.addWidget(box, index // 2, index % 2)
+        types_row.setLayout(types_layout)
+
+        self.target = QComboBox()
+        self.target.setToolTip("Where the copies go. Only content the destination doesn't already have is copied.")
         self.merge = QRadioButton("Merge into matching folders")
         self.merge.setToolTip("New files go into the folder that already holds most of the same photos "
                               "(see Folder mapping).")
@@ -258,39 +321,44 @@ class ComparePage(Page):
         placement = QButtonGroup(self)
         placement.addButton(self.merge)
         placement.addButton(self.mirror)
-        self.copy_view_only = QCheckBox("Only files in the current view")
+        self.both_ways = QCheckBox("Also copy back what this library is missing")
         self.copy_summary = label("", "small", wrap=True)
-        self.copy_btn = button("Review && choose files...", "primary", self.review_copy)
-        for widget in (self.mode, self.source, self.target):
-            widget.currentIndexChanged.connect(self._update_actions)
-        for widget in (self.merge, self.copy_view_only):
-            widget.toggled.connect(self._update_actions)
-        sync_card = Card(vbox(
-            label("Copy missing files", "h2"),
-            label("Copy-only: nothing is overwritten or deleted on either side.", "small", wrap=True),
-            self.mode, hbox(self.source_label, self.source), hbox(self.target_label, self.target),
-            label("Where new files go", "small"),
-            self.merge, self.mirror, self.copy_view_only, self.copy_summary, hbox(None, self.copy_btn), spacing=6))
-        self.remove_from = QComboBox()
-        self.remove_from.currentIndexChanged.connect(self._update_actions)
-        self.remove_view_only = QCheckBox("Only files in the current view")
-        self.remove_view_only.toggled.connect(self._update_actions)
+        self.copy_btn = button("Copy…", "primary", self.review_copy)
+        self.layout_ref = QComboBox()
+        self.layout_ref.setToolTip("Shared files are moved so each sits at the same folder and name as in this library.")
+        self.layout_summary = label("", "small", wrap=True)
+        self.layout_btn = button("Rearrange…", on_click=self.review_layout)
+        self.move_btn = button("Move into a folder…", on_click=self.review_move)
+        self.album_btn = button("Make an album…", on_click=self.make_album,
+                                tip="Album of these files in this library, to tag, date, edit or export them together.")
         self.remove_summary = label("", "small", wrap=True)
-        self.remove_btn = button("Review removal...", on_click=self.review_removal)
-        remove_card = Card(vbox(
-            label("Remove duplicates", "h2"),
-            hbox(label("From", "small"), self.remove_from),
-            HelpToggle("Files whose exact content is also in another library. They go to that library's own Recovery "
-                       "folder and can be undone from History. A photo moves only together with its Live Photo "
-                       "video, RAW and edit files.", "What gets removed — undo from History"),
-            self.remove_view_only, self.remove_summary, hbox(None, self.remove_btn), spacing=6))
+        self.remove_btn = button("Move to Recovery…", "danger", self.review_removal)
+        for widget in (self.target, self.layout_ref):
+            widget.currentIndexChanged.connect(self._update_actions)
+        for widget in (self.merge, self.both_ways):
+            widget.toggled.connect(self._update_actions)
+
+        def section(title, *items):
+            return vbox(label(title, "small"), *items, spacing=4)
+        act_card = Card(vbox(
+            label("Act on these files", "small"), self.sel_title, self.sel_counts,
+            section("Copies in", side_row), section("File types", types_row),
+            section("Copy to another library", hbox(self.target, self.copy_btn), self.merge, self.mirror,
+                    self.both_ways, self.copy_summary),
+            section("Give the same folder layout as", hbox(self.layout_ref, self.layout_btn), self.layout_summary),
+            section("Reorganise or edit", hbox(self.move_btn, self.album_btn, None)),
+            section("Delete", hbox(self.remove_btn, None), self.remove_summary),
+            HelpToggle("Nothing changes until you review and confirm. Copies never overwrite, moves keep every file, "
+                       "and Move to Recovery puts files in that library's own Recovery folder, so everything can be "
+                       "undone from History & recovery.", "Safe by design — review first, undo anytime"),
+            spacing=10))
         actions = QWidget()
-        actions.setLayout(vbox(sync_card, remove_card, None, spacing=10))
+        actions.setLayout(vbox(act_card, None, spacing=10))
         actions_scroll = scroll(actions)
         actions_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         actions_scroll.setMinimumWidth(320)
         actions_scroll.setMaximumWidth(380)
-        for combo in (self.mode, self.source, self.target, self.remove_from):
+        for combo in (self.target, self.layout_ref):
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             combo.setMinimumContentsLength(12)
             combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -372,8 +440,9 @@ class ComparePage(Page):
 
     def profile_data(self) -> dict:
         return {"others": self._others(), "master": self.master.currentData() or 0,
-                "media_only": self.media_only.isChecked(), "mode": self.mode.currentData(),
-                "source": self.source.currentData() if self.source.count() else 1,
+                "media_only": self.media_only.isChecked(),
+                "mode": "two-way" if self.both_ways.isChecked() else "one-way",
+                "source": self.side_group.checkedId() if self.side_group.checkedId() >= 0 else 1,
                 "target": self.target.currentData() if self.target.count() else 0,
                 "placement": "merge" if self.merge.isChecked() else "mirror"}
 
@@ -418,8 +487,10 @@ class ComparePage(Page):
         profile, self._pending_profile = self._pending_profile, None
         if not profile:
             return
-        self.mode.setCurrentIndex(max(0, self.mode.findData(profile.get("mode", "one-way"))))
-        self.source.setCurrentIndex(max(0, self.source.findData(profile.get("source", 1))))
+        self.both_ways.setChecked(profile.get("mode") == "two-way")
+        source = profile.get("source", 1)
+        if 0 <= source < len(self.side_buttons) and self.side_buttons[source].isVisible():
+            self.side_buttons[source].setChecked(True)
         self.target.setCurrentIndex(max(0, self.target.findData(profile.get("target", 0))))
         (self.mirror if profile.get("placement") == "mirror" else self.merge).setChecked(True)
 
@@ -436,7 +507,7 @@ class ComparePage(Page):
                 return libsync.compare(lib, others, master=master, media_only=media_only, progress=progress)
             finally:
                 lib.close_thread()
-        self.run("Comparing libraries", work, self.show_result)
+        self.run("Comparing libraries", work, self.show_result, read_only=True)
 
     def show_result(self, cmp: libsync.Comparison) -> None:
         previous = self.result
@@ -457,9 +528,8 @@ class ComparePage(Page):
         self.venn.set_data([participant.label for participant in cmp.participants], cmp.regions())
         for side, pane in enumerate(self.panes):
             pane.setVisible(side < cmp.count)
-        keep = {combo: combo.currentData() for combo in (self.source, self.target, self.remove_from,
-                                                          self.map_from, self.map_to)}
-        defaults = {self.source: 1, self.target: 0, self.remove_from: 1, self.map_from: 1, self.map_to: 0}
+        keep = {combo: combo.currentData() for combo in (self.target, self.layout_ref, self.map_from, self.map_to)}
+        defaults = {self.target: 0, self.layout_ref: 0, self.map_from: 1, self.map_to: 0}
         same_shape = previous is not None and previous.count == cmp.count
         for combo, default in defaults.items():
             combo.blockSignals(True)
@@ -479,11 +549,14 @@ class ComparePage(Page):
 
     def _fill_filters(self) -> None:
         cmp = self.result
-        options = [("Everything (union)", ("all", 0)), (f"In all {cmp.count} (intersection)", ("every", 0))]
+        letters = [libsync.letter(side) for side in range(cmp.count)]
+        union, inter = " or ".join(letters), " ∩ ".join(letters)
+        options = [(f"Everything (in {union})", ("all", 0)), (f"In all {cmp.count} ({inter})", ("every", 0))]
         if cmp.count == 3:
             options.append(("In two or more (shared)", ("shared", 0)))
-        options += [(f"Only in {libsync.letter(side)}", ("only", side)) for side in range(cmp.count)]
-        options += [(f"Missing from {libsync.letter(side)}", ("missing", side)) for side in range(cmp.count)]
+        options += [(f"Only in {letters[side]}", ("only", side)) for side in range(cmp.count)]
+        if cmp.count == 3:   # with two libraries "missing from A" is the same as "only in B"
+            options += [(f"Missing from {letters[side]}", ("missing", side)) for side in range(cmp.count)]
         regions = cmp.regions()
         self.filters.blockSignals(True)
         self.filters.clear()
@@ -543,23 +616,80 @@ class ComparePage(Page):
         accept = self.result.predicate(*self.view)
         for side in range(self.result.count):
             self.panes[side].show_tree(self.result, accept)
-        self.entry_info.setText("Select a file to see where each copy lives.")
+        self.entry_info.setText("Select a file to see it and where each copy lives.")
+        self._preview_entry = None
+        self.preview_img.setPixmap(QPixmap())
+        self.preview_img.setText("")
+        for b in (self.preview_open, self.preview_show):
+            b.setEnabled(False)
+        self._choose_side()
         self._update_actions()
+
+    def _choose_side(self) -> None:
+        """Offer only libraries that have files in this view; prefer the one the view is about."""
+        cmp = self.result
+        accept = cmp.predicate(*self.view)
+        counts = [len(cmp.matching(side, accept)) for side in range(cmp.count)]
+        kind, value = self.view
+        preferred = value if kind == "only" else 0
+        current = self.side_group.checkedId()
+        for side, radio in enumerate(self.side_buttons):
+            radio.blockSignals(True)
+            radio.setVisible(side < cmp.count and counts[side] > 0)
+            if side < cmp.count:
+                radio.setText(f"{libsync.letter(side)} · {cmp.participants[side].label} — {fmt_n(counts[side], 'file')}")
+            radio.blockSignals(False)
+        if current < 0 or current >= cmp.count or not counts[current] or kind == "only":
+            current = preferred if preferred < cmp.count and counts[preferred] else next(
+                (s for s in range(cmp.count) if counts[s]), 0)
+        self.side_buttons[current].blockSignals(True)
+        self.side_buttons[current].setChecked(True)
+        self.side_buttons[current].blockSignals(False)
 
     def show_entry(self, entry, node, side: int) -> None:
         cmp = self.result
         if entry is None:
             if node is not None:
                 self.entry_info.setText(
-                    f"{libsync.letter(side)}: {node.rel or cmp.participants[side].label} - {node.matching:,} of "
+                    f"<b>{libsync.letter(side)}: {node.rel or cmp.participants[side].label}</b><br>{node.matching:,} of "
                     f"{node.total:,} files match this view ({fmt_size(node.bytes)}).")
             return
+        from html import escape
         places = []
         for other in range(cmp.count):
             copies = [entry] if other == side else [copy for copy in cmp.copies(entry) if copy.side == other]
-            where = "; ".join(copy.rel for copy in copies[:3]) + (f" (+{len(copies) - 3})" if len(copies) > 3 else "")
-            places.append(f"{libsync.letter(other)}: {where or 'missing'}")
-        self.entry_info.setText(f"{entry.name} ({fmt_size(entry.size)})   " + "   |   ".join(places))
+            where = "; ".join(escape(copy.rel) for copy in copies[:3]) + (f" (+{len(copies) - 3})" if len(copies) > 3 else "")
+            color = side_colors()[other]
+            places.append(f"<span style='color:{color}'><b>{libsync.letter(other)}</b></span> "
+                          f"{where or '<i>missing</i>'}")
+        from datetime import datetime
+        when = fmt_date(datetime.fromtimestamp(entry.mtime).isoformat(sep=" "), True) if entry.mtime else ""
+        self.entry_info.setText(f"<b>{escape(entry.name)}</b> · {fmt_size(entry.size)} · modified {when}"
+                                f"<br>{'<br>'.join(places)}")
+        self._preview_entry = entry
+        for b in (self.preview_open, self.preview_show):
+            b.setEnabled(True)
+        self.preview_img.setText("Loading…")
+        self.preview_img.setPixmap(QPixmap())
+        path, kind = entry.path, libsync.Comparison.kind(entry)
+        self.preview_bg.call(lambda: (entry, _preview_image(path, kind)))
+
+    def _preview_loaded(self, result) -> None:
+        entry, image = result
+        if entry is not self._preview_entry:
+            return
+        if image is None or image.isNull():
+            self.preview_img.setPixmap(QPixmap())
+            self.preview_img.setText("No preview for this file")
+            return
+        self.preview_img.setText("")
+        self.preview_img.setPixmap(QPixmap.fromImage(image).scaled(
+            self.preview_img.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+
+    def _open_entry(self, reveal: bool) -> None:
+        entry = self._preview_entry
+        if entry is not None:
+            (show_in_explorer if reveal else open_path)(entry.path)
 
     def _render_mapping(self, *_) -> None:
         cmp = self.result
@@ -580,66 +710,122 @@ class ComparePage(Page):
             self.mapping.addTopLevelItem(item)
 
     # actions --------------------------------------------------------------------------------
-    def _view_entries(self, side: int):
-        return self.result.matching(side, self.result.predicate(*self.view))
+    def _side(self) -> int:
+        side = self.side_group.checkedId()
+        return side if self.result is not None and 0 <= side < self.result.count else 0
+
+    def _types(self) -> set[str]:
+        return {kind for kind, box in self.type_boxes.items() if box.isChecked()}
+
+    def _view_entries(self, side: int, typed: bool = True):
+        entries = self.result.matching(side, self.result.predicate(*self.view))
+        if typed:
+            kinds = self._types()
+            entries = [entry for entry in entries if libsync.Comparison.kind(entry) in kinds]
+        return entries
+
+    def selection(self) -> list[libsync.Entry]:
+        """The files the actions apply to: the chosen library's files in this view, of the ticked types."""
+        return self._view_entries(self._side()) if self.result is not None else []
 
     def _excluded(self, source: int, target: int) -> set[str]:
         cmp = self.result
         return set(libsync.load_exclusions(self.lib, cmp.participants[source].root, cmp.participants[target].root))
 
+    def _others_of(self, side: int) -> None:
+        """Copy/layout targets are the other libraries."""
+        cmp = self.result
+        for combo in (self.target, self.layout_ref):
+            keep = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            for other in range(cmp.count):
+                if other != side:
+                    combo.addItem(f"{libsync.letter(other)} - {cmp.participants[other].label}", other)
+            combo.setCurrentIndex(max(0, combo.findData(keep)))
+            combo.blockSignals(False)
+
     def copy_plan(self) -> list[libsync.CopyItem]:
         cmp = self.result
-        source, target = self.source.currentData(), self.target.currentData()
-        if cmp is None or source is None or target is None or source == target:
+        side, target = self._side(), self.target.currentData()
+        if cmp is None or target is None or side == target:
             return []
         placement = "merge" if self.merge.isChecked() else "mirror"
-        directions = [(source, target)] + ([(target, source)] if self.mode.currentData() == "two-way" else [])
-        items = []
-        for frm, to in directions:
-            entries = self._view_entries(frm) if self.copy_view_only.isChecked() else None
-            items.extend(cmp.plan_copy(frm, to, placement, entries, self._excluded(frm, to)))
+        items = list(cmp.plan_copy(side, target, placement, self.selection(), self._excluded(side, target)))
+        if self.both_ways.isChecked():
+            items.extend(cmp.plan_copy(target, side, placement, self._view_entries(target), self._excluded(target, side)))
         return items
 
-    def removal_plan(self):
-        cmp = self.result
-        side = self.remove_from.currentData()
-        if cmp is None or side is None:
-            return None
-        return cmp.plan_removal(side, self._view_entries(side) if self.remove_view_only.isChecked() else None)
-
     def _update_actions(self, *_) -> None:
-        two_way = self.mode.currentData() == "two-way"
-        self.source_label.setText("Between" if two_way else "From")
-        self.target_label.setText("and" if two_way else "To")
-        if self.result is None:
-            self.copy_btn.setEnabled(False)
-            self.remove_btn.setEnabled(False)
+        cmp = self.result
+        controls = (self.copy_btn, self.layout_btn, self.move_btn, self.album_btn, self.remove_btn)
+        if cmp is None:
+            for control in controls:
+                control.setEnabled(False)
             return
+        side = self._side()
+        self._others_of(side)
+        letter_ = libsync.letter(side)
+        everything = self._view_entries(side, typed=False)
+        chosen = self.selection()
+        counts = {kind: 0 for kind in self.type_boxes}
+        for entry in everything:
+            counts[libsync.Comparison.kind(entry)] += 1
+        for kind, box in self.type_boxes.items():
+            box.setText(f"{box.text().split(' (')[0]} ({counts[kind]:,})")
+        self.sel_title.setText(self._view_text(self.view))
+        self.sel_counts.setText(f"{fmt_n(len(chosen), 'file')} in {letter_} ({fmt_size(sum(e.size for e in chosen))}) "
+                                f"of {len(everything):,} in this view")
+        idle = not self.busy
+
         items = self.copy_plan()
         wanted = [item for item in items if not item.excluded]
         skipped = len(items) - len(wanted)
-        if self.source.currentData() == self.target.currentData():
-            self.copy_summary.setText("Choose two different libraries.")
-        elif items:
+        if wanted:
             new_folders = len({(item.target, item.folder.lower()) for item in wanted if not item.merged})
             text = (f"{fmt_n(len(wanted), 'file')} ({fmt_size(sum(item.entry.size for item in wanted))}) to copy"
-                    + (f", {fmt_n(new_folders, 'new folder')}" if new_folders else "") + "."
-                    if wanted else "Nothing new to copy.")
-            if skipped:
-                text += (f" {fmt_n(skipped, 'file')} ({fmt_size(sum(i.entry.size for i in items if i.excluded))}) "
-                         "you chose to keep only where they are - review to change.")
-            self.copy_summary.setText(text)
+                    + (f", {fmt_n(new_folders, 'new folder')}" if new_folders else "") + ".")
         else:
-            self.copy_summary.setText("Nothing to copy - the destination already has all of this content.")
-        self.copy_btn.setEnabled(bool(items) and not self.busy)
-        plan = self.removal_plan()
-        if plan is not None:
-            text = (f"{fmt_n(len(plan.items), 'file')} ({fmt_size(sum(entry.size for entry in plan.items))}) "
-                    "also exist in another library." if plan.items else "No files here exist in another library.")
-            if plan.kept_linked:
-                text += f" {plan.kept_linked} photo(s) stay because their linked parts are not all duplicates."
-            self.remove_summary.setText(text)
-        self.remove_btn.setEnabled(bool(plan and plan.items) and not self.busy)
+            text = "Nothing new to copy - the destination already has this content."
+        if skipped:
+            text += (f" {fmt_n(skipped, 'file')} ({fmt_size(sum(i.entry.size for i in items if i.excluded))}) "
+                     "you chose to keep only where they are - review to change.")
+        self.copy_summary.setText(text)
+        self.copy_btn.setEnabled(bool(items) and idle)
+
+        ref = self.layout_ref.currentData()
+        moves, extra = cmp.plan_match_layout(side, ref, chosen) if ref is not None else ([], 0)
+        shared = sum(1 for entry in chosen if entry.hash and ref is not None and entry.mask & (1 << ref))
+        self.layout_summary.setText(
+            (f"{fmt_n(len(moves), 'file')} in {letter_} would move to the same folder and name as in "
+             f"{libsync.letter(ref)}; {shared - len(moves) - extra:,} already match." if moves else
+             f"Shared files in {letter_} already sit where they are in {libsync.letter(ref)}." if shared else
+             f"No files here are also in {libsync.letter(ref)}.") if ref is not None else "")
+        self.layout_btn.setEnabled(bool(moves) and idle)
+        self.move_btn.setEnabled(bool(chosen) and idle)
+        self.album_btn.setVisible(cmp.participants[side].current)
+        self.album_btn.setEnabled(bool(chosen) and idle and all(entry.file_id for entry in chosen[:1]))
+
+        unique = sum(1 for entry in chosen if not any(c.side != side for c in cmp.copies(entry)))
+        self.remove_summary.setText(
+            (f"{fmt_n(len(chosen), 'file')} to {letter_}'s Recovery folder"
+             + (f"; {fmt_n(unique, 'file')} {'has' if unique == 1 else 'have'} no copy in the other libraries"
+                if unique else "; every one has a copy in another library") + ".") if chosen else "Nothing selected.")
+        self.remove_btn.setEnabled(bool(chosen) and idle)
+
+    def _review_groups(self, pairs, size=lambda pair: pair[0].size):
+        folders: dict[str, list] = {}
+        for pair in pairs:
+            folders.setdefault(pair[0].folder, []).append(pair)
+        return [ReviewGroup(folder, folder or "(library root)", members, size=sum(size(m) for m in members))
+                for folder, members in sorted(folders.items(), key=lambda item: item[0].lower())]
+
+    @staticmethod
+    def _render(pair):
+        entry, action = pair[0], pair[1]
+        row = QTreeWidgetItem([entry.name, fmt_size(entry.size), action.reason])
+        row.setToolTip(0, entry.rel)
+        return row
 
     def review_copy(self) -> None:
         items = self.copy_plan()
@@ -670,39 +856,129 @@ class ComparePage(Page):
             done_message=lambda r: f"Copied and verified {fmt_n(r.done, 'file')} ({fmt_size(r.bytes)}).",
             rescan=any(item.target == 0 for item in chosen))
 
-    def review_removal(self) -> None:
-        plan = self.removal_plan()
-        if plan is None or not plan.items:
+    def review_layout(self) -> None:
+        cmp, side, ref = self.result, self._side(), self.layout_ref.currentData()
+        if cmp is None or ref is None:
             return
-        side = self.remove_from.currentData()
-        folders: dict[str, list] = {}
-        for entry, action in zip(plan.items, plan.actions):
-            folders.setdefault(entry.folder, []).append((entry, action))
-        review = [ReviewGroup(folder, folder or "(library root)", members, size=sum(entry.size for entry, _ in members))
-                  for folder, members in sorted(folders.items(), key=lambda pair: pair[0].lower())]
-
-        def render(_key, pair):
-            entry, action = pair
-            row = QTreeWidgetItem([entry.name, fmt_size(entry.size), action.reason])
-            row.setToolTip(0, entry.rel)
-            return row
-        participant = self.result.participants[side]
-        where = ("this library's Recovery folder" if participant.current
-                 else f"{libsync.letter(side)}'s own Recovery folder ({participant.root}\\.memoria\\recovery)")
+        moves, extra = cmp.plan_match_layout(side, ref, self.selection())
+        if not moves:
+            return
+        participant = cmp.participants[side]
         dialog = PlanReviewDialog(
-            self, f"Remove duplicates from {libsync.letter(side)} · {participant.label}",
-            f"These {fmt_n(len(plan.items), 'file')} ({fmt_size(sum(entry.size for entry in plan.items))}) have an "
-            "identical copy in another library. That copy is kept and checked again before anything moves.",
-            review, ["File", "Size", "Kept copy"], render, lambda pair: pair[0].size,
-            "Move {n} to Recovery", f"<b>Nothing is deleted.</b> Files move to {where}. Undo them from "
-            "<b>History &amp; recovery</b> in this library.", note_kind="warn", danger=True)
+            self, f"Give {libsync.letter(side)} the same folder layout as {libsync.letter(ref)}",
+            f"{fmt_n(len(moves), 'file')} in {libsync.letter(side)} · {participant.label} move to the folder and "
+            f"name they have in {libsync.letter(ref)} · {cmp.participants[ref].label}. Files only in "
+            f"{libsync.letter(side)} stay where they are" + (f"; {fmt_n(extra, 'extra copy', 'extra copies')} of the "
+                                                             "same content also stay" if extra else "") + ".",
+            self._review_groups(moves), ["File", "Size", "Moves to"], lambda _key, pair: self._render(pair),
+            lambda pair: pair[0].size, "Move {n}",
+            "Files are moved, not copied: nothing is deleted or overwritten, and names already used get \" (2)\". "
+            "Undo puts every file back.", note_kind="trust")
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         chosen = [action for _, action in dialog.selected()]
         self.apply_actions(
-            "sync", f"Remove duplicates from {libsync.letter(side)}", chosen,
-            summary=f"{fmt_n(len(chosen), 'file')} will be moved to Recovery.",
-            details=["Each kept copy in another library is checked again before a file moves.", f"Files go to {where}."],
+            "sync", f"Match {libsync.letter(side)} to {libsync.letter(ref)}'s folders", chosen,
+            summary=f"{fmt_n(len(chosen), 'file')} will be moved within {participant.label}.",
+            details=["Each file is checked again before it moves.", "Nothing is overwritten."],
             confirm_text=f"Move {fmt_n(len(chosen), 'file')}", confirm_action=False,
+            note="Undo from History & recovery puts each file back.",
+            done_message=lambda r: f"Moved {fmt_n(r.done, 'file')} to match {libsync.letter(ref)}.",
+            rescan=participant.current)
+
+    def review_move(self) -> None:
+        cmp, side = self.result, self._side()
+        chosen = self.selection()
+        if cmp is None or not chosen:
+            return
+        root = cmp.participants[side].root
+        path = QFileDialog.getExistingDirectory(self, f"Move {len(chosen):,} files into which folder of "
+                                                      f"{libsync.letter(side)}?", str(root))
+        if not path:
+            return
+        target = Path(path).resolve()
+        if target != root and root not in target.parents:
+            MessageDialog(self, "Choose a folder inside the same library",
+                          f"Files can only be moved within {libsync.letter(side)} ({root}). Use Copy to another "
+                          "library to put them somewhere else.").exec()
+            return
+        folder = "" if target == root else str(target.relative_to(root))
+        moves = cmp.plan_move_into(side, chosen, folder)
+        if not moves:
+            self.ctx.toast_requested.emit("Those files are already in that folder.", "")
+            return
+        dialog = PlanReviewDialog(
+            self, f"Move into {folder or root.name}",
+            f"{fmt_n(len(moves), 'file')} move into {folder or 'the library folder'}, keeping their names.",
+            self._review_groups(moves), ["File", "Size", "Reason"], lambda _key, pair: self._render(pair),
+            lambda pair: pair[0].size, "Move {n}", "Nothing is overwritten; Undo puts every file back.",
+            note_kind="trust")
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        acts = [action for _, action in dialog.selected()]
+        self.apply_actions(
+            "sync", f"Move files into {folder or root.name}", acts,
+            summary=f"{fmt_n(len(acts), 'file')} will be moved.", details=["Nothing is overwritten."],
+            confirm_text=f"Move {fmt_n(len(acts), 'file')}", confirm_action=False,
+            note="Undo from History & recovery.", done_message=lambda r: f"Moved {fmt_n(r.done, 'file')}.",
+            rescan=cmp.participants[side].current)
+
+    def make_album(self) -> None:
+        chosen = [entry for entry in self.selection() if entry.file_id]
+        if not chosen:
+            return
+        name, ok = QInputDialog.getText(self, "Make an album", f"Name for an album of {len(chosen):,} files:",
+                                        text=self._view_text(self.view))
+        if not ok or not name.strip():
+            return
+        from ...engine import albums
+        lib, ids = self.lib, [entry.file_id for entry in chosen]
+
+        def work(progress):
+            try:
+                return albums.create(lib, name.strip(), ids)
+            finally:
+                lib.close_thread()
+
+        def done(album_id):
+            self.ctx.albums_changed.emit()
+            self.ctx.album_requested.emit(album_id)
+        self.run("Making an album", work, done)
+
+    def review_removal(self) -> None:
+        cmp, side = self.result, self._side()
+        if cmp is None:
+            return
+        plan = cmp.plan_recycle(side, self.selection())
+        if not plan:
+            return
+        unique = sum(1 for _, _, alone in plan if alone)
+        participant = cmp.participants[side]
+        where = ("this library's Recovery folder" if participant.current
+                 else f"{libsync.letter(side)}'s own Recovery folder ({participant.root}\\.memoria\\recovery)")
+        dialog = PlanReviewDialog(
+            self, f"Move to Recovery from {libsync.letter(side)} · {participant.label}",
+            f"{fmt_n(len(plan), 'file')} ({fmt_size(sum(entry.size for entry, _, _ in plan))}). "
+            + (f"{fmt_n(unique, 'file')} {'has' if unique == 1 else 'have'} no copy in the other compared "
+               "libraries — untick any you want to keep. " if unique else
+               "Each has an identical copy in another library, which is checked again first. "),
+            self._review_groups(plan), ["File", "Size", "Why"], lambda _key, item: self._render(item),
+            lambda item: item[0].size, "Move {n} to Recovery",
+            f"<b>Nothing is deleted.</b> Files move to {where}. Undo them from <b>History &amp; recovery</b> in "
+            "this library.", note_kind="warn", danger=True)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        chosen = dialog.selected()
+        alone = sum(1 for _, _, only in chosen if only)
+        self.apply_actions(
+            "sync", f"Move to Recovery from {libsync.letter(side)}", [action for _, action, _ in chosen],
+            summary=f"{fmt_n(len(chosen), 'file')} will be moved to Recovery.",
+            details=([f"{fmt_n(alone, 'file')} exist only here among the compared libraries."] if alone else
+                     ["Each kept copy in another library is checked again before a file moves."])
+            + [f"Files go to {where}."],
+            confirm_text=f"Move {fmt_n(len(chosen), 'file')}", confirm_action=bool(alone),
+            require_ack=(f"I understand {fmt_n(alone, 'file')} {'has' if alone == 1 else 'have'} no other copy; "
+                         "they go to Recovery and can be restored." if alone else None),
             note="Undo from History & recovery.",
-            done_message=lambda r: f"Moved {fmt_n(r.done, 'file')} ({fmt_size(r.bytes)}) to Recovery.")
+            done_message=lambda r: f"Moved {fmt_n(r.done, 'file')} ({fmt_size(r.bytes)}) to Recovery.",
+            rescan=participant.current)

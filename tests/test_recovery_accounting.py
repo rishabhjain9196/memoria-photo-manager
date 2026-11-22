@@ -409,7 +409,7 @@ def test_history_and_overview_agree_and_explain_incomplete_emptying(small_librar
         notices = []
         monkeypatch.setattr(MessageDialog, "exec", lambda self: notices.append(self.windowTitle()) or 0)
         page.empty_btn.click()
-        _wait(app, lambda: not ctx.runner.busy and bool(notices))
+        _wait(app, lambda: not ctx.runner.active and bool(notices))
         assert notices == ["Can't empty Recovery yet"]
         data = _insights(lib, {"duplicates": [], "similar": [], "organize": SimpleNamespace(items=[])})
         overview._insights(data)
@@ -477,7 +477,7 @@ def test_empty_click_refreshes_stale_accounting_and_requires_acknowledgement(
         return dialog.DialogCode.Rejected if decision == "cancel" else dialog.DialogCode.Accepted
     monkeypatch.setattr(ConfirmDialog, "exec", confirm)
     page.empty_btn.click()
-    _wait(app, lambda: bool(confirmations) and not ctx.runner.busy)
+    _wait(app, lambda: bool(confirmations) and not ctx.runner.active)
     assert not errors, errors
     assert confirmations == ["Empty Recovery?"]
     assert destination.exists() == (decision != "accept")
@@ -511,7 +511,7 @@ def test_empty_self_fixes_and_asks_once_instead_of_blocking(small_library, histo
     page.show()
     _wait(app, lambda: page._accounting_ready)
     page.empty_btn.click()
-    _wait(app, lambda: bool(shown) and not ctx.runner.busy)
+    _wait(app, lambda: bool(shown) and not ctx.runner.active)
     assert not errors and destination.exists(), errors
     assert ("didn't come from a Memoria cleanup" in shown[0]) == (situation in ("untracked", "changed"))
     if situation == "interrupted":  # Finished automatically before asking.
@@ -546,7 +546,7 @@ def test_disconnected_folder_is_the_one_clear_reason_emptying_waits(small_librar
     _wait(app, lambda: page._accounting_ready)
     assert "“Phone” is disconnected" in page.rec_notice.text()
     page.empty_btn.click()
-    _wait(app, lambda: bool(messages) and not ctx.runner.busy)
+    _wait(app, lambda: bool(messages) and not ctx.runner.active)
     assert messages[0][0] == "Can't empty Recovery yet"
     assert "“Phone” is disconnected. Connect it" in messages[0][1] and "Nothing was deleted" in messages[0][1]
 
@@ -567,7 +567,7 @@ def test_recovery_change_during_confirmation_blocks_deletion(small_library, hist
     page.show()
     _wait(app, lambda: page._accounting_ready)
     page.empty_btn.click()
-    _wait(app, lambda: bool(errors) and not ctx.runner.busy)
+    _wait(app, lambda: bool(errors) and not ctx.runner.active)
     assert "Recovery changed" in errors[0][1]
     assert destination.read_bytes() == b"xxx" and extra.read_bytes() == b"new contents"
 

@@ -120,7 +120,7 @@ class GroupReview(QWidget):
                 lib.close_thread()
         self.page.run(f"Finding similar {self.noun}s", work,
                       lambda groups: self._show(groups) if (lib, generation) ==
-                      (self.ctx.library, self.ctx.generation) else None)
+                      (self.ctx.library, self.ctx.generation) else None, read_only=True)
 
     def _show(self, groups) -> None:
         self.groups = groups

@@ -114,6 +114,7 @@ class PhotosPage(Page):
         self.a_story = self.more_menu.addAction("Add to Story maker", self._to_story)
         self.a_video = self.more_menu.addAction("Compress videos", self._to_video)
         self.a_album = self.more_menu.addAction("Add to album…", lambda: self.add_to_album())
+        self.a_date = self.more_menu.addAction("Set date…", self.set_date)
         self.more_menu.addSeparator()
         self.a_copy = self.more_menu.addAction("Copy to folder…", self.copy_selected)
         self.a_move = self.more_menu.addAction("Move to folder in this library…", self.move_selected)
@@ -459,6 +460,55 @@ class PhotosPage(Page):
             self._load_page()
         self.run("Updating organisation", work, done)
 
+    def set_date(self):
+        """Set or clear a Memoria-only date for the selected files (the files themselves are not edited)."""
+        selected = self.selected()
+        if not selected or self.busy:
+            return
+        from datetime import datetime as _dt
+        from PySide6.QtCore import QDateTime
+        from PySide6.QtWidgets import QDateTimeEdit, QRadioButton
+        from ...engine import dates
+        dialog = Dialog(self)
+        dialog.setWindowTitle(f"Set date for {len(selected):,} selected files")
+        first = next((r["taken_at"] for r in selected if r.get("taken_at")), None)
+        picker = QDateTimeEdit(QDateTime.fromString(first[:19], "yyyy-MM-dd HH:mm:ss") if first else
+                               QDateTime.currentDateTime())
+        picker.setCalendarPopup(True)
+        picker.setDisplayFormat("dd MMM yyyy  HH:mm")
+        set_it = QRadioButton("Use this date and time")
+        clear_it = QRadioButton("Clear a date set in Memoria (use the detected date again)")
+        set_it.setChecked(True)
+        clear_it.setEnabled(any(r.get("date_source") == "manual" for r in selected))
+        uncertain = sum(r.get("date_source") == "modified" for r in selected)
+        dialog.setLayout(vbox(
+            label(f"{len(selected):,} selected files" + (f" · {uncertain:,} only have a file-modified date" if uncertain else ""),
+                  "h2"),
+            label("Saved in the catalogue only and kept across rescans; the photo files are not changed. Organise by "
+                  "date, albums, the timeline and Story maker use it.", "small", wrap=True),
+            set_it, hbox(24, picker, None), clear_it,
+            hbox(None, button("Cancel", on_click=dialog.reject), button("Apply", "primary", dialog.accept)),
+            spacing=10, margins=(20, 20, 20, 20)))
+        if not dialog.exec():
+            return
+        lib, ids = self.lib, [r["id"] for r in selected]
+        when = _dt.fromisoformat(picker.dateTime().toString("yyyy-MM-ddTHH:mm:ss")) if set_it.isChecked() else None
+
+        def work(progress):
+            try:
+                progress.check()
+                return dates.set_manual(lib, ids, when)
+            finally:
+                lib.close_thread()
+
+        def done(count):
+            self.ctx.library_modified.emit()
+            self.ctx.toast_requested.emit(
+                f"Set the date of {count:,} files. The photo files were not changed." if when else
+                f"Cleared the set date of {count:,} files; the detected date returns at the next rescan (F5).", "")
+            self._load_page()
+        self.run("Setting dates", work, done)
+
     # --------------------------------------------------------------------------- view / zoom
     def _set_zoom(self, v: int) -> None:
         self.grid.delegate.cell = v
@@ -498,7 +548,8 @@ class PhotosPage(Page):
         videos = [r for r in sel if r["kind"] == "video" and not r.get("error")]
         self.sel_label.setText(f"{n:,} selected · {fmt_size(size)}")
         idle = not self.busy
-        for w in (self.b_recycle, self.b_organise, self.a_copy, self.a_move, self.a_edit, self.a_album, self.a_video):
+        for w in (self.b_recycle, self.b_organise, self.a_copy, self.a_move, self.a_edit, self.a_album, self.a_video,
+                  self.a_date):
             w.setEnabled(idle)
         self.a_story.setEnabled(idle and bool(photos))
         self.a_story.setText(f"Add {len(photos)} photos to Story maker" if len(photos) > 1 else "Add to Story maker")
@@ -654,6 +705,7 @@ class PhotosPage(Page):
             m.addAction("Compress video" + ("s" if len(sel) > 1 else ""), self._to_video)
         m.addAction("Add to album…", lambda: self.add_to_album())
         m.addAction("Tags / rating / favourite / Pick-Reject…", self.edit_organisation)
+        m.addAction("Set date…", self.set_date)
         m.addAction("Copy to folder…", self.copy_selected)
         m.addAction("Move to folder…", self.move_selected)
         m.addSeparator()

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-from . import activity, config
+from . import activity, config, sniff
 from .db import Library
 from .hashing import full_hash
 from .progress import Progress
@@ -71,6 +71,12 @@ def run_health(lib: Library, progress: Optional[Progress] = None, decode_images:
         if h is None:
             return r, "unreadable", "File could not be read", None
         err = _decode_ok(p) if decode_images and r["kind"] == "image" else None
+        if err:
+            err += sniff.tag(sniff.identify_file(p, r["ext"]))
+        elif r["error"] and r["kind"] == "video":
+            diagnosis = sniff.identify_file(p, r["ext"])
+            if diagnosis:
+                err = r["error"].split(" [content:")[0] + sniff.tag(diagnosis)
         if r["baseline_hash"] is None:
             status = "new"
         elif r["baseline_size"] == r["size"] and abs((r["baseline_mtime"] or 0) - r["mtime"]) < 0.001:
@@ -110,3 +116,28 @@ def run_health(lib: Library, progress: Optional[Progress] = None, decode_images:
 
 def last_checked(lib: Library) -> Optional[str]:
     return lib.db.execute("SELECT MAX(checked_at) FROM files").fetchone()[0]
+
+
+def plan_extension_fixes(lib: Library, problems: list[dict]):
+    """Rename actions for files whose content is a known photo/video type under the wrong extension.
+
+    Each file keeps its folder and name; only the extension changes ("IMG_1.jpg" → "IMG_1.mp4",
+    or "IMG_1 (2).mp4" if that name is taken). Applied through the journal, so Undo renames back.
+    """
+    import os
+    from .actions import Action
+    acts, taken = [], set()
+    for p in problems:
+        content = sniff.parse_tag(p.get("detail") or p.get("error"))
+        if not content or content[0] != "wrong_ext" or not content[1]:
+            continue
+        src = str(lib.abspath(p["rel_path"]))
+        stem = os.path.splitext(src)[0]
+        dst, n = stem + content[1], 1
+        while os.path.lexists(config.longpath(dst)) or dst.lower() in taken:
+            n += 1
+            dst = f"{stem} ({n}){content[1]}"
+        taken.add(dst.lower())
+        acts.append(Action(op="move", src=src, dst=dst, size=p["size"], mtime=p["mtime"], hash=p.get("chash"),
+                           file_id=p["id"], reason=f"Content is really {content[1]}"))
+    return acts

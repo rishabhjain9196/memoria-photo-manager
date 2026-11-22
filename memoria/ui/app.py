@@ -90,8 +90,8 @@ def main(argv: list[str] | None = None) -> int:
     win.show()
     args = [a for a in argv[1:] if not a.startswith("-")]
     if args and os.path.isdir(args[0]):
-        win.open_library(args[0])
-    else:
+        win.open_library(args[0], viewer="--browse" in argv)
+    elif "--new-window" not in argv:
         win.restore_last()
     def startup_updates():
         from ..engine import app_updates

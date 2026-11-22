@@ -98,11 +98,11 @@ def test_linked_files_require_confirmation_even_when_quick_mode_skips_it(asset_l
             note=base.recovery_note(), done_message=lambda _: "Moved", confirm_action=False,
             before_apply=lambda: mutations.append(True), on_declined=lambda: declined.append(True))
         deadline = time.monotonic() + 10
-        while runner.busy and time.monotonic() < deadline:
+        while runner.active and time.monotonic() < deadline:
             app.processEvents()
             time.sleep(.01)
         app.processEvents()
-        assert not runner.busy and not errors
+        assert not runner.active and not errors
         assert len(prompts) == 1 and prompts[0][1]["require_ack"]
         assert len(prompts[0][1]["file_ids"]) == 3
         assert prompts[0][0][4] == "Move 3 files"

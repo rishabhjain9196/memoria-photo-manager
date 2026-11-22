@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from . import dates
 from .actions import Action
 from .roots import key_for, split_key
 from .db import Library
@@ -20,10 +21,12 @@ PATTERNS = {
     "year_monthname": ("{year}\\{month} {month_name}", "2024\\07 July"),
     "year_month_day": ("{year}\\{year}-{month}-{day}", "2024\\2024-07-21"),
     "year": ("{year}", "2024"),
+    # Events: photos taken close together (a trip stays together) share a folder named by date and place.
+    "events": ("{year}\\{year}-{month}-{day} {place}", "2024\\2024-07-21 Goa"),
 }
+EVENT_MIN_ITEMS = 3   # smaller groups go to a month folder instead of a folder of their own
 
-SOURCE_LABEL = {"exif": "Camera date", "metadata": "Video date", "filename": "Date in file name",
-                "modified": "File modified date (less reliable)"}
+SOURCE_LABEL = dates.LABELS
 
 
 @dataclass
@@ -47,9 +50,50 @@ class OrganizePlan:
 
 
 def folder_for(dt: datetime, pattern_id: str) -> str:
+    if pattern_id == "events":   # used for files outside any event
+        pattern_id = "year_month"
     fmt = PATTERNS[pattern_id][0]
     return fmt.format(year=f"{dt.year:04d}", month=f"{dt.month:02d}", day=f"{dt.day:02d}",
                       month_name=MONTHS[dt.month - 1])
+
+
+def event_folders(rows: list[dict]) -> dict[int, str]:
+    """{file id: "YYYY\\YYYY-MM-DD Place"} for photos/videos that belong to an event.
+
+    Same grouping as album suggestions: a pause of more than 8 hours starts a new event, unless the photos
+    stay in one place (a trip) and the pause is under 3 days. The folder is named after the first day and
+    the most common nearby town when enough photos have GPS.
+    """
+    from datetime import timedelta
+    from . import albums, places
+    opts = albums.EventOptions()
+    where = albums._PlaceCache()
+    ordered = sorted((r for r in rows if r.get("taken_at")), key=lambda r: (r["taken_at"], r["rel_path"].lower()))
+    events, cur, last_place = [], [], None
+    for r in ordered:
+        p = where(r.get("lat"), r.get("lon"))
+        if cur:
+            gap = datetime.fromisoformat(r["taken_at"][:19]) - datetime.fromisoformat(cur[-1]["taken_at"][:19])
+            same_place = (p is not None and last_place is not None and
+                          places.distance_km(p.lat, p.lon, last_place.lat, last_place.lon) <= opts.place_km)
+            if gap > timedelta(hours=opts.gap_hours) and not (same_place and gap <= timedelta(days=opts.trip_days)):
+                events.append(cur)
+                cur, last_place = [], None
+        cur.append(r)
+        last_place = p or last_place
+    if cur:
+        events.append(cur)
+    out = {}
+    for ev in events:
+        if len(ev) < EVENT_MIN_ITEMS:
+            continue
+        start = datetime.fromisoformat(ev[0]["taken_at"][:19])
+        place = albums._place_name(ev, where)
+        name = f"{start:%Y-%m-%d}" + (f" {place}" if place else "")
+        folder = os.path.join(f"{start.year:04d}", albums.folder_name(name))
+        for r in ev:
+            out[r["id"]] = folder
+    return out
 
 
 def plan_organize(lib: Library, pattern_id: str = "year_month", include_uncertain: bool = False,
@@ -64,6 +108,8 @@ def plan_organize(lib: Library, pattern_id: str = "year_month", include_uncertai
     rows = [dict(r) for r in lib.readable_files("kind!='other' AND taken_at IS NOT NULL AND error IS NULL AND size>0")
             if not r["name"].startswith("._")]
     taken: set[str] = {r["rel_path"].lower() for r in lib.files()}
+    events = event_folders([r for r in rows if include_uncertain or r["date_source"] != "modified"]) \
+        if pattern_id == "events" else {}
     items, in_place, uncertain = [], 0, 0
     for n, r in enumerate(rows, 1):
         if n % 2000 == 0:
@@ -72,7 +118,8 @@ def plan_organize(lib: Library, pattern_id: str = "year_month", include_uncertai
             uncertain += 1
             continue
         dt = datetime.fromisoformat(r["taken_at"])
-        folder = os.path.join(root_subfolder, folder_for(dt, pattern_id)) if root_subfolder else folder_for(dt, pattern_id)
+        base = events.get(r["id"]) or folder_for(dt, pattern_id)
+        folder = os.path.join(root_subfolder, base) if root_subfolder else base
         folder = key_for(r["root_id"], folder)
         if r["folder"].lower() == folder.lower():
             in_place += 1

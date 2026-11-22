@@ -172,7 +172,7 @@ def test_tidy_protects_sidecars_and_explains_analysis_errors(tmp_path, monkeypat
         monkeypatch.setattr(page, "_selected", lambda: {"other": [dict(lib.file_by_rel("IMG_1.AAE"))]})
         page.apply()
         assert notices == ["Tidy selection needs review"]
-        assert not runner.busy
+        assert not runner.active
         assert (root / "IMG_1.AAE").read_bytes() == b"<plist>Apple editing instructions</plist>"
         assert (root / "IMG_2.HEIF").read_bytes() == b"incomplete test photo"
     finally:
@@ -231,11 +231,11 @@ def test_storage_reset_window_flow(tmp_path, monkeypatch):
 
     def idle():
         end = time.monotonic() + 30
-        while window.runner.busy and time.monotonic() < end:
+        while window.runner.active and time.monotonic() < end:
             app.processEvents()
             time.sleep(.01)
         app.processEvents()
-        assert not window.runner.busy and not errors
+        assert not window.runner.active and not errors
 
     try:
         window.open_library(str(tmp_path))

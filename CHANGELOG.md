@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Compare & sync: act on any part of the Venn diagram
+- Clicking a file in a pane now shows the photo (or a video frame) with its size, date and where each copy lives,
+  plus Open and Show in folder.
+- The right-hand panel acts on whatever region is selected (Only in A, Only in B, In both, Everything, …): choose
+  which library's copies and which file types (photos, videos, sidecars such as Apple `.AAE` edit files, other),
+  then **Copy to** another library, **Give the same folder layout as** another library (moves shared files to the
+  folder and name they have there, so a backup drive can mirror a tidy laptop), **Move into a folder…**,
+  **Make an album…** (this library: tag, date, edit or export the set), or **Move to Recovery…**. Each opens a
+  reviewable, untickable list and changes nothing until confirmed; removing content that has no other copy needs
+  an extra acknowledgement, and everything is undoable from History.
+
+### Organise by events
+- New **Organise by date** layout `2024\2024-07-21 Goa`: photos taken close together (a trip stays together) share a
+  folder named by the first day and the nearest town; small groups go to month folders.
+
+### Better photo dates
+- New date sources, tried before falling back to the file's modified time: Google Takeout `.json` and XMP sidecars,
+  embedded XMP and PNG creation dates, Unix timestamps in file names, and the reliable date of a same-named file in
+  the same folder (Live Photo pairs, RAW+JPEG, edited copies). Existing catalogues are re-checked once, without
+  re-reading every photo.
+- **Set date…** (Photos & videos, More actions or right-click) sets or clears a catalogue-only date for selected
+  files; it survives rescans and re-analysis. Organise, albums, the timeline and Story maker use it.
+
+### Several tasks at once, and more than one window
+- Read-only finders run side by side, each with its own task-bar row (progress, speed, time left, Pause, Cancel).
+  Anything that changes files still runs alone; if a search is running, the change waits for it and then starts.
+- Libraries catalogued before photos were hashed while indexing are fingerprinted in the background after a
+  rescan; this pauses while a change runs.
+- **Library ▾ → New window** (Ctrl+Shift+N) starts another window. Opening a library that another window owns
+  offers **Open to browse & find**: browse, filter, view and run finders; changes, rescans, Health check, People
+  and Compare stay in the owning window.
+
+### Unreadable files explained
+- Files that can't be decoded are checked by content: empty, all zeros, truncated JPEG, a web page saved as a
+  photo, or a real photo/video type behind the wrong extension. Health check shows the reason and offers
+  **Fix file extensions**, recorded in History and undoable.
+
 ### Clearer visual cues
 - Each sidebar section has its own colour (Library blue, Clean up orange, Organise violet, Create magenta, Protect
   green), used for the sidebar icons, a tinted icon chip beside every page title and on the Overview cards.

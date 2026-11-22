@@ -335,7 +335,7 @@ class DuplicatesPage(Page):
 
     def find(self):
         lib = self.lib
-        self.run("Finding duplicates", lambda progress: duplicates.find_all(lib, progress), self._show)
+        self.run("Finding duplicates", lambda progress: duplicates.find_all(lib, progress), self._show, read_only=True)
 
     def on_busy_changed(self, busy):
         self.find_btn.setEnabled(not busy)

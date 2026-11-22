@@ -22,6 +22,11 @@ class HealthPage(Page):
         self.report = None
         self._page = 0
         self.run_btn = button("Run health check", "primary", self.check)
+        self.fix_btn = button("Fix file extensions…", on_click=self.fix_extensions,
+                              tip="Rename files whose content is a photo/video type different from their "
+                                  "extension, so they open. Recorded in History; Undo renames them back.")
+        self.fix_btn.hide()
+        self.header_actions.addWidget(self.fix_btn)
         self.header_actions.addWidget(self.run_btn)
         self.explain = HelpToggle(
             "The first check records a fingerprint of every file. Each later check re-reads every "
@@ -56,6 +61,24 @@ class HealthPage(Page):
 
     def on_busy_changed(self, busy: bool) -> None:
         self.run_btn.setEnabled(not busy)
+        self.fix_btn.setEnabled(not busy)
+
+    def _fixes(self) -> list:
+        return health.plan_extension_fixes(self.lib, self.report.problems) if self.report and self.lib else []
+
+    def fix_extensions(self) -> None:
+        acts = self._fixes()
+        if not acts:
+            return
+        from pathlib import Path as _P
+        details = [f"{self.lib.display_path(self.lib.rel(a.src, resolve=False))}  →  {_P(a.dst).name}" for a in acts]
+        self.apply_actions(
+            "health", "Fix file extensions", acts,
+            summary=f"{fmt_n(len(acts), 'file')} will be renamed so the extension matches the content.",
+            details=details, confirm_text=f"Rename {fmt_n(len(acts), 'file')}",
+            note="Only the extension changes; the files stay in their folders. Undo renames them back.",
+            done_message=lambda r: f"Renamed {fmt_n(r.done, 'file')}. Run the health check again to confirm.",
+            after=lambda _r: self.fix_btn.hide(), rescan=True)
 
     def refresh(self) -> None:
         last = health.last_checked(self.lib)
@@ -69,7 +92,8 @@ class HealthPage(Page):
 
     def check(self) -> None:
         lib = self.lib
-        self.run("Checking every file", lambda p: health.run_health(lib, p), self._show, notify_success=False)
+        self.run("Checking every file", lambda p: health.run_health(lib, p), self._show, notify_success=False,
+                 read_only=True)
 
     def _show(self, rep: health.HealthReport) -> None:
         self.report, self._page = rep, 0
@@ -86,6 +110,9 @@ class HealthPage(Page):
                                 f"{'it' if bad == 1 else 'them'} from a backup (Compare &amp; sync can help find a good "
                                 "copy) and consider checking the drive for errors.")
         self.advice.setVisible(bool(bad))
+        fixes = len(self._fixes())
+        self.fix_btn.setText(f"Fix {fmt_n(fixes, 'file extension')}…")
+        self.fix_btn.setVisible(bool(fixes))
         self.ctx.library_modified.emit()
         self.ctx.toast_requested.emit(f"Checked {fmt_n(rep.checked, 'file')} ({fmt_size(rep.bytes)}). "
                                       + ("No problems found in the files checked." if not problems else

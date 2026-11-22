@@ -48,6 +48,17 @@ the rendered page).
 
 ## Highlights
 
+- **Better photo dates**: besides camera EXIF and video metadata, dates come from Google Takeout `.json` and XMP
+  sidecars, embedded XMP/PNG creation dates, timestamps in file names (e.g. `FB_IMG_1577836800000.jpg`) and a
+  same-named file in the same folder (Live Photo HEIC+MOV, edited copies). Older catalogues are re-checked once.
+  **Set date…** in Photos & videos fixes the rest; it's stored in the catalogue only and kept across rescans.
+- **Several tasks at once**: finders (duplicates, similar, health, people, tidy, organise preview, compare,
+  album suggestions) run side by side, each with its own progress row. Changes still run one at a time and wait
+  for running searches; photos of older libraries are fingerprinted in the background (paused while a change
+  runs). **New window** (Ctrl+Shift+N) opens another library, or the same one in a **browse & find** window
+  that searches and reviews while the first window makes the changes.
+- **Unreadable files explained**: empty, all-zero, truncated, web pages saved as photos, and real photo/video
+  types behind the wrong extension; Health check offers an undoable **Fix file extensions**.
 - **Built for big libraries**: used on ~90,000 files / 420 GB, so ~500 GB libraries work well; up to ~1 million
   files are supported. Photos are read once while indexing, reads are paced for hard disks, and Find duplicates
   reuses the saved fingerprints. See [Performance](#library-size-what-works-well) for measured limits.
@@ -106,7 +117,11 @@ the rendered page).
   so a repeat comparison only reads new or changed files. Only files whose size appears more than once are read.
   A clickable **Venn diagram** and filters (everything, in all, in two or more, only in X, missing from X) drive
   side-by-side panes; a folder whose files all match is shown as one row, and so is a parent whose subfolders all
-  match. **Folder mapping** pairs each folder with the folder holding most of the same photos. **Copy missing
+  match. Clicking a file previews it and shows where each copy lives. The **Act on these files** panel works on the
+  selected region and library's copies, filtered by type (photos, videos, sidecars like `.AAE`, other): **Copy to**,
+  **Give the same folder layout as** (move shared files to the folder/name they have in another library),
+  **Move into a folder…**, **Make an album…** and **Move to Recovery…**, each reviewed before anything changes.
+  **Folder mapping** pairs each folder with the folder holding most of the same photos. **Copy missing
   files** is copy-only (never overwrites or deletes): one-way backup or two-way, merging into a matching folder
   when at least half of the source folder is already there, otherwise recreating the source folder path, and
   copying each content once. Before copying, **Review & choose files** shows every folder and file in a tree with
@@ -710,12 +725,12 @@ compression when both use x264. Codec/preset/hardware choices and compatibility 
 | Problem | Fix |
 |---|---|
 | `run.ps1` is blocked | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or run `powershell -ExecutionPolicy Bypass -File run.ps1` |
-| A photo wasn't organised | Its only date was the file's modified date. Tick *Also move files whose only date is the file's modified date*. |
+| A photo wasn't organised | Its only date was the file's modified date. Select it in Photos & videos and use *More actions → Set date…*, or tick *Also move files whose only date is the file's modified date*. |
 | A sharp photo is listed as blurry | Smooth scenes (sky, fog, night) have little fine detail. Use *Only very blurry*; nothing there is ticked for you. |
 | The library has a `.memoria` folder | It holds catalogue data, History and Recovery. Do not delete it to reset the app; use Storage & reset. Preserve it for recovery if it cannot be opened. |
 | Results look stale or a rebuild stopped | Try F5; use Storage & reset for selective clearing. Resume an unfinished rebuild, optionally skipping shrinking when disk space is low. |
 | Offscreen screenshots show boxes instead of text | Set `QT_QPA_FONTDIR=C:\Windows\Fonts` (the screenshot tool does this automatically). |
-| "This library is already open" | Another Memoria window has it open. Close that window first. |
+| "This library is open in another window" | Another Memoria window owns it. Choose *Open to browse & find* to search and review here, or close the other window to make changes here. |
 | "The library folder can't be reached" | The drive was unplugged or the network is down. Reconnect it and press F5. Nothing was changed. |
 | OpenCV 5 is installed | Memoria needs `opencv-python-headless<5`, because OpenCV 5 removed the bundled face detector. |
 

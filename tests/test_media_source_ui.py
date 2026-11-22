@@ -209,7 +209,7 @@ def test_exports_guard_registered_sources_before_engine_reads(context, app, monk
         start = page._compress
     try:
         start()
-        spin(app, lambda: not context.runner.busy)
+        spin(app, lambda: not context.runner.active)
         assert not invoked
         assert errors and "offline <disk>" in errors[0][1]
         assert guards and all(thread != threading.get_ident() for thread in guards)

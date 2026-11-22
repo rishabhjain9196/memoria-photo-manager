@@ -41,7 +41,7 @@ def test_library_folder_controls_register_without_moving_originals(tmp_path, mon
     try:
         dialog.show()
         dialog.add_btn.click()
-        _wait(app, lambda: not runner.busy)
+        _wait(app, lambda: not runner.active)
         assert not errors and dialog.changed
         assert dialog.tree.topLevelItemCount() == 2
         assert Path(lib.roots()[1]["path"]) == added
@@ -144,7 +144,7 @@ def test_compare_page_shows_grouped_panes_and_copies_only_the_delta(tmp_path, mo
         page.add_c.click()
         page.paths[1].setText(str(drive))
         page.cmp_btn.click()
-        _wait(app, lambda: page.result is not None and not runner.busy)
+        _wait(app, lambda: page.result is not None and not runner.active)
         assert not errors and page.result.count == 3
         assert all(pane.isVisible() for pane in page.panes)
         only_b = next(i for i in range(page.filters.count())
@@ -157,9 +157,17 @@ def test_compare_page_shows_grouped_panes_and_copies_only_the_delta(tmp_path, mo
         page.venn.region_clicked.emit(0b011)
         assert page.view == ("region", 0b011) and "not in C" in page.view_title.text()
 
-        page.source.setCurrentIndex(page.source.findData(1))
+        page.filters.setCurrentRow(only_b)          # act on what only the phone has
+        assert page._side() == 1 and page.side_buttons[1].isChecked()
         page.target.setCurrentIndex(page.target.findData(0))
         assert "3 files" in page.copy_summary.text()
+        # Clicking a file shows it (a placeholder here: these test files aren't real images) and where it lives.
+        trip = next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount()) if tree.topLevelItem(i).text(0) == "Trip")
+        trip.setExpanded(True)
+        tree.setCurrentItem(trip.child(0))
+        _wait(app, lambda: page.preview_img.text() in ("No preview for this file", ""))
+        assert "t1.jpg" in page.entry_info.text() and "missing" in page.entry_info.text()
+        assert page.preview_open.isEnabled()
         from memoria.ui import sync_review
 
         def choose(dialog):
@@ -175,15 +183,19 @@ def test_compare_page_shows_grouped_panes_and_copies_only_the_delta(tmp_path, mo
             return dialog.DialogCode.Accepted
         monkeypatch.setattr(sync_review.CopyReviewDialog, "exec", choose)
         page.copy_btn.click()
-        _wait(app, lambda: (home / "Backup" / "new.jpg").exists() and not runner.busy)
+        _wait(app, lambda: (home / "Backup" / "new.jpg").exists() and not runner.active)
         assert not (home / "Trip").exists() and (phone / "DCIM" / "new.jpg").exists() and not errors
-        _wait(app, lambda: page.result is not None and not runner.busy and "Nothing new to copy" in page.copy_summary.text())
+        _wait(app, lambda: page.result is not None and not runner.active and "Nothing new to copy" in page.copy_summary.text())
         assert "2 files" in page.copy_summary.text() and "keep only where they are" in page.copy_summary.text()
 
-        page.remove_from.setCurrentIndex(page.remove_from.findData(2))
-        assert "1 file" in page.remove_summary.text()
+        shared = next(i for i in range(page.filters.count())
+                      if page.filters.item(i).data(Qt.ItemDataRole.UserRole) == ("shared", 0))
+        page.filters.setCurrentRow(shared)
+        page.side_buttons[2].setChecked(True)       # the drive's copies of shared content
+        assert "1 file to C's Recovery folder" in page.remove_summary.text()
+        assert "every one has a copy" in page.remove_summary.text()
         page.remove_btn.click()
-        _wait(app, lambda: not (drive / "Old" / "a.jpg").exists() and not runner.busy)
+        _wait(app, lambda: not (drive / "Old" / "a.jpg").exists() and not runner.active)
         assert (drive / "Old" / "x.jpg").exists() and list((drive / ".memoria" / "recovery").rglob("a.jpg"))
 
         monkeypatch.setattr(compare_ui.QInputDialog, "getText", lambda *args, **kwargs: ("Phone backup", True))

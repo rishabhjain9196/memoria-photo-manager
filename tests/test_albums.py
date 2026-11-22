@@ -136,18 +136,20 @@ def test_suggest_button_uses_selected_mode_and_displays_results(library, monkeyp
     before = _snapshot(library.root)
     started, errors, slot_errors = [], [], []
     runner.started.connect(started.append)
+    ctx.parallel.started.connect(started.append)
     runner.error.connect(lambda *args: errors.append(args))
+    ctx.parallel.error.connect(lambda *args: errors.append(args))
     monkeypatch.setattr(sys, "excepthook", lambda typ, value, tb: slot_errors.append(value))
     try:
         QTest.mouseClick(page.suggest_btn, Qt.MouseButton.LeftButton)
         assert not slot_errors, slot_errors
         assert started == ["Suggesting albums"]
         deadline = time.monotonic() + 10
-        while (runner.busy or page._suggestion_query.running) and time.monotonic() < deadline:
+        while (runner.active or ctx.parallel.tasks or page._suggestion_query.running) and time.monotonic() < deadline:
             app.processEvents()
             time.sleep(.01)
         app.processEvents()
-        assert not runner.busy and not errors and not slot_errors, (errors, slot_errors)
+        assert not runner.active and not ctx.parallel.tasks and not errors and not slot_errors, (errors, slot_errors)
         assert page.suggest_btn.isEnabled()
         if mode == "person":
             assert not page.suggestions and not page.save_btn.isEnabled()

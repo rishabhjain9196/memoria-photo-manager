@@ -434,7 +434,7 @@ class AlbumsPage(Page):
                 return albums.suggest_people(lib, opts.min_items)
             finally:
                 lib.close_thread()
-        self.run("Suggesting albums", work, self._show_suggestions)
+        self.run("Suggesting albums", work, self._show_suggestions, read_only=True)
 
     def _show_suggestions(self, sugg: list[albums.Suggestion]) -> None:
         self.suggestions = sugg

@@ -302,7 +302,7 @@ def test_people_queries_are_paged_at_100k_and_delayed_io_is_responsive(large_lib
         album_ids = []
         monkeypatch.setattr(albums, "create", lambda lib, name, ids, kind: album_ids.extend(ids) or 42)
         page.make_album()
-        spin(app, lambda: not ctx.runner.busy)
+        spin(app, lambda: not ctx.runner.active)
         assert len(album_ids) == 85_000, "Make album must retain all-person scope, not just the visible page"
         first = page.grid.items()[0]["id"]
         page._content_step("photo", 1)

@@ -371,6 +371,91 @@ class Comparison:
             items.append(entry)
         return RemovalPlan(actions, items, kept_units)
 
+    # file types and general plans ---------------------------------------------------------------
+    @staticmethod
+    def kind(entry: Entry) -> str:
+        """``photo`` | ``video`` | ``sidecar`` (.AAE, .XMP… edit and metadata files) | ``other``."""
+        ext = os.path.splitext(entry.name)[1].lower()
+        if ext in assets.SIDECARS:
+            return "sidecar"
+        kind = config.kind_for_ext(ext)
+        return {"image": "photo", "video": "video"}.get(kind, "other")
+
+    def plan_recycle(self, side: int, entries: Iterable[Entry]) -> list[tuple[Entry, Action, bool]]:
+        """Move ``side``'s selected files to that library's Recovery: [(entry, action, unique)].
+
+        Content that another library also holds keeps a guard (that copy must still exist, unchanged);
+        ``unique`` marks content that exists nowhere else, which the caller must confirm explicitly.
+        """
+        participant = self.participants[side]
+        out = []
+        for entry in sorted((e for e in entries if e.side == side), key=lambda e: e.rel.lower()):
+            keeper = next((copy for copy in self.copies(entry) if copy.side != side), None)
+            guards = [(str(keeper.path), entry.hash)] if keeper is not None and entry.hash else []
+            reason = (f"Also in {letter(keeper.side)} ({self.participants[keeper.side].label}) at {keeper.rel}"
+                      if keeper is not None else "Only copy of this content in the compared libraries")
+            out.append((entry, Action(op="recycle", src=str(entry.path), size=entry.size, mtime=entry.mtime,
+                                      hash=entry.hash, guards=guards, file_id=entry.file_id,
+                                      recovery_root=None if participant.current else str(participant.root),
+                                      reason=reason), keeper is None))
+        return out
+
+    def _free_name(self, side: int, rel: str, taken: set[str]) -> str:
+        stem, ext = os.path.splitext(rel)
+        candidate, n = rel, 1
+        while candidate.lower() in taken or os.path.lexists(config.longpath(self.participants[side].root / candidate)):
+            n += 1
+            candidate = f"{stem} ({n}){ext}"
+        taken.add(candidate.lower())
+        return candidate
+
+    def _occupied(self, side: int, moving: set[int]) -> set[str]:
+        return {e.rel.lower() for e in self.entries[side] if id(e) not in moving}
+
+    def plan_move_into(self, side: int, entries: Iterable[Entry], folder: str) -> list[tuple[Entry, Action]]:
+        """Move ``side``'s selected files into ``folder`` (relative to that library), keeping names."""
+        pool = sorted((e for e in entries if e.side == side), key=lambda e: e.rel.lower())
+        taken = self._occupied(side, {id(e) for e in pool})
+        root, out = self.participants[side].root, []
+        for entry in pool:
+            if entry.folder.lower() == folder.lower():
+                continue
+            rel = self._free_name(side, os.path.join(folder, entry.name), taken)
+            out.append((entry, Action(op="move", src=str(entry.path), dst=str(root / rel), size=entry.size,
+                                      mtime=entry.mtime, hash=entry.hash, file_id=entry.file_id,
+                                      reason=f"Move into {folder or 'the library folder'}")))
+        return out
+
+    def plan_match_layout(self, side: int, reference: int, entries: Iterable[Entry]) -> tuple[list[tuple[Entry, Action]], int]:
+        """Rearrange ``side`` so content shared with ``reference`` sits at the same folder and name as there.
+
+        Returns (moves, extra copies left in place). Only one copy per content moves; a name already
+        used by different content gets " (2)". Files only in ``side`` are not touched.
+        """
+        pool = sorted((e for e in entries if e.side == side and e.hash and e.mask & (1 << reference)),
+                      key=lambda e: e.rel.lower())
+        chosen, extra = {}, 0
+        for entry in pool:
+            if entry.hash in chosen:
+                extra += 1
+            else:
+                chosen[entry.hash] = entry
+        moving = {id(e) for e in chosen.values()}
+        taken = self._occupied(side, moving)
+        root, out = self.participants[side].root, []
+        for digest, entry in chosen.items():
+            refs = sorted((c for c in self.by_hash[digest] if c.side == reference),
+                          key=lambda c: (c.name.lower() != entry.name.lower(), c.rel.lower()))
+            target_rel = refs[0].rel
+            if entry.rel.lower() == target_rel.lower():
+                taken.add(entry.rel.lower())
+                continue
+            rel = self._free_name(side, target_rel, taken)
+            out.append((entry, Action(op="move", src=str(entry.path), dst=str(root / rel), size=entry.size,
+                                      mtime=entry.mtime, hash=entry.hash, file_id=entry.file_id,
+                                      reason=f"Same place as in {letter(reference)}: {target_rel}")))
+        return out, extra
+
 
 # building ---------------------------------------------------------------------------------
 def _overlaps(a: Path, b: Path) -> bool:

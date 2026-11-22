@@ -142,6 +142,79 @@ def _make_group(h: str, members: list) -> DuplicateGroup:
     return g
 
 
+def missing_fingerprints(lib: Library) -> int:
+    """Photos that have no saved content fingerprint yet (catalogued before photos were hashed while indexing)."""
+    return lib.db.execute("SELECT COUNT(*) FROM files WHERE kind='image' AND chash IS NULL AND size > 0 "
+                          "AND root_id IN (SELECT id FROM library_roots WHERE online=1)").fetchone()[0]
+
+
+def fingerprint_missing(lib: Library, progress: Optional[Progress] = None) -> int:
+    """Save quick + full fingerprints for photos that lack them, so Find duplicates never needs to read them.
+
+    Meant to run in the background: reads are paced per drive, results are saved in batches (an
+    interrupted run keeps its work), and a file that changes while being read is skipped.
+    """
+    from .hashing import hashes_of_bytes
+    progress = progress or Progress()
+    rows = [r for r in lib.readable_files("kind='image' AND chash IS NULL AND size > 0")]
+    rows.sort(key=lambda r: r["rel_path"].lower())
+    if not rows:
+        return 0
+    gates = disk_speed.root_gates(lib)
+    total_bytes = sum(r["size"] for r in rows)
+    state = {"files": 0, "bytes": 0, "saved": 0}
+    pending: list[tuple[int, str, str]] = []
+
+    def work(r):
+        progress.check()
+        path = lib.abspath(r["rel_path"])
+        try:
+            lib.check_path(path)
+            with gates.get(r["root_id"]) or contextlib.nullcontext():
+                before = os.stat(config.longpath(path))
+                if before.st_size != r["size"] or abs(before.st_mtime - r["mtime"]) > 0.001:
+                    return r, None
+                if r["size"] <= config.IN_MEMORY_READ_LIMIT:
+                    with open(config.longpath(path), "rb", buffering=0) as f:
+                        data = f.read()
+                    q, c = hashes_of_bytes(data) if len(data) == r["size"] else (None, None)
+                else:
+                    q, c = quick_hash(path, r["size"]), full_hash(path)
+                after = os.stat(config.longpath(path))
+        except Exception:
+            return r, None
+        if (after.st_size, after.st_mtime) != (before.st_size, before.st_mtime) or not c:
+            return r, None
+        return r, (q, c)
+
+    def flush():
+        if pending:
+            with lib.transaction() as db:
+                db.executemany("UPDATE files SET qhash=?, chash=? WHERE id=? AND chash IS NULL AND size=? AND mtime=?",
+                               pending)
+            state["saved"] += len(pending)
+            pending.clear()
+
+    workers = min(config.WORKERS, disk_speed.read_workers(lib, {r["root_id"] for r in rows}))
+    try:
+        with activity.pool("Fingerprinting", workers), ThreadPoolExecutor(max_workers=workers) as pool:
+            for r, hashes in pool.map(work, rows):
+                state["files"] += 1
+                state["bytes"] += r["size"]
+                if hashes:
+                    pending.append((hashes[0], hashes[1], r["id"], r["size"], r["mtime"]))
+                    if len(pending) >= 200:
+                        flush()
+                progress.update(state["bytes"], total_bytes or 1,
+                                f"Fingerprinting photos so finding duplicates needn't read them… "
+                                f"{state['files']:,} of {len(rows):,}",
+                                detail={"items": (state["files"], len(rows)), "bytes": (state["bytes"], total_bytes),
+                                        "unit": "photo"})
+    finally:
+        flush()
+    return state["saved"]
+
+
 def find_duplicates(lib: Library, progress: Optional[Progress] = None, media_only: bool = True) -> list[DuplicateGroup]:
     where = "kind!='other'" if media_only else "1"
     rows = lib.readable_files(where)

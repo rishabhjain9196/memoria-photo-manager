@@ -202,7 +202,7 @@ class PeoplePage(Page):
                 return faces.scan(lib, progress)
             finally:
                 lib.close_thread()
-        self.run("Finding people", work, self._found)
+        self.run("Finding people", work, self._found, read_only=True)
 
     def _found(self, res: faces.ScanResult) -> None:
         self.refresh()

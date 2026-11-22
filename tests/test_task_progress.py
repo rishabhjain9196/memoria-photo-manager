@@ -200,7 +200,7 @@ def test_task_bar_shows_counts_and_pauses_the_running_task():
         assert reached == [1, 2]   # held at the next safe point
         assert window.task_msg.text().startswith("Paused") and "paused" in window.task_eta.text()
         window.pause_btn.click()
-        spin(lambda: not window.runner.busy)
+        spin(lambda: not window.runner.active)
         assert reached == [1, 2, 3, 4, 5] and window.task_bar.isHidden()
     finally:
         release.set()

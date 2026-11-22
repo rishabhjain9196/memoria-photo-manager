@@ -15,7 +15,7 @@ def _idle(app, window):
     quiet = None
     while time.monotonic() < deadline:
         app.processEvents()
-        if window.runner.busy or any(worker.running for worker in window.findChildren(LatestCall)):
+        if window.runner.active or any(worker.running for worker in window.findChildren(LatestCall)):
             quiet = None
         elif quiet is None:
             quiet = time.monotonic()

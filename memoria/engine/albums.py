@@ -14,12 +14,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable, Optional
 
-from . import catalogue, duplicates, faces, organisation, places
+from . import catalogue, dates, duplicates, faces, organisation, places
 from .actions import Action
 from .db import Library
 from .progress import Progress
 
-RELIABLE = ("exif", "metadata", "filename")
+RELIABLE = dates.RELIABLE
 _SCREENSHOT = re.compile(r"screen ?shot|screen_\d|screenrecord", re.I)
 _BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 ALBUM_PAGE_SIZE = 100

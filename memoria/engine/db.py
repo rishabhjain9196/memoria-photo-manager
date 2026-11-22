@@ -246,7 +246,7 @@ def _release_lock(key: str) -> None:
 class Library:
     """A folder of photos plus its ``.memoria`` catalogue."""
 
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, viewer: bool = False):
         self.root = Path(root).resolve()
         if not self.root.is_dir():
             raise NotADirectoryError(str(self.root))
@@ -259,7 +259,26 @@ class Library:
         self._source_locks: dict[int, str] = {}
         self._root_paths: dict[int, Path] = {}
         self._root_labels: dict[int, str] = {}
-        self._lock_key: Optional[str] = _acquire_lock(config.app_dir(self.root) / "lock")
+        self._lock_key: Optional[str] = None
+        self.viewer = viewer
+        if viewer:
+            # Browse & find window: another window owns this library and makes every change. No lock,
+            # no migrations and no setup writes here; the owner has already prepared the catalogue.
+            self._lock_key = f"viewer:{self.root}".lower()
+            try:
+                version = self.db.execute("PRAGMA user_version").fetchone()[0]
+                if version != SCHEMA_VERSION:
+                    raise LibraryInUse("The window that has this library open needs to finish upgrading it first.")
+                row = self.db.execute("SELECT token FROM library_roots WHERE id=1").fetchone()
+                if row is None:
+                    raise LibraryInUse("The window that has this library open hasn't finished preparing it yet.")
+                self._catalogue_token = row["token"]
+                self._reload_roots()
+            except BaseException:
+                self.close()
+                raise
+            return
+        self._lock_key = _acquire_lock(config.app_dir(self.root) / "lock")
         try:
             self._migrate()
             roots.initialize(self)

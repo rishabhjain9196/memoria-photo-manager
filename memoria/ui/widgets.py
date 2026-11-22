@@ -64,6 +64,20 @@ def friendly_error(err: Optional[str]) -> str:
     """Plain-language version of a technical read/decode error."""
     if not err:
         return ""
+    from ..engine.sniff import parse_tag
+    content = parse_tag(err)
+    if content:
+        code, fix_ext = content
+        message = {
+            "empty": "The file is empty (0 bytes) — its data was never saved.",
+            "zeros": "The file contains only zeros — its data was lost, typically in a failed copy, sync or disk recovery.",
+            "html": "This is a web page or text saved under a photo name — the download probably failed.",
+            "truncated": "The file is incomplete — it was probably cut off during a copy or download.",
+            "wrong_ext": f"The content doesn't match the file extension: it is really a {fix_ext or 'different'} file. "
+                         "Health check → Fix file extensions renames it so it opens (undoable).",
+        }.get(code)
+        if message:
+            return message
     e = err.lower()
     if "truncated" in e or "premature end" in e:
         return "The file is incomplete — it was probably cut off during a copy or download."
@@ -318,6 +332,8 @@ class AppContext(QObject):
     def __init__(self, runner):
         super().__init__()
         self.runner = runner
+        from .tasks import ParallelTasks
+        self.parallel = ParallelTasks(runner, self)
         from ..engine.diagnostics import Metrics
         self.diagnostics = Metrics()
         self.library: Optional[Library] = None
@@ -337,6 +353,9 @@ class AppContext(QObject):
 
     def set_library(self, lib: Optional[Library]) -> None:
         if self.library is not None and self.library is not lib:
+            # Read-only tasks use the old catalogue: stop them before it closes.
+            self.parallel.cancel_all()
+            self.parallel.wait()
             self.library.close()
         self.library = lib
         self.indexing = False
@@ -703,8 +722,8 @@ class Preview(QFrame):
         self.loader.call(lambda: (request, read_image(lib, snapshot, 900)))
         self.title.setText(row.get("name") or Path(row["rel_path"]).name)
         facts = []
-        src = {"exif": "camera", "metadata": "video metadata", "filename": "file name",
-               "modified": "file date — may be inaccurate"}.get(row.get("date_source") or "", "")
+        from ..engine.dates import SHORT_LABELS
+        src = SHORT_LABELS.get(row.get("date_source") or "", "")
         if row.get("taken_at"):
             facts.append(f"<b>Taken</b> {fmt_date(row['taken_at'], True)} <span style='color:{theme.MUTED}'>({src})</span>")
         if row.get("width"):

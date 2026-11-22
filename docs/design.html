@@ -176,7 +176,9 @@ then simply tells the truth about those rules.</p>
     folders/files that can't be read keep their catalogue rows. Genuinely missing rows are retained separately.</td>
     <td>Unreadable counts and persistent missing-file results.</td></tr>
   <tr><td>I12</td><td>One writer per library</td><td>A cross-process lock file in <code>.memoria</code>; a second window
-    is refused.</td><td>"This library is already open in another Memoria window."</td></tr>
+    may only open the library in browse &amp; find mode (no lock, no changes, rescans or catalogue-structure writes).
+    Within a window, read-only finders run in parallel and changes run alone, after running searches finish.</td>
+    <td>"This library is open in another window" → Open to browse &amp; find.</td></tr>
   <tr><td>I13</td><td>Undo restores knowledge, not just files</td><td>Catalogue rows of recycled files are parked and
     restored on undo, with non-reused file IDs. Metadata deliberately cleared by reset is not resurrected.</td>
     <td>Saved album/face links cannot attach to a new import because a recycled ID was reused.</td></tr>
@@ -374,7 +376,8 @@ returns a reason alongside its result:</p>
     location; "Goa" when photos are between towns (the region is used).</td></tr>
   <tr><td>Best shot</td><td>"Best pick: sharpest (20.1× the softest), best exposure, 2 faces detected"; others:
     "blurrier (25% of best sharpness)", "too dark", "smaller (800×600)".</td></tr>
-  <tr><td>Photo date</td><td>"Camera date", "Date in file name", "File modified date (less reliable)".</td></tr>
+  <tr><td>Photo date</td><td>"Set in Memoria", "Camera date", "Embedded date", "Sidecar file", "Date in file name",
+      "From matching file", "File modified date (less reliable)".</td></tr>
   <tr><td>Problem files</td><td>"The file is incomplete — it was probably cut off during a copy or download."</td></tr>
   <tr><td>Video result</td><td>"620.7 KB → 155.9 KB (75% smaller), quality SSIM 0.999 · Excellent".</td></tr>
 </table>

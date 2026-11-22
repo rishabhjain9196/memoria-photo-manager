@@ -13,6 +13,10 @@ from ...engine.progress import Progress
 from .. import nav
 from ..widgets import AppContext, MessageDialog, confirm, fmt_n, fmt_size, hbox, icon_chip, label, vbox
 
+# Read-only tasks that still write catalogue structure (rescans, comparison indexes, face data): only the
+# window that owns the library runs them.
+VIEWER_BLOCKED = {"health", "compare", "people"}
+
 
 class Page(QWidget):
     title = ""
@@ -91,7 +95,10 @@ class Page(QWidget):
         return not self.busy or (self.live_index_view and self.ctx.indexing and not self.ctx.maintenance)
 
     def run(self, title: str, fn: Callable[[Progress], Any], on_done: Optional[Callable[[Any], None]] = None,
-            on_cancel: Optional[Callable[[], None]] = None, *, notify_success: bool = True) -> bool:
+            on_cancel: Optional[Callable[[], None]] = None, *, notify_success: bool = True,
+            read_only: bool = False) -> bool:
+        """Start a task. ``read_only`` tasks (they only read files and the catalogue) run side by side;
+        anything that changes files runs alone."""
         if self.ctx.maintenance:
             self.ctx.toast_requested.emit("Finish the library rebuild using Resume rebuild first.", "")
             return False
@@ -105,9 +112,22 @@ class Page(QWidget):
                 on_done(result)
             if notify_success:
                 self.ctx.notification_requested.emit("results_ready", 0)
-        ok = self.ctx.runner.run(title, fn, completed, on_cancel, diagnostic_key=key if key in OPERATIONS else "other")
-        if not ok:
-            self.ctx.toast_requested.emit(f"Please wait for “{self.ctx.runner.title}” to finish first.", "")
+        diagnostic_key = key if key in OPERATIONS else "other"
+        if read_only:
+            if self.ctx.runner.viewer and key in VIEWER_BLOCKED:
+                self.ctx.toast_requested.emit(f"{self.title} updates the catalogue, so run it in the Memoria window "
+                                              "that opened this library first.", "")
+                return False
+            ok = self.ctx.parallel.run(title, fn, completed, on_cancel, diagnostic_key=diagnostic_key)
+            if not ok:
+                self.ctx.toast_requested.emit(
+                    f"Please wait for “{self.ctx.parallel.refusal}” to finish first." if self.ctx.runner.busy else
+                    f"“{title}” is already running — see the task bar.", "")
+            return ok
+        ok = self.ctx.runner.run(title, fn, completed, on_cancel, diagnostic_key=diagnostic_key)
+        if not ok and not self.ctx.runner.viewer:
+            self.ctx.toast_requested.emit(f"Please wait for “{self.ctx.runner.refusal}” to finish first. Changes "
+                                          "don't run while a search is still reading the library.", "")
         return ok
 
     def apply_actions(self, kind: str, title: str, acts: list[Action], *, summary: str, details: list[str],

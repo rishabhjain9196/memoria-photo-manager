@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Optional
 
-from . import activity, config, disk_speed, ffmpeg, hashing, media, roots
+from . import activity, config, dates, disk_speed, ffmpeg, hashing, media, roots, sniff
 from .db import DERIVED, METADATA_VERSION, Library, LibraryUnavailable
 from .progress import Progress
 
@@ -175,7 +175,8 @@ def _scan_root(lib: Library, source: dict, progress: Progress) -> ScanResult:
             db.execute("DELETE FROM missing_files WHERE file_id=?", (row["id"],))
         db.executemany("INSERT INTO files (rel_path, folder, name, ext, kind, size, mtime, root_id) "
                        "VALUES (?,?,?,?,?,?,?,?)", new_rows)
-        reset = ", ".join(f"{c}=NULL" for c in DERIVED if c != "analyzed")
+        reset = ", ".join(f"{c}=CASE WHEN date_source='manual' THEN {c} END" if c in ("taken_at", "date_source")
+                          else f"{c}=NULL" for c in DERIVED if c != "analyzed")
         db.executemany(f"UPDATE files SET size=?, mtime=?, analyzed=0, {reset} WHERE id=?", changed_ids)
     lib.mark_missing(removed)
     res.added, res.changed, res.removed = len(new_rows), len(changed_ids), len(removed)
@@ -203,6 +204,7 @@ def _analyze_one(path: Path, kind: str, name: str, mtime: float, size: int = -1,
     gate = gate or contextlib.nullcontext()
     out: dict = {}
     hashes: dict = {}
+    data: Optional[bytes] = None
     try:
         if kind == "image":
             with gate:
@@ -229,8 +231,20 @@ def _analyze_one(path: Path, kind: str, name: str, mtime: float, size: int = -1,
                 out["thumb"] = media.thumbnail_bytes(img)
                 out["dhash"] = media.dhash(img.convert("L"))
     except Exception as e:  # unreadable/corrupt files are recorded, never fatal
-        out = {"error": f"{type(e).__name__}: {e}"[:300]}
+        message = f"{type(e).__name__}: {e}"[:260]
+        try:
+            ext = os.path.splitext(name)[1]
+            diagnosis = (sniff.identify(data[:65536], len(data), ext, data[-4096:]) if data is not None
+                         else sniff.identify_file(path, ext))
+        except Exception:
+            diagnosis = None
+        out = {"error": message + sniff.tag(diagnosis)}
     out.update(hashes)
+    if "taken_at" not in out:
+        with gate:
+            dt = dates.sidecar_date(path)
+        if dt:
+            out["taken_at"], out["date_source"] = dt, "sidecar"
     if "taken_at" not in out:
         dt = media.date_from_filename(name)
         if dt:
@@ -243,6 +257,11 @@ def _analyze_one(path: Path, kind: str, name: str, mtime: float, size: int = -1,
 _COLS = ("width", "height", "taken_at", "date_source", "camera", "lat", "lon", "duration", "dhash",
          "sharpness", "brightness", "contrast", "clipped", "error", "fps", "video_codec", "audio_codec",
          "iso", "aperture", "exposure_seconds", "focal_length_mm", "lens")
+# A date the user set in Memoria survives re-analysis (SQLite evaluates CASE against the old row).
+_KEEP_MANUAL = {"taken_at": "taken_at=CASE WHEN date_source='manual' THEN taken_at ELSE ? END",
+                "date_source": "date_source=CASE WHEN date_source='manual' THEN date_source ELSE ? END"}
+_ANALYSIS_SET = ", ".join(_KEEP_MANUAL.get(c, f"{c}=?") for c in _COLS)
+DATES_MARKER = "dates-v2.done"
 
 
 def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = config.WORKERS) -> AnalyzeResult:
@@ -254,6 +273,11 @@ def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = co
                           "ORDER BY kind, rel_path", (METADATA_VERSION,)).fetchall()
     total = len(rows)
     res = AnalyzeResult()
+    marker = config.app_dir(lib.root) / DATES_MARKER
+    if not marker.exists() and lib.db.execute("SELECT 1 FROM files WHERE analyzed=1 LIMIT 1").fetchone() is None:
+        # A new catalogue: every file is analysed with the current date sources, so no backfill is needed.
+        config.ensure_app_dir(lib.root)
+        marker.write_text("New catalogue: every file was analysed with the current date sources.\n")
     others = lib.db.execute("SELECT id, name, mtime FROM files WHERE analyzed=0 AND kind='other'").fetchall()
     if others:
         with lib.transaction() as db:
@@ -263,6 +287,7 @@ def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = co
                 db.execute("UPDATE files SET analyzed=1, taken_at=?, date_source=? WHERE id=?",
                            (dt.isoformat(sep=" "), "filename" if fn_dt else "modified", r["id"]))
     if not total:
+        _improve_dates(lib, progress)
         return res
     progress.update(0, total, "Analysing photos and videos…", force=True)
     pending: list[tuple[int, dict]] = []
@@ -278,7 +303,7 @@ def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = co
                 for c in _COLS:
                     v = out.get(c)
                     vals.append(v.isoformat(sep=" ") if isinstance(v, datetime) else v)
-                db.execute(f"UPDATE files SET {', '.join(c + '=?' for c in _COLS)}, analyzed=1, metadata_version=? WHERE id=?",
+                db.execute(f"UPDATE files SET {_ANALYSIS_SET}, analyzed=1, metadata_version=? WHERE id=?",
                            (*vals, METADATA_VERSION, fid))
                 if out.get("chash"):
                     db.execute("UPDATE files SET qhash=?, chash=? WHERE id=?", (out["qhash"], out["chash"], fid))
@@ -341,8 +366,61 @@ def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = co
             flush()
             raise
     flush()
+    _improve_dates(lib, progress)
     progress.update(total, total, "Analysis complete", force=True)
     return res
+
+
+def _improve_dates(lib: Library, progress: Progress) -> None:
+    """After analysis: give modified-time-only files a better date where one can be found.
+
+    Every run: copy the reliable date of a same-named file in the same folder (cheap, catalogue only).
+    Once per library: re-check older catalogue entries for sidecar files, embedded XMP/PNG dates and
+    timestamps in file names, which earlier versions didn't read. New files get these during analysis.
+    """
+    marker = config.app_dir(lib.root) / DATES_MARKER
+    if not marker.exists():
+        rows = lib.db.execute("SELECT id, rel_path, name, kind, root_id FROM files WHERE date_source='modified' "
+                              "AND kind != 'other' AND root_id IN (SELECT id FROM library_roots WHERE online=1) "
+                              "ORDER BY rel_path").fetchall()
+        gates = disk_speed.root_gates(lib)
+        updates = []
+        for n, r in enumerate(rows, 1):
+            progress.update(n, len(rows), f"Looking for better dates… {n:,} of {len(rows):,}")
+            dt, source = media.date_from_filename(r["name"]), "filename"
+            if dt is None:
+                path = lib.abspath(r["rel_path"])
+                with gates.get(r["root_id"]) or contextlib.nullcontext():
+                    dt, source = dates.sidecar_date(path), "sidecar"
+                    if dt is None and r["kind"] == "image":
+                        dt, source = _embedded_date(path), "metadata"
+            if dt is not None:
+                updates.append((dt.isoformat(sep=" "), source, r["id"]))
+        if updates:
+            with lib.transaction() as db:
+                db.executemany("UPDATE files SET taken_at=?, date_source=? WHERE id=? AND date_source='modified'",
+                               updates)
+        marker.write_text("Older catalogue entries were checked for sidecar, embedded and file-name dates.\n")
+    dates.infer_dates(lib)
+
+
+def _embedded_date(path: Path) -> Optional[datetime]:
+    """PNG creation-time text or an XMP date near the start of the file; never decodes the image."""
+    try:
+        with open(config.longpath(path), "rb") as f:
+            head = f.read(512 * 1024)
+    except OSError:
+        return None
+    dt = dates.xmp_date(head)
+    if dt is None and head.startswith(b"\x89PNG"):
+        try:
+            import io
+            from PIL import Image
+            with Image.open(io.BytesIO(head)) as img:
+                dt = dates.png_text_date(img.info)
+        except Exception:
+            dt = None
+    return dt
 
 
 def index(lib: Library, progress: Optional[Progress] = None) -> tuple[ScanResult, AnalyzeResult]:

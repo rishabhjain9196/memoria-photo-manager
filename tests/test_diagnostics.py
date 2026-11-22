@@ -164,7 +164,7 @@ def test_task_timings_never_capture_titles_or_error_text(app):
     def fail(progress):
         raise PermissionError(SECRET)
     runner.run(SECRET, fail, diagnostic_key="index")
-    pump_until(app, lambda: not runner.busy)
+    pump_until(app, lambda: not runner.active)
     runner.report_measurement()
     snapshot = metrics.snapshot()
     assert snapshot["index"]["count"] == 1 and snapshot["index"]["outcomes"]["failed"] == 1
@@ -195,7 +195,7 @@ def test_existing_cache_and_in_progress_task_record_in_checkout(app, cached_libr
         assert report["task_in_progress"]["operation"] == "index"
         assert report["library"]["files"] == 2 and SECRET not in path.read_text()
         event.set()
-        pump_until(app, lambda: not ctx.runner.busy)
+        pump_until(app, lambda: not ctx.runner.active)
         controller.refresh()
         pump_until(app, lambda: controller._writer is None and "index" in (controller.latest or {}).get("timings", {}))
         assert controller.latest["task_in_progress"] is None

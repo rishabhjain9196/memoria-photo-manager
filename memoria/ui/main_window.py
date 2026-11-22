@@ -20,7 +20,7 @@ from . import motion, theme
 from .task_stats import TaskStats
 from .tasks import TaskRunner
 from .nav import NAV, NAV_KEYS
-from .widgets import (AppContext, Banner, ConfirmDialog, MessageDialog, Toast, button, fmt_date, fmt_n, fmt_size,
+from .widgets import (AppContext, Banner, ConfirmDialog, MessageDialog, Toast, button, confirm, fmt_date, fmt_n, fmt_size,
                       glyph_label, hbox, icon_family, label, scroll, show_in_explorer, vbox)
 
 SHORTCUT_KEYS = [key for key in NAV_KEYS if key != "insights"]
@@ -160,6 +160,8 @@ class MainWindow(QMainWindow):
         self.runner.paused_changed.connect(self._task_paused)
         self.runner.finished.connect(self._task_finished)
         self.runner.error.connect(self._task_error)
+        self.runner.refused.connect(lambda message: self.toast.show_message(message, seconds=6))
+        self.ctx.parallel.error.connect(self._task_error)
         self.runner.busy_changed.connect(lambda busy: self.appearance_menu.setEnabled(not busy))
         self.runner.busy_changed.connect(
             lambda busy: self.storage_btn.setEnabled(self.ctx.library is not None and not busy))
@@ -198,6 +200,9 @@ class MainWindow(QMainWindow):
         library_menu = QMenu(self)
         library_menu.setToolTipsVisible(True)
         library_menu.addAction("Change library…\tCtrl+O", self.choose_library)
+        library_menu.addAction("New window\tCtrl+Shift+N", lambda: self.new_window())
+        self.browse_window_btn = library_menu.addAction("Open this library in a new window (browse && find)",
+                                                        lambda: self.new_window(browse=True))
         self.roots_btn = library_menu.addAction("Library folders...", self.manage_roots)
         self.storage_btn = library_menu.addAction("Storage && reset…", self.manage_storage)
         library_menu.addSeparator()
@@ -311,6 +316,9 @@ class MainWindow(QMainWindow):
         rl.setContentsMargins(0, 0, 0, 0)
         rl.setSpacing(0)
         rl.addWidget(self.stack, 1)
+        from .parallel_bar import ParallelBar
+        self.parallel_bar = ParallelBar(self.ctx, lambda: getattr(self, "_task_paths", None) or self._library_paths())
+        rl.addWidget(self.parallel_bar)
         rl.addWidget(self.task_bar)
         root = QWidget()
         lay = QHBoxLayout(root)
@@ -326,6 +334,7 @@ class MainWindow(QMainWindow):
             QShortcut(QKeySequence(f"Ctrl+{(i + 1) % 10}"), self, activated=lambda k=key: self.go(k))
         QShortcut(QKeySequence("F5"), self, activated=self.index_library)
         QShortcut(QKeySequence("Ctrl+O"), self, activated=self.choose_library)
+        QShortcut(QKeySequence("Ctrl+Shift+N"), self, activated=lambda: self.new_window())
         QShortcut(QKeySequence("Ctrl+Z"), self, activated=self.undo_last)
         QShortcut(QKeySequence("Escape"), self, activated=lambda: self.runner.busy and self._cancel())
 
@@ -377,6 +386,7 @@ class MainWindow(QMainWindow):
         self.nav_container.setEnabled(has_lib)
         self.roots_btn.setEnabled(has_lib)
         self.storage_btn.setEnabled(has_lib and not self.runner.busy)
+        self.browse_window_btn.setEnabled(has_lib)
         if not has_lib:
             self.welcome.set_recent(self.settings.value("recent", [], list) or [])
             self.stack.setCurrentWidget(self.welcome)
@@ -399,6 +409,24 @@ class MainWindow(QMainWindow):
         self.open_library(e.mimeData().urls()[0].toLocalFile())
 
     # ---------------------------------------------------------------------------- library
+    def new_window(self, browse: bool = False) -> None:
+        """Start another Memoria window (a separate process, so each window keeps its own tasks)."""
+        import subprocess
+        import sys
+        args = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "memoria"]
+        if browse and self.ctx.library is not None:
+            args += [str(self.ctx.library.root), "--browse"]
+        else:
+            args.append("--new-window")
+        try:
+            subprocess.Popen(args, cwd=str(Path(__file__).resolve().parents[2]),
+                             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        except OSError as error:
+            MessageDialog(self, "Couldn't open a new window", str(error)).exec()
+            return
+        self.toast.show_message("Opening a new Memoria window…" if not browse else
+                                "Opening a browse & find window for this library…")
+
     def choose_library(self) -> None:
         if self.runner.busy or self.ctx.indexing:
             return
@@ -407,15 +435,24 @@ class MainWindow(QMainWindow):
         if path:
             self.open_library(path)
 
-    def open_library(self, path: str, page: str = "overview") -> None:
+    def open_library(self, path: str, page: str = "overview", viewer: bool = False) -> None:
         if self.runner.busy or self.ctx.indexing:
             return
         try:
-            lib = Library(path)
-        except LibraryInUse:
-            MessageDialog(self, "This library is already open",
-                          "Another Memoria window is using this library. Close it first, so two windows can "
-                          "never change the same files at the same time.").exec()
+            lib = Library(path, viewer=viewer)
+        except LibraryInUse as error:
+            if viewer:
+                MessageDialog(self, "This library can't be browsed yet", str(error)).exec()
+                return
+            if confirm(self, "This library is open in another window",
+                       "Another Memoria window is using this library, and only that window can change its files. "
+                       "You can still open it here to browse, search and find duplicates or similar photos.",
+                       ["Browsing, filters, Library insights and the viewer work as usual.",
+                        "Find duplicates, Similar photos, Tidy up and Organise previews work; their results "
+                        "can be acted on in the other window.",
+                        "Moving, removing, editing, renaming, rescanning and Health check stay in the other window."],
+                       "Open to browse && find"):
+                self.open_library(path, page, viewer=True)
             return
         except LibraryTooNew as e:
             MessageDialog(self, "Please update Memoria", str(e)).exec()
@@ -424,7 +461,7 @@ class MainWindow(QMainWindow):
             MessageDialog(self, "Can't open this folder", str(e)).exec()
             return
         try:
-            fixed = actions.reconcile(lib)
+            fixed = 0 if viewer else actions.reconcile(lib)
         except Exception as e:
             lib.close()
             MessageDialog(self, "Could not recover this catalogue", str(e) +
@@ -432,31 +469,44 @@ class MainWindow(QMainWindow):
                           "for recovery; do not remove it to force a fresh start.").exec()
             return
         try:
-            recovery.tidy(lib)
+            if not viewer:
+                recovery.tidy(lib)
         except Exception:
             pass  # Self-cleaning is best effort; anything left stays visible in Recovery accounting.
         self._clear_pages()
         self.ctx.set_library(lib)
+        self.runner.viewer = viewer
         parent = str(lib.root.parent)
         if len(parent) > 34:
             parent = parent[:12] + "…" + parent[-20:]
-        self.lib_label.setText(f"<b style='color:{theme.TEXT}'>{lib.root.name or lib.root}</b><br>{parent}")
-        self.lib_label.setToolTip(str(lib.root))
-        self.setWindowTitle(f"{lib.root.name or lib.root} — Memoria")
+        mode = f"<br><span style='color:{theme.WARN}'>Browse &amp; find window</span>" if viewer else ""
+        self.lib_label.setText(f"<b style='color:{theme.TEXT}'>{lib.root.name or lib.root}</b><br>{parent}{mode}")
+        self.lib_label.setToolTip(str(lib.root) + ("\nAnother window owns this library and makes all changes."
+                                                    if viewer else ""))
+        self.setWindowTitle(f"{lib.root.name or lib.root} — Memoria" + (" (browse & find)" if viewer else ""))
         recent = [str(lib.root)] + [p for p in (self.settings.value("recent", [], list) or []) if p != str(lib.root)]
         self.settings.setValue("recent", recent[:8])
-        self.settings.setValue("library", str(lib.root))
+        if not viewer:
+            self.settings.setValue("library", str(lib.root))
         self._show_library_ui(True)
         self._reset_state()
         self.go(page if page in self.page_classes else "overview")
         if fixed:
             self.toast.show_message(f"Memoria was interrupted last time. {fmt_n(fixed, 'unfinished change')} "
                                     "were checked and recorded in History, where you can undo them.")
-        self.index_library()
+        if viewer:
+            self.toast.show_message("Browse & find window: search and review here; moving, editing and rescanning "
+                                    "happen in the window that opened this library first.", seconds=8)
+        else:
+            self.index_library()
 
     def index_library(self) -> None:
         lib = self.ctx.library
         if lib is None or self.runner.busy or self.ctx.indexing:
+            return
+        if lib.viewer:
+            self.toast.show_message("Rescan this library in the window that opened it first; this window only "
+                                    "browses and finds.")
             return
         live = not self.ctx.maintenance
 
@@ -484,6 +534,7 @@ class MainWindow(QMainWindow):
             self.ctx.notification_requested.emit(
                 "index_issues" if s.unreadable_folders or s.unreadable_files or s.offline_roots or a.errors else
                 "index_complete" if live else "rebuild_complete", 0)
+            QTimer.singleShot(0, self._fingerprint_in_background)
 
         if live:
             self._index_notified = False
@@ -496,6 +547,27 @@ class MainWindow(QMainWindow):
         if not started and live:
             self._index_refresh.stop()
             self.ctx.set_indexing(False)
+
+    def _fingerprint_in_background(self) -> None:
+        """Older catalogues lack photo fingerprints; fill them in quietly so Find duplicates never re-reads photos."""
+        lib = self.ctx.library
+        if lib is None or self._closing or self.ctx.maintenance or self.ctx.indexing or self.runner.busy:
+            return
+        from ..engine import duplicates
+        try:
+            missing = duplicates.missing_fingerprints(lib)
+        except Exception:
+            return
+        if not missing:
+            return
+
+        def work(progress):
+            try:
+                return duplicates.fingerprint_missing(lib, progress)
+            finally:
+                lib.close_thread()
+
+        self.ctx.parallel.run("Fingerprinting photos", work, diagnostic_key="index", background=True)
 
     def _publish_index_progress(self) -> None:
         if not self.ctx.indexing or self._closing:
@@ -612,6 +684,9 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.welcome)
 
     def manage_roots(self) -> None:
+        if self.ctx.library is not None and self.ctx.library.viewer:
+            self.toast.show_message(TaskRunner.VIEWER_REFUSAL)
+            return
         if self.ctx.library is None or self.runner.busy or self.ctx.indexing or self.ctx.maintenance:
             self.toast.show_message("Finish the current task or rebuild before changing library folders.")
             return
@@ -633,6 +708,9 @@ class MainWindow(QMainWindow):
 
     def manage_storage(self) -> None:
         lib = self.ctx.library
+        if lib is not None and lib.viewer:
+            self.toast.show_message(TaskRunner.VIEWER_REFUSAL)
+            return
         if lib is None or self.runner.busy or self.ctx.indexing:
             return
         from .storage_dialog import StorageDialog
@@ -729,6 +807,10 @@ class MainWindow(QMainWindow):
         lib = self.ctx.library
         if lib is None or self.runner.busy or self.ctx.maintenance or self.ctx.indexing:
             return
+        if lib.viewer:
+            self.toast.show_message("Check everything starts with a rescan, so run it in the Memoria window that opened "
+                                    "this library first. Individual finders work here.")
+            return
         from ..engine import checkup
 
         def done(c):
@@ -744,7 +826,9 @@ class MainWindow(QMainWindow):
             self.toast.show_message("Check-up complete: " + ", ".join(parts) + ". Nothing was changed.", seconds=12)
             self.ctx.notification_requested.emit("results_ready", 0)
 
-        self.runner.run("Checking everything", lambda prog: checkup.run(lib, prog), done, diagnostic_key="checkup")
+        if not self.ctx.parallel.run("Checking everything", lambda prog: checkup.run(lib, prog), done,
+                                     diagnostic_key="checkup"):
+            self.toast.show_message("“Checking everything” is already running — see the task bar.")
 
     def open_sample(self) -> None:
         if self.runner.busy or self.ctx.indexing:
@@ -944,6 +1028,8 @@ class MainWindow(QMainWindow):
             self.runner.cancel()
             self.runner.wait()
             self.runner.report_measurement()
+        self.ctx.parallel.cancel_all()
+        self.ctx.parallel.wait()
         self.settings.setValue("geometry", self.saveGeometry())
         for p in self.pages.values():
             stop = getattr(p, "shutdown", None)

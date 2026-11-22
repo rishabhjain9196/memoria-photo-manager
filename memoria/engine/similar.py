@@ -14,7 +14,7 @@ from typing import Optional
 
 import numpy as np
 
-from . import activity, config, media
+from . import activity, config, dates, media
 from .actions import Action
 from .db import Library
 from .progress import Progress
@@ -54,7 +54,7 @@ class _DSU:
 
 def _epoch(row) -> float:
     """Capture time from camera/video metadata only; file names and mtimes are too coarse for bursts."""
-    if row["taken_at"] and row["date_source"] in ("exif", "metadata"):
+    if row["taken_at"] and row["date_source"] in dates.PRECISE:
         try:
             return datetime.fromisoformat(row["taken_at"]).timestamp()
         except ValueError:

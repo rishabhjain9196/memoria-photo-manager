@@ -51,7 +51,8 @@ def date_from_filename(name: str) -> Optional[datetime]:
             continue
         if 1990 <= dt.year <= datetime.now().year + 1:
             return dt
-    return None
+    from .dates import epoch_from_filename
+    return epoch_from_filename(name)
 
 
 def _parse_exif_dt(value) -> Optional[datetime]:
@@ -153,6 +154,11 @@ def open_oriented(path: str | Path, target: int = ANALYSIS_SIZE,
             raise UnidentifiedImageError(f"cannot identify image file {longpath(path)!r}") from None
     original = img.size
     info = read_exif(img)
+    if "taken_at" not in info:
+        from .dates import png_text_date
+        text_date = png_text_date(img.info)
+        if text_date:
+            info["embedded_date"] = text_date
     if img.format == "JPEG":
         img.draft("RGB", (target, target))
     img.load()
@@ -218,6 +224,11 @@ def analyze_image(path: str | Path, data: Optional[bytes] = None) -> dict:
     if "taken_at" in info:
         result["taken_at"] = info["taken_at"]
         result["date_source"] = "exif"
+    else:
+        from .dates import xmp_date
+        embedded = info.get("embedded_date") or (xmp_date(data) if data else None)
+        if embedded:
+            result["taken_at"], result["date_source"] = embedded, "metadata"
     return result
 
 

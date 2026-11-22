@@ -63,20 +63,38 @@ class TaskRunner(QObject):
     error = Signal(str, str, str)   # title, message, details
     busy_changed = Signal(bool)
     measured = Signal(str, str, float, float)
+    refused = Signal(str)           # a change was not started (browse & find window)
+
+    VIEWER_REFUSAL = ("This window only browses and finds. Make this change in the Memoria window that opened "
+                      "the library first.")
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._worker: Optional[_Worker] = None
+        self._pending: Optional[tuple] = None
         self._cancel = threading.Event()
         self._pause = threading.Event()
         self.title = ""
         self._diagnostic_key = "other"
         self._diagnostic_started = 0.0
         self._measurement_reported = True
+        self.parallel: Optional["ParallelTasks"] = None
+        self.refusal = ""
+        self.viewer = False    # a browse & find window: never changes files
 
     @property
     def busy(self) -> bool:
-        return self._worker is not None
+        return self._worker is not None or self._pending is not None
+
+    @property
+    def waiting(self) -> bool:
+        """A change is waiting for read-only tasks to finish before it starts."""
+        return self._pending is not None
+
+    @property
+    def active(self) -> bool:
+        """Anything at all is running or waiting: a change, or a read-only task beside it."""
+        return self.busy or bool(self.parallel is not None and self.parallel.tasks)
 
     @property
     def paused(self) -> bool:
@@ -86,9 +104,36 @@ class TaskRunner(QObject):
             on_done: Optional[Callable[[Any], None]] = None,
             on_cancel: Optional[Callable[[], None]] = None, *, diagnostic_key: str = "other") -> bool:
         if self.busy:
+            self.refusal = self.title
+            return False
+        if self.viewer:
+            self.refusal = self.VIEWER_REFUSAL
+            self.refused.emit(self.VIEWER_REFUSAL)
             return False
         if diagnostic_key not in OPERATIONS:
             raise ValueError("Unknown diagnostic task category")
+        self.title = title
+        searches = self.parallel.foreground() if self.parallel is not None else []
+        if searches:
+            # Changes never run while a search is still reading the library: wait for it (new searches
+            # can't start meanwhile), then start automatically. Cancel drops the waiting change.
+            self._pending = (title, fn, on_done, on_cancel, diagnostic_key)
+            self.started.emit(title)
+            self.busy_changed.emit(True)
+            self.progressed.emit(0, 0, f"Waiting for “{searches[0].title}” to finish (it only reads files)…")
+            self.parallel.changed.connect(self._start_pending)
+            return True
+        self._start(title, fn, on_done, on_cancel, diagnostic_key)
+        return True
+
+    def _start_pending(self) -> None:
+        if self._pending is None or (self.parallel is not None and self.parallel.foreground()):
+            return
+        self.parallel.changed.disconnect(self._start_pending)
+        pending, self._pending = self._pending, None
+        self._start(*pending, announce=False)
+
+    def _start(self, title, fn, on_done, on_cancel, diagnostic_key, announce: bool = True) -> None:
         self._diagnostic_key = diagnostic_key
         self._diagnostic_started = time.perf_counter()
         self._measurement_reported = False
@@ -117,12 +162,25 @@ class TaskRunner(QObject):
         w.succeeded.connect(done)
         w.failed.connect(failed)
         w.was_cancelled.connect(cancelled)
-        self.started.emit(title)
-        self.busy_changed.emit(True)
+        if self.parallel is not None:
+            self.parallel.hold_background(True)
+        if announce:
+            self.started.emit(title)
+            self.busy_changed.emit(True)
+        else:
+            self.progressed.emit(0, 0, "Starting…")
         w.start()
-        return True
 
     def cancel(self) -> None:
+        if self._pending is not None and self._worker is None:
+            on_cancel = self._pending[3]
+            self._pending = None
+            self.parallel.changed.disconnect(self._start_pending)
+            self.finished.emit("cancelled")
+            self.busy_changed.emit(False)
+            if on_cancel:
+                on_cancel()
+            return
         self._cancel.set()
         if self._pause.is_set():
             self._pause.clear()
@@ -130,7 +188,7 @@ class TaskRunner(QObject):
 
     def pause(self) -> None:
         """Hold the running task at its next safe point (between files or copy chunks)."""
-        if self.busy and not self._pause.is_set():
+        if self._worker is not None and not self._pause.is_set():
             self._pause.set()
             self.paused_changed.emit(True)
 
@@ -149,12 +207,17 @@ class TaskRunner(QObject):
             self.report_measurement()
             w.deleteLater()
         self._worker = None
+        if self.parallel is not None:
+            self.parallel.hold_background(False)
         self.finished.emit(outcome)
         self.busy_changed.emit(False)
 
     def wait(self) -> None:
+        """Wait for the running change and any read-only tasks running beside it."""
         if self._worker is not None:
             self._worker.wait()
+        if self.parallel is not None:
+            self.parallel.wait()
 
     def report_measurement(self) -> None:
         w = self._worker
@@ -167,6 +230,125 @@ class TaskRunner(QObject):
             return None
         return {"operation": self._diagnostic_key,
                 "elapsed_seconds": time.perf_counter() - self._diagnostic_started}
+
+
+class ParallelTask:
+    """One read-only task in the parallel lane, with the latest progress it reported."""
+
+    def __init__(self, task_id: int, title: str, key: str, background: bool):
+        self.id, self.title, self.key, self.background = task_id, title, key, background
+        self.cancel = threading.Event()
+        self.pause = threading.Event()        # set by the user
+        self.held = False                     # paused because a change is running
+        self.done = self.total = 0
+        self.message = "Starting…"
+        self.detail: dict = {}
+        self.started = time.monotonic()
+        self.worker: Optional[_Worker] = None
+
+    @property
+    def fraction(self) -> Optional[float]:
+        return min(1.0, self.done / self.total) if self.total else None
+
+
+class ParallelTasks(QObject):
+    """Read-only tasks (finding duplicates, similar photos, health check, people…) that run side by side.
+
+    They never move, copy or delete files, so several can run at once. A task that changes files
+    (TaskRunner) can't start while one of these is running, and background tasks (such as
+    fingerprinting) are held while a change runs, then resume.
+    """
+    changed = Signal()                   # a task started or finished
+    started = Signal(str)                # title
+    progressed = Signal(int)             # task id
+    error = Signal(str, str, str)
+
+    def __init__(self, runner: TaskRunner, parent=None):
+        super().__init__(parent)
+        self.runner = runner
+        runner.parallel = self
+        self.tasks: dict[int, ParallelTask] = {}
+        self._ids = 0
+        self.refusal = ""
+
+    def foreground(self) -> list[ParallelTask]:
+        return [t for t in self.tasks.values() if not t.background]
+
+    def running(self, title: str) -> bool:
+        return any(t.title == title for t in self.tasks.values())
+
+    def run(self, title: str, fn: Callable[[Progress], Any], on_done: Optional[Callable[[Any], None]] = None,
+            on_cancel: Optional[Callable[[], None]] = None, *, diagnostic_key: str = "other",
+            background: bool = False) -> bool:
+        if self.runner.busy:
+            self.refusal = self.runner.title
+            return False
+        if self.running(title):
+            self.refusal = title
+            return False
+        if diagnostic_key not in OPERATIONS:
+            raise ValueError("Unknown diagnostic task category")
+        self._ids += 1
+        task = ParallelTask(self._ids, title, diagnostic_key, background)
+        worker = _Worker(fn, task.cancel, task.pause)
+        task.worker = worker
+        self.tasks[task.id] = task
+
+        def progressed(done, total, message):
+            task.done, task.total, task.message = done, total, message
+            self.progressed.emit(task.id)
+
+        def detailed(detail):
+            task.detail = detail or {}
+
+        def finish(outcome, callback=None, *args):
+            worker.wait(2000)
+            self.tasks.pop(task.id, None)
+            self.runner.measured.emit(diagnostic_key, worker.outcome, worker.wall_seconds, worker.cpu_seconds)
+            worker.deleteLater()
+            self.changed.emit()
+            self.runner.busy_changed.emit(self.runner.busy)  # pages re-check what they may start
+            if callback:
+                callback(*args)
+
+        worker.progressed.connect(progressed)
+        worker.detailed.connect(detailed)
+        worker.succeeded.connect(lambda result: finish("ok", on_done, result) if on_done else finish("ok"))
+        worker.failed.connect(lambda msg, details: finish("failed", self.error.emit, title, msg, details))
+        worker.was_cancelled.connect(lambda: finish("cancelled", on_cancel) if on_cancel else finish("cancelled"))
+        self.changed.emit()
+        self.started.emit(title)
+        worker.start()
+        return True
+
+    def cancel(self, task_id: int) -> None:
+        task = self.tasks.get(task_id)
+        if task:
+            task.cancel.set()
+            task.pause.clear()
+
+    def toggle_pause(self, task_id: int) -> None:
+        task = self.tasks.get(task_id)
+        if task and not task.held:
+            (task.pause.clear if task.pause.is_set() else task.pause.set)()
+            self.progressed.emit(task_id)
+
+    def hold_background(self, hold: bool) -> None:
+        """Pause background tasks while a change runs (they read the files being changed), then resume."""
+        for task in self.tasks.values():
+            if task.background and task.held != hold:
+                task.held = hold
+                (task.pause.set if hold else task.pause.clear)()
+                self.progressed.emit(task.id)
+
+    def cancel_all(self) -> None:
+        for task in list(self.tasks.values()):
+            self.cancel(task.id)
+
+    def wait(self) -> None:
+        for task in list(self.tasks.values()):
+            if task.worker is not None:
+                task.worker.wait()
 
 
 class _CallThread(QThread):

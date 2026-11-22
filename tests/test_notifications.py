@@ -190,11 +190,11 @@ def test_real_tasks_route_once_keep_undo_and_hide_private_details(qt, tmp_path, 
 
     def wait():
         until = time.monotonic() + 15
-        while (window.runner.busy or window.ctx.indexing) and time.monotonic() < until:
+        while (window.runner.active or window.ctx.indexing) and time.monotonic() < until:
             app.processEvents()
             time.sleep(.01)
         app.processEvents()
-        assert not window.runner.busy and not window.ctx.indexing
+        assert not window.runner.active and not window.ctx.indexing
 
     def expect(key, count=0):
         wait()

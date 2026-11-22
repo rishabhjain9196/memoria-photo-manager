@@ -180,7 +180,7 @@ def test_photos_saves_current_search_sort_and_edits_selection(smart_library, mon
             return QDialog.DialogCode.Accepted
         monkeypatch.setattr(QDialog, "exec", accepted)
         page.b_organise.click()
-        wait(app, lambda: not ctx.runner.busy)
+        wait(app, lambda: not ctx.runner.active)
         assert organisation.state(smart_library, 3)["review"] == "reject"
         assert organisation.state(smart_library, 2)["review"] == "unreviewed"
         assert smart_library.file(3) is not None

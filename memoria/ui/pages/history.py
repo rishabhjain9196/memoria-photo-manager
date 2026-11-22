@@ -20,7 +20,7 @@ OP_PAGE = 500
 KIND = {"duplicates": "Duplicates", "similar": "Similar / blurry", "tidy": "Tidy up", "organize": "Organise",
         "sync": "Compare & sync", "batch": "Photos & videos", "edit": "Editor",
         "albums": "Albums export", "story": "Story maker", "video": "Video compressor",
-        "recovery_import": "Recovery restoration"}
+        "recovery_import": "Recovery restoration", "health": "Health check fixes"}
 OP = {"recycle": "Moved to Recovery", "move": "Moved", "copy": "Copied", "rmdir": "Removed empty folder",
       "create": "Created", "metadata": "Merged organisation"}
 OP_STATUS = {"done": "Done", "undone": "Undone", "skipped": "Skipped", "failed": "Failed",

@@ -233,7 +233,7 @@ def _wait_review(app, window):
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         app.processEvents()
-        if not window.runner.busy and not any(worker.running for worker in window.findChildren(LatestCall)):
+        if not window.runner.active and not any(worker.running for worker in window.findChildren(LatestCall)):
             app.processEvents()
             return
         time.sleep(.01)
