@@ -1,14 +1,16 @@
 """Engine tests against the generated library's ground truth (tools/make_test_library.py)."""
 import os
 import shutil
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
-from memoria.engine import actions, compare, duplicates, health, organize, scanner, similar, tidy
-from memoria.engine.config import SAMPLE_BYTES, SAMPLE_POINTS
+from memoria.engine import actions, compare, disk_speed, duplicates, health, organize, scanner, similar, tidy
+from memoria.engine.config import SAMPLE_BYTES, SAMPLE_POINTS, kind_for_ext
 from memoria.engine.db import Library
-from memoria.engine.hashing import full_hash, quick_hash
+from memoria.engine.hashing import full_hash, hashes_of_bytes, quick_hash
 from memoria.engine.progress import Cancelled, Progress
 
 
@@ -36,6 +38,14 @@ def test_quick_hash_is_only_a_prefilter(tmp_path):
     b.write_bytes(data)
     assert quick_hash(a, len(data)) == quick_hash(b, len(data))
     assert full_hash(a) != full_hash(b)
+
+
+def test_bytes_hashes_match_on_disk_hashes(tmp_path):
+    for size in (100, SAMPLE_BYTES * SAMPLE_POINTS * 3 + 7):
+        p = tmp_path / f"{size}.bin"
+        data = os.urandom(size)
+        p.write_bytes(data)
+        assert hashes_of_bytes(data) == (quick_hash(p, size), full_hash(p))
 
 
 def test_scan_is_incremental(library):
@@ -93,6 +103,49 @@ def test_duplicate_groups_match_ground_truth(library, expected):
     for g in groups:
         keeper = next(f for f in g.files if f["id"] == g.keeper_id)
         assert not keeper["rel_path"].startswith(("Phone Backup", "Downloads")), keeper["rel_path"]
+
+
+def test_duplicates_reuse_photo_hashes_from_indexing(library, expected, monkeypatch):
+    photos = library.files("kind='image'")
+    assert photos and all(r["chash"] == full_hash(library.abspath(r["rel_path"])) for r in photos)
+    reads = []
+    monkeypatch.setattr(duplicates, "quick_hash", lambda p, size: reads.append(p) or quick_hash(p, size))
+    monkeypatch.setattr(duplicates, "full_hash", lambda p: reads.append(p) or full_hash(p))
+    groups = duplicates.find_duplicates(library)
+    assert sorted(sorted(f["rel_path"] for f in g.files) for g in groups) == expected["duplicate_groups"]
+    assert not [p for p in reads if kind_for_ext(Path(p).suffix) == "image"]
+
+
+def test_analysis_respects_drive_read_limit(pristine_library, tmp_path, monkeypatch):
+    dest = tmp_path / "library"
+    shutil.copytree(pristine_library, dest)
+    monkeypatch.setenv("MEMORIA_IO_WORKERS", "1")
+    disk_speed.reset_cache()
+    active = peak = 0
+    lock = threading.Lock()
+    original = scanner._read_original
+
+    def tracked(path, size):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        try:
+            time.sleep(0.005)
+            return original(path, size)
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(scanner, "_read_original", tracked)
+    lib = Library(dest)
+    try:
+        scanner.index(lib)
+        assert peak == 1
+        assert lib.stats()["pending"] == 0
+    finally:
+        lib.close()
+        disk_speed.reset_cache()
 
 
 def test_large_duplicates_are_removed_regression(library, expected):

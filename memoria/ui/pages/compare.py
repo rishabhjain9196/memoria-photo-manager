@@ -15,7 +15,7 @@ from .. import theme
 from ..motion import Dialog
 from ..review_pages import ReviewGroup, ReviewPages
 from ..venn import VennWidget, side_colors
-from ..widgets import Banner, Card, EmptyState, MessageDialog, button, fmt_n, fmt_size, hbox, label, scroll, vbox
+from ..widgets import Banner, Card, EmptyState, HelpToggle, MessageDialog, button, fmt_n, fmt_size, hbox, label, scroll, vbox
 from .base import Page
 
 FILES_PER_FOLDER = 400
@@ -280,9 +280,9 @@ class ComparePage(Page):
         remove_card = Card(vbox(
             label("Remove duplicates", "h2"),
             hbox(label("From", "small"), self.remove_from),
-            label("Files whose exact content is also in another library. They go to that library's own Recovery "
-                  "folder and can be undone from History. A photo moves only together with its Live Photo video, "
-                  "RAW and edit files.", "small", wrap=True),
+            HelpToggle("Files whose exact content is also in another library. They go to that library's own Recovery "
+                       "folder and can be undone from History. A photo moves only together with its Live Photo "
+                       "video, RAW and edit files.", "What gets removed — undo from History"),
             self.remove_view_only, self.remove_summary, hbox(None, self.remove_btn), spacing=6))
         actions = QWidget()
         actions.setLayout(vbox(sync_card, remove_card, None, spacing=10))

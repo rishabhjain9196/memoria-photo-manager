@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .config import ANALYSIS_SIZE, THUMB_SIZE, longpath
 
@@ -137,12 +137,20 @@ def read_exif(img: Image.Image) -> dict:
     return out
 
 
-def open_oriented(path: str | Path, target: int = ANALYSIS_SIZE) -> tuple[Image.Image, tuple[int, int], dict]:
+def open_oriented(path: str | Path, target: int = ANALYSIS_SIZE,
+                  data: Optional[bytes] = None) -> tuple[Image.Image, tuple[int, int], dict]:
     """Open an image decoded at reduced resolution (fast for JPEG), upright, in RGB.
 
+    ``data`` is the file's bytes when the caller has already read it, so the disk is not read again.
     Returns (image, original_size, exif_info). Raises on unreadable files.
     """
-    img = Image.open(longpath(path))
+    if data is None:
+        img = Image.open(longpath(path))
+    else:
+        try:
+            img = Image.open(io.BytesIO(data))
+        except UnidentifiedImageError:
+            raise UnidentifiedImageError(f"cannot identify image file {longpath(path)!r}") from None
     original = img.size
     info = read_exif(img)
     if img.format == "JPEG":
@@ -195,8 +203,8 @@ def thumbnail_bytes(img: Image.Image, size: int = THUMB_SIZE) -> bytes:
     return buf.getvalue()
 
 
-def analyze_image(path: str | Path) -> dict:
-    img, (w, h), info = open_oriented(path)
+def analyze_image(path: str | Path, data: Optional[bytes] = None) -> dict:
+    img, (w, h), info = open_oriented(path, data=data)
     # Always measure at the same scale so small copies don't look "sharper" than their originals.
     scale = ANALYSIS_SIZE / max(img.size)
     size = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))

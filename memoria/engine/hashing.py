@@ -33,17 +33,35 @@ def full_hash(path: str | os.PathLike) -> Optional[str]:
     return h.hexdigest()
 
 
+def _sample_offsets(size: int) -> list[int]:
+    last = size - SAMPLE_BYTES
+    return [last * i // (SAMPLE_POINTS - 1) for i in range(SAMPLE_POINTS)]
+
+
 def quick_hash(path: str | os.PathLike, size: int) -> Optional[str]:
     if size <= SAMPLE_BYTES * SAMPLE_POINTS:
         return full_hash(path)
     h = xxhash.xxh3_128()
-    last = size - SAMPLE_BYTES
     try:
         with open(longpath(path), "rb", buffering=0) as f:
-            for i in range(SAMPLE_POINTS):
-                f.seek(last * i // (SAMPLE_POINTS - 1))
+            for offset in _sample_offsets(size):
+                f.seek(offset)
                 h.update(f.read(SAMPLE_BYTES))
     except OSError:
         return None
     h.update(size.to_bytes(8, "little"))
     return h.hexdigest()
+
+
+def hashes_of_bytes(data: bytes) -> tuple[str, str]:
+    """(quick_hash, full_hash) of a file already read into memory; identical to the on-disk versions."""
+    full = xxhash.xxh3_128(data).hexdigest()
+    size = len(data)
+    if size <= SAMPLE_BYTES * SAMPLE_POINTS:
+        return full, full
+    view = memoryview(data)
+    h = xxhash.xxh3_128()
+    for offset in _sample_offsets(size):
+        h.update(view[offset:offset + SAMPLE_BYTES])
+    h.update(size.to_bytes(8, "little"))
+    return h.hexdigest(), full

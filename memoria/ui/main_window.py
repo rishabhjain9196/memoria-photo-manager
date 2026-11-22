@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import shutil
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -13,26 +14,15 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFileDialo
                                QMenu, QProgressBar, QPushButton, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import __version__
-from ..engine import actions, recovery, scanner, storage
+from ..engine import actions, activity, disk_speed, recovery, scanner, storage
 from ..engine.db import Library, LibraryInUse, LibraryTooNew
 from . import motion, theme
 from .task_stats import TaskStats
 from .tasks import TaskRunner
-from .widgets import (AppContext, Banner, ConfirmDialog, MessageDialog, Toast, button, fmt_date, fmt_n,
-                      glyph_label, hbox, icon_family, label, scroll, vbox)
+from .nav import NAV, NAV_KEYS
+from .widgets import (AppContext, Banner, ConfirmDialog, MessageDialog, Toast, button, fmt_date, fmt_n, fmt_size,
+                      glyph_label, hbox, icon_family, label, scroll, show_in_explorer, vbox)
 
-NAV = [
-    ("LIBRARY", [("overview", "Overview", "\uE80F"), ("photos", "Photos & videos", "\uE91B"),
-                 ("people", "People", "\uE716"), ("insights", "Library insights", "\uE9D9")]),
-    ("CLEAN UP", [("duplicates", "Duplicates", "\uE8C8"), ("similar", "Similar & best shots", "\uE734"),
-                  ("tidy", "Tidy up", "\uE74D")]),
-    ("ORGANISE", [("organize", "Organise by date", "\uE8B7"), ("albums", "Albums", "\uE7AA")]),
-    ("CREATE", [("editor", "Editor", "\uE70F"), ("story", "Story maker", "\uE786"),
-                ("video", "Video compressor", "\uE714")]),
-    ("PROTECT", [("health", "Health check", "\uEA18"), ("compare", "Compare & sync", "\uE895"),
-                 ("history", "History & recovery", "\uE81C")]),
-]
-NAV_KEYS = [k for _, items in NAV for k, _, _ in items]
 SHORTCUT_KEYS = [key for key in NAV_KEYS if key != "insights"]
 
 
@@ -210,6 +200,8 @@ class MainWindow(QMainWindow):
         library_menu.addAction("Change library…\tCtrl+O", self.choose_library)
         self.roots_btn = library_menu.addAction("Library folders...", self.manage_roots)
         self.storage_btn = library_menu.addAction("Storage && reset…", self.manage_storage)
+        library_menu.addSeparator()
+        self.ios_import_btn = library_menu.addAction("Import from iPhone backup…", self.import_ios_backup)
         self.library_btn = button("Library  ▾", "sideMenu", tip="Change library, manage folders or storage")
         self.library_btn.setMenu(library_menu)
         sl.addLayout(hbox(4, self.library_btn, None))
@@ -236,7 +228,7 @@ class MainWindow(QMainWindow):
                 lay = QHBoxLayout(b)
                 lay.setContentsMargins(10, 0, 8, 0)
                 if fam:
-                    g = glyph_label(glyph, 15, theme.MUTED)
+                    g = glyph_label(glyph, 15, theme.section_color(heading))
                     g.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
                     lay.addWidget(g)
                 lay.addStretch(1)
@@ -291,6 +283,9 @@ class MainWindow(QMainWindow):
         self.task_counts = label("", "small")
         self.task_speed = label("", "small")
         self.task_eta = label("", "small")
+        self.task_system = label("", "small")
+        self.task_system.setObjectName("taskSystem")
+        self.task_system.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.task_progress = QProgressBar()
         self.task_progress.setTextVisible(False)
         self.task_progress.setFixedHeight(8)
@@ -301,6 +296,7 @@ class MainWindow(QMainWindow):
         top.setStretch(1, 1)
         tb = vbox(top, self.task_progress,
                   hbox(self.task_counts, None, self.task_speed, 16, self.task_eta),
+                  self.task_system,
                   spacing=6, margins=(28, 10, 28, 12))
         self.task_bar.setLayout(tb)
         self.task_bar.hide()
@@ -680,6 +676,54 @@ class MainWindow(QMainWindow):
         self.runner.run("Rebuilding library storage", work, done,
                         on_cancel=self.ctx.library_modified.emit, diagnostic_key="reset")
 
+    def import_ios_backup(self) -> None:
+        if self.runner.busy or self.ctx.indexing or self.ctx.maintenance:
+            self.toast.show_message("Finish the current task before importing from an iPhone backup.")
+            return
+        from ..engine import iosbackup
+        from .ios_import import IosImportDialog
+        lib = self.ctx.library
+        dialog = IosImportDialog(self, lib)
+        accepted = dialog.exec()
+        choices = dialog.choices() if accepted else None
+        dialog.deleteLater()
+        if not choices:
+            return
+        library_mode = choices["library_mode"]
+
+        def work(prog):
+            try:
+                return iosbackup.extract(choices["backup"], choices["destination"], choices["categories"],
+                                         progress=prog, media_only=library_mode,
+                                         library=lib if library_mode else None, entries=choices["entries"])
+            finally:
+                if library_mode:
+                    lib.close_thread()
+
+        def done(result):
+            parts = [f"Copied {fmt_n(result.copied, 'file')} ({fmt_size(result.copied_bytes)})"]
+            if result.already_in_library:
+                parts.append(f"{fmt_n(result.already_in_library, 'file')} already in the library")
+            if result.resumed:
+                parts.append(f"{fmt_n(result.resumed, 'file')} copied earlier")
+            if result.renamed:
+                parts.append(f"{fmt_n(result.renamed, 'file')} renamed to avoid replacing existing files")
+            problems = result.missing + result.failed + result.size_mismatches
+            message = "; ".join(parts) + "."
+            if problems:
+                MessageDialog(self, "Import finished with problems",
+                              message + f" {fmt_n(problems, 'file')} could not be copied exactly "
+                              "(listed below). Everything else was copied.",
+                              "\n".join(result.errors)).exec()
+            else:
+                self.toast.show_message(message, seconds=8)
+            if library_mode and result.copied:
+                QTimer.singleShot(0, self.index_library)
+            elif not library_mode:
+                show_in_explorer(result.destination)
+
+        self.runner.run("Importing from iPhone backup", work, done, diagnostic_key="ios_import")
+
     def run_checkup(self) -> None:
         """Run every finder in one read-only pass; pages and sidebar badges use the results."""
         lib = self.ctx.library
@@ -773,9 +817,13 @@ class MainWindow(QMainWindow):
         self.task_title.setText(title)
         self.task_msg.setText("Starting…")
         self.task_pct.setText("")
-        for widget in (self.task_counts, self.task_speed, self.task_eta):
+        for widget in (self.task_counts, self.task_speed, self.task_eta, self.task_system):
             widget.setText("")
         self.task_progress.setRange(0, 0)
+        self._task_paths = self._library_paths()
+        if self._task_paths:
+            # Detect the library drives off the UI thread (a sleeping hard disk can take seconds to answer).
+            threading.Thread(target=self._detect_drives, args=(list(self._task_paths),), daemon=True).start()
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.setText("Cancel")
         self.pause_btn.setEnabled(True)
@@ -812,6 +860,27 @@ class MainWindow(QMainWindow):
         self.task_counts.setText(stats.counts_text())
         self.task_speed.setText(stats.speed_text())
         self.task_eta.setText(stats.time_text())
+        stats.system(activity.snapshot(getattr(self, "_task_paths", ())))
+        system = stats.system_text()
+        self.task_system.setText(system)
+        self.task_system.setToolTip(system.replace("   ·   ", "\n"))
+
+    def _library_paths(self) -> list[str]:
+        lib = getattr(self.ctx, "library", None)
+        if lib is None:
+            return []
+        try:
+            return [str(path) for path in lib._root_paths.values()]
+        except Exception:
+            return []
+
+    @staticmethod
+    def _detect_drives(paths: list[str]) -> None:
+        for path in paths:
+            try:
+                disk_speed.detect_disk(path)
+            except Exception:
+                pass
 
     def _toggle_pause(self) -> None:
         if self.runner.paused:

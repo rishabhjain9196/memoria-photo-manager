@@ -7,7 +7,8 @@ from PySide6.QtWidgets import QHeaderView, QTreeWidget, QTreeWidgetItem
 
 from ...engine import health
 from .. import theme
-from ..widgets import Banner, Tile, button, fmt_date, fmt_n, fmt_size, friendly_error, hbox, label, show_in_explorer
+from ..widgets import (Banner, HelpToggle, Tile, button, fmt_date, fmt_n, fmt_size, friendly_error, hbox, label,
+                       show_in_explorer)
 from .base import Page
 
 
@@ -22,15 +23,17 @@ class HealthPage(Page):
         self._page = 0
         self.run_btn = button("Run health check", "primary", self.check)
         self.header_actions.addWidget(self.run_btn)
-        self.explain = Banner(
-            "<b>How it works.</b> The first check records a fingerprint of every file. Each later check re-reads every "
+        self.explain = HelpToggle(
+            "The first check records a fingerprint of every file. Each later check re-reads every "
             "file: if one changed although nobody edited it (same size and date), it is flagged as possibly damaged. "
-            "Photos are also opened to make sure they still display. This only reads files.", "info")
+            "Photos are also opened to make sure they still display. This only reads files.",
+            "How it works — this only reads files")
         self.last = label("", "muted")
-        self.tiles = {k: Tile(text=v) for k, v in [("ok", "Intact"), ("new", "Newly fingerprinted"),
-                                                   ("edited", "Edited since last check"),
-                                                   ("damaged", "Possibly damaged"), ("unreadable", "Can't be opened"),
-                                                   ("missing", "Missing")]}
+        specs = [("ok", "Intact", "\uE73E", theme.OK), ("new", "Newly fingerprinted", "\uE928", theme.ACCENT),
+                 ("edited", "Edited since last check", "\uE70F", theme.MUTED),
+                 ("damaged", "Possibly damaged", "\uE7BA", theme.DANGER),
+                 ("unreadable", "Can't be opened", "\uEA39", theme.DANGER), ("missing", "Missing", "\uE9CE", theme.WARN)]
+        self.tiles = {k: Tile(text=v, glyph=g, color=c) for k, v, g, c in specs}
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Status", "File", "Details"])
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -72,7 +75,8 @@ class HealthPage(Page):
         self.report, self._page = rep, 0
         for k, t in self.tiles.items():
             n = rep.counts.get(k, 0)
-            color = theme.DANGER if k in ("damaged", "unreadable") and n else (theme.OK if k == "ok" and n else None)
+            color = theme.DANGER if k in ("damaged", "unreadable") and n else (
+                theme.OK if k == "ok" and n else theme.WARN if k == "missing" and n else None)
             t.set(f"{n:,}", color=color)
         self._render_page()
         bad = rep.counts.get("damaged", 0)

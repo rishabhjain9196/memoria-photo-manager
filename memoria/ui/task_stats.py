@@ -8,6 +8,7 @@ from typing import Callable, Optional
 from .widgets import fmt_size
 
 WINDOW = 8.0        # seconds of recent work used for the speed
+SYSTEM_WINDOW = 3.0  # seconds of activity snapshots used for disk I/O and CPU rates
 MIN_ETA_SECONDS = 2.0
 
 
@@ -32,6 +33,8 @@ class TaskStats:
         self.fraction: Optional[float] = None
         self.detail: dict = {}
         self.samples: deque = deque()
+        self.system_samples: deque = deque()
+        self.snapshot: dict = {}
 
     # pausing ------------------------------------------------------------------------------
     @property
@@ -47,6 +50,7 @@ class TaskStats:
             self.paused_total += self.clock() - self.paused_at
             self.paused_at = None
             self.samples.clear()  # speed restarts after a pause instead of averaging the idle gap
+            self.system_samples.clear()
 
     def elapsed(self) -> float:
         now = self.paused_at if self.paused_at is not None else self.clock()
@@ -124,3 +128,60 @@ class TaskStats:
         if left is not None and (self.fraction or 0) < 0.999:
             text += f" · about {fmt_secs(left)} left"
         return text
+
+    # system activity (engine.activity.snapshot) --------------------------------------------
+    def system(self, snap: dict) -> None:
+        """Record an activity snapshot; disk I/O and CPU rates come from the last few seconds."""
+        self.snapshot = snap
+        if self.paused:
+            return
+        self.system_samples.append(snap)
+        while len(self.system_samples) > 2 and snap["time"] - self.system_samples[0]["time"] > SYSTEM_WINDOW:
+            self.system_samples.popleft()
+
+    def system_rates(self) -> tuple[Optional[float], Optional[float], Optional[float]]:
+        """(disk read bytes/s, disk write bytes/s, CPU share 0–1 of the whole machine)."""
+        if len(self.system_samples) < 2:
+            return None, None, None
+        first, last = self.system_samples[0], self.system_samples[-1]
+        dt = last["time"] - first["time"]
+        if dt < 0.5:
+            return None, None, None
+        read = write = None
+        if first.get("io") and last.get("io"):
+            read = max(0, last["io"][0] - first["io"][0]) / dt
+            write = max(0, last["io"][1] - first["io"][1]) / dt
+        cpu = max(0.0, last["cpu_seconds"] - first["cpu_seconds"]) / dt / max(1, last.get("cpus", 1))
+        return read, write, min(1.0, cpu)
+
+    def drive_text(self) -> str:
+        snap = getattr(self, "snapshot", None) or {}
+        parts = []
+        for d in snap.get("drives", []):
+            kind = "HDD" if d.get("is_hdd") else "SSD" if d.get("is_ssd") else "Drive"
+            text = f"{kind}: {d.get('tier', 'unknown')}"
+            if d.get("workers"):
+                text += f" · {d.get('active', 0)} of {d['workers']} reader{'' if d['workers'] == 1 else 's'} busy"
+            parts.append(text)
+        return " | ".join(parts)
+
+    def workers_text(self) -> str:
+        snap = getattr(self, "snapshot", None) or {}
+        parts = [f"{name} ×{workers}" for name, workers in snap.get("pools", [])]
+        if snap.get("threads"):
+            parts.append(f"{snap['threads']} threads")
+        _, _, cpu = self.system_rates()
+        if cpu is not None and not self.paused:
+            parts.append(f"CPU {cpu:.0%}")
+        return " · ".join(parts)
+
+    def io_text(self) -> str:
+        if self.paused:
+            return ""
+        read, write, _ = self.system_rates()
+        if read is None:
+            return ""
+        return f"Disk read {fmt_size(read)}/s · write {fmt_size(write)}/s"
+
+    def system_text(self) -> str:
+        return "   ·   ".join(part for part in (self.drive_text(), self.workers_text(), self.io_text()) if part)

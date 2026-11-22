@@ -9,7 +9,8 @@ from PySide6.QtWidgets import QHeaderView, QSplitter, QTreeWidget, QTreeWidgetIt
 from ...engine import tidy
 from ..review_pages import ReviewGroup, ReviewPages
 from ..tasks import LatestCall
-from ..widgets import Banner, MessageDialog, Preview, button, fmt_date, fmt_n, fmt_size, hbox, label, show_in_explorer
+from ..widgets import (MessageDialog, Preview, button, fmt_date, fmt_n, fmt_size, hbox, label, show_in_explorer,
+                       trust_note)
 from .base import Page, recovery_note
 
 
@@ -38,13 +39,15 @@ class TidyPage(Page):
         self.pages = ReviewPages(self.tree, self._render_item, lambda item: item.get("size") or 0)
         self.pages.changed.connect(self._update)
         self.apply_btn = button("Tidy selected", "primary", self.apply)
-        self.body.addWidget(Banner(recovery_note() + " Categories that need a closer look start unticked.", "trust"))
         self.sidecar_note = label("", "muted", wrap=True)
         self.sidecar_note.hide()
         self.body.addWidget(self.sidecar_note)
         self.body.addWidget(split, 1)
         self.body.addLayout(self.pages.controls)
-        self.body.addLayout(hbox(self.summary, None, self.apply_btn))
+        self.body.addLayout(hbox(self.summary, None,
+                                 trust_note("Nothing is deleted · moved to Recovery, undo anytime",
+                                            recovery_note() + " Categories that need a closer look start unticked."),
+                                 12, self.apply_btn))
         self.report: tidy.TidyReport | None = None
         self.plan_bg = LatestCall(self)
         self.plan_bg.result.connect(self._apply_ready)

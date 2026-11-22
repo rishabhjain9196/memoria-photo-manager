@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHeaderView, QListW
 from ...engine import assets, catalogue, duplicate_cleanup, duplicates
 from .. import theme
 from ..tasks import LatestCall
-from ..widgets import (Banner, Card, ConfirmDialog, MessageDialog, PhotoGrid, Preview, Viewer, button, fmt_n,
+from ..widgets import (Banner, Card, ConfirmDialog, HelpToggle, MessageDialog, PhotoGrid, Preview, Viewer, button, fmt_n,
                        fmt_size, hbox, label, scroll, vbox)
 from .base import Page, recovery_note, recycle_summary
 
@@ -150,6 +150,8 @@ class DuplicatesPage(Page):
 
         self.list = QListWidget()
         self.list.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.list.setWordWrap(True)  # two-line entries wrap instead of being cut off at the list edge
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list.currentRowChanged.connect(self._select_group)
         self.group_scope = label("", "small", wrap=True)
         self.group_previous = button("Previous page", on_click=lambda: self._group_step(-1))
@@ -262,10 +264,11 @@ class DuplicatesPage(Page):
             box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._group_divider = self._divider()
         self.action_bar = Card(hbox(file_box, self._group_divider, self.group_box, self._divider(), all_box, spacing=16))
-        self.body.addWidget(Banner(
-            "<b>How it works:</b> 1. pick a group, 2. tick the copies to move (unticked copies are kept; a copy to "
+        self.body.addWidget(HelpToggle(
+            "1. Pick a group, 2. tick the copies to move (unticked copies are kept; a copy to "
             "keep is already suggested), 3. move them for <b>this file</b>, <b>this group</b> or <b>all groups</b>. "
-            "Nothing is deleted - files go to Recovery and can be undone.", "info"))
+            "Nothing is deleted - files go to Recovery and can be undone.",
+            "How it works — nothing is deleted, moves can be undone"))
         self.body.addWidget(split, 1)
         self.body.addWidget(self.action_bar)
         self.body.addLayout(hbox(self.quick_remove, self.quick_warning, None, self.action_note, spacing=12))

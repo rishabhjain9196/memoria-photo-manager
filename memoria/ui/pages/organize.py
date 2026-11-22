@@ -12,7 +12,7 @@ from ...engine.actions import Action
 from .. import theme
 from ..review_pages import ReviewGroup, ReviewPages
 from ..tasks import LatestCall
-from ..widgets import Banner, Card, EmptyState, Tile, button, fmt_date, fmt_n, hbox, label, vbox
+from ..widgets import Card, EmptyState, Tile, button, fmt_date, fmt_n, hbox, label, trust_note, vbox
 from .base import Page
 
 
@@ -50,9 +50,12 @@ class OrganizePage(Page):
         self.summary = label("")
         self.apply_btn = button("Move files", "primary", self.apply)
         res = vbox(hbox(self.t_move, self.t_place, self.t_skip, spacing=12),
-                   Banner("Files are only renamed if a file with the same name already exists in the new folder "
-                          "(e.g. “IMG_1234 (2).jpg”). Nothing is overwritten, and you can undo the whole move.", "trust"),
-                   self.tree, self.pages.controls, hbox(self.summary, None, self.apply_btn), spacing=10)
+                   self.tree, self.pages.controls,
+                   hbox(self.summary, None,
+                        trust_note("Nothing is overwritten · undo the whole move",
+                                   "Files are only renamed if a file with the same name already exists in the new "
+                                   "folder (e.g. “IMG_1234 (2).jpg”). Nothing is overwritten, and you can undo the "
+                                   "whole move."), 12, self.apply_btn), spacing=10)
         from PySide6.QtWidgets import QWidget
         w = QWidget()
         w.setLayout(res)

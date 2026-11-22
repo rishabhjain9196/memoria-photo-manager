@@ -26,7 +26,7 @@ from typing import Optional
 import numpy as np
 from PIL import Image
 
-from . import config, ffmpeg, media
+from . import activity, config, ffmpeg, media
 from .db import Library
 from .duplicates import keeper_score
 from .progress import Progress
@@ -160,20 +160,22 @@ def _signatures(lib: Library, rows: list[dict], progress: Progress) -> dict[int,
 
     n = len(todo)
     progress.update(0, n, f"Reading videos… 0 of {n:,}", force=True)
-    pool = ThreadPoolExecutor(max_workers=max(1, config.WORKERS // 2))
-    try:
-        futures = [pool.submit(work, r) for r in todo]
-        for i, fut in enumerate(as_completed(futures), 1):
-            r, sig = fut.result()
-            if sig is not None:
-                out[r["id"]] = (r["duration"], sig)
-                pending.append((r["id"], r["size"], r["mtime"], r["duration"], json.dumps(sig)))
-                if len(pending) >= 16:
-                    flush()
-            progress.update(i, n, f"Reading videos… {i:,} of {n:,}")
-    finally:
-        pool.shutdown(wait=True, cancel_futures=True)
-        flush()                        # keep finished work even when cancelled
+    workers = max(1, config.WORKERS // 2)
+    pool = ThreadPoolExecutor(max_workers=workers)
+    with activity.pool("Video readers", workers):
+        try:
+            futures = [pool.submit(work, r) for r in todo]
+            for i, fut in enumerate(as_completed(futures), 1):
+                r, sig = fut.result()
+                if sig is not None:
+                    out[r["id"]] = (r["duration"], sig)
+                    pending.append((r["id"], r["size"], r["mtime"], r["duration"], json.dumps(sig)))
+                    if len(pending) >= 16:
+                        flush()
+                progress.update(i, n, f"Reading videos… {i:,} of {n:,}")
+        finally:
+            pool.shutdown(wait=True, cancel_futures=True)
+            flush()                        # keep finished work even when cancelled
     return out
 
 

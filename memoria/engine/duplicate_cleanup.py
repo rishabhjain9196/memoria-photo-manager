@@ -7,6 +7,7 @@ explicitly acknowledged review; they are never included by default.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -16,7 +17,7 @@ from dataclasses import dataclass, field
 
 import xxhash
 
-from . import assets, config, duplicates, roots
+from . import activity, assets, config, disk_speed, duplicates, roots
 from .actions import Action
 from .db import Library
 from .hashing import CHUNK
@@ -165,7 +166,7 @@ def _choices(lib, report, file_choices, folder_choices, progress):
     return protected, recommended
 
 
-def _fingerprint_component(lib, row, progress):
+def _fingerprint_component(lib, row, progress, gates=None):
     """Fingerprint a reviewed stat snapshot, cancellably, on a worker."""
     try:
         progress.check()
@@ -175,7 +176,8 @@ def _fingerprint_component(lib, row, progress):
         if before.st_size != row["size"] or before.st_mtime != row["mtime"]:
             return None
         digest = xxhash.xxh3_128()
-        with open(config.longpath(path), "rb", buffering=0) as stream:
+        gate = (gates or {}).get(roots.split_key(row["rel_path"])[0]) or contextlib.nullcontext()
+        with gate, open(config.longpath(path), "rb", buffering=0) as stream:
             buffer = bytearray(CHUNK)
             view = memoryview(buffer)
             while True:
@@ -201,9 +203,12 @@ def _fingerprint_component(lib, row, progress):
 def _fingerprints(lib, rows, progress):
     result = {}
     if rows:
-        with ThreadPoolExecutor(max_workers=min(config.WORKERS, len(rows))) as pool:
-            values = pool.map(lambda row: _fingerprint_component(lib, row, progress), rows.values())
-            for index, (fid, digest) in enumerate(zip(rows, values), 1):
+        gates = disk_speed.root_gates(lib)
+        ordered = sorted(rows, key=lambda fid: rows[fid]["rel_path"].lower())
+        workers = min(config.WORKERS, disk_speed.read_workers(lib), len(rows))
+        with activity.pool("Verifying", workers), ThreadPoolExecutor(max_workers=workers) as pool:
+            values = pool.map(lambda fid: _fingerprint_component(lib, rows[fid], progress, gates), ordered)
+            for index, (fid, digest) in enumerate(zip(ordered, values), 1):
                 result[fid] = digest
                 progress.update(index, len(rows), "Verifying linked cleanup contents")
     return result

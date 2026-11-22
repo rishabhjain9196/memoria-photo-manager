@@ -47,12 +47,12 @@ def test_live_photos_before_completion_keep_view_stable_and_actions_locked(tmp_p
     slow_started = threading.Event()
     original = scanner._analyze_one
 
-    def blocked(path, kind, name, mtime):
+    def blocked(path, kind, name, mtime, *rest):
         if name == "1.jpg":
             slow_started.set()
             if not release.wait(20):
                 raise RuntimeError("Test analysis gate timed out")
-        return original(path, kind, name, mtime)
+        return original(path, kind, name, mtime, *rest)
 
     monkeypatch.setattr(scanner, "_analyze_one", blocked)
     monkeypatch.setattr(widgets.MessageDialog, "exec", lambda self: 0)

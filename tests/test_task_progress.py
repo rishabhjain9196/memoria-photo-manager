@@ -117,6 +117,52 @@ def test_stats_speed_eta_and_pause_excluded_from_elapsed():
     assert stats.elapsed() == pytest.approx(5)
 
 
+def test_system_stats_show_drive_workers_and_disk_speed():
+    from memoria.ui.task_stats import TaskStats
+    stats = TaskStats(lambda: 0.0)
+    mb = 1024 * 1024
+    drive = {"drive": "e:\\", "is_hdd": True, "is_ssd": False, "tier": "Mechanical HDD (WD Elements)",
+             "workers": 1, "active": 1}
+    base = {"pools": [("Photo decoders", 12), ("Video readers", 6)], "drives": [drive], "threads": 23, "cpus": 4}
+    stats.system({**base, "time": 10.0, "cpu_seconds": 1.0, "io": (0, 0)})
+    stats.system({**base, "time": 12.0, "cpu_seconds": 5.0, "io": (100 * mb, 2 * mb)})
+    text = stats.system_text()
+    assert "HDD: Mechanical HDD (WD Elements) · 1 of 1 reader busy" in text
+    assert "Photo decoders ×12 · Video readers ×6 · 23 threads · CPU 50%" in text
+    assert "Disk read 50.0 MB/s · write 1.0 MB/s" in text
+    stats.pause()
+    assert "Disk read" not in stats.system_text() and "CPU" not in stats.system_text()
+
+
+def test_task_bar_shows_live_workers_while_running():
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    from PySide6.QtWidgets import QApplication
+    from memoria.engine import activity
+    from memoria.ui.main_window import MainWindow
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    release = threading.Event()
+
+    def work(progress):
+        with activity.pool("Hashing", 3):
+            progress.update(1, 2, "Hashing", force=True)
+            release.wait(5)
+        return "ok"
+    try:
+        window.runner.run("Hashing files", work)
+        deadline = time.monotonic() + 5
+        while "Hashing ×3" not in window.task_system.text() and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert "Hashing ×3" in window.task_system.text() and "threads" in window.task_system.text()
+    finally:
+        release.set()
+        window.runner.wait()
+        window.close()
+        window.deleteLater()
+        app.processEvents()
+
+
 def test_task_bar_shows_counts_and_pauses_the_running_task():
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     from PySide6.QtWidgets import QApplication

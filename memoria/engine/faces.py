@@ -18,7 +18,7 @@ from typing import Optional
 import numpy as np
 from PIL import Image
 
-from . import config, media
+from . import activity, config, media
 from .db import Library
 from .progress import Progress
 
@@ -231,7 +231,7 @@ def scan(lib: Library, progress: Optional[Progress] = None, chunk: int = 48) -> 
     prev = cv2.getNumThreads()
     cv2.setNumThreads(1)          # parallel across photos instead of inside each model
     try:
-        with ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
+        with activity.pool("Face detection", config.WORKERS), ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
             for start in range(0, len(todo), chunk):
                 part = list(pool.map(work, todo[start:start + chunk]))
                 _store(lib, part)

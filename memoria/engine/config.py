@@ -35,6 +35,8 @@ SAMPLE_POINTS = 5
 
 CPU_COUNT = os.cpu_count() or 4
 WORKERS = max(2, min(12, CPU_COUNT))
+# Photos up to this size are read into memory once and hashed + decoded from that copy.
+IN_MEMORY_READ_LIMIT = 128 * 1024 * 1024
 
 
 def kind_for_ext(ext: str) -> str:

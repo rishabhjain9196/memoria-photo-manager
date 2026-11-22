@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### Clearer visual cues
+- Each sidebar section has its own colour (Library blue, Clean up orange, Organise violet, Create magenta, Protect
+  green), used for the sidebar icons, a tinted icon chip beside every page title and on the Overview cards.
+- Summary tiles can carry an icon, and tiles that report a status show it with a coloured left edge (for example
+  Health check: intact in green, damaged or unreadable in red, missing in amber).
+- "How it works" explanations on Duplicates and Health check, and the removal note in Compare & sync, are now a
+  one-line link that expands on demand. Tidy up and Organise by date show their "nothing is deleted / overwritten"
+  reassurance as one green line beside the action button (full text in the tooltip) instead of a banner.
+- History shows files outside the library (e.g. compressed-video exports) as `…\folder\name`; the tooltip has the full path.
+- Fixed clipped text: the Photos selection bar now uses two rows, and long Duplicates group names wrap.
+
+### Import from iPhone backup
+- *Library ▾ → Import from iPhone backup…* finds unencrypted iTunes / Apple Devices backups (or a folder you pick),
+  shows device, iOS version, date and per-category file counts and sizes, then either adds only the photos and
+  videos the library doesn't already hold (compared by content) or copies a readable, folderised copy anywhere.
+- Rewritten extractor (`memoria/engine/iosbackup.py`; `tools/extract_ios_backup.py` is now a thin command line):
+  the catalogue is opened immutable/read-only (no side files in the backup); original file dates come from the
+  catalogue instead of the backup time; encrypted and unfinished backups are detected; copies go through `.part`
+  files and are size-checked; nothing is overwritten (including names differing only by case, which previously
+  replaced each other); `..` in backup paths can't escape the destination; long names keep their extension;
+  progress is committed in batches instead of one disk flush per file; an import interrupted after a file was
+  written is adopted on resume rather than copied twice; reads and writes follow the per-drive limits.
+- `tools/export_new_iphone_media.py` is replaced by `extract_ios_backup.py --library`.
+
+### Task bar shows what the computer is doing
+- A second line under the progress bar shows the drive being read (HDD/SSD/network, model) with busy/allowed
+  readers, each running worker pool (for example *Photo decoders ×12 · Video readers ×6*), process threads, CPU
+  use, and disk read/write speed — for every task, alongside the existing transfer speed and time left.
+
+### Faster indexing and duplicates on hard disks
+- Indexing reads each photo once: the same bytes are hashed and decoded, so **Find duplicates** no longer re-reads
+  photos (only videos that share a size with another file are read again).
+- Reads of originals are rationed per drive: one at a time on a USB hard disk, two on an internal hard disk, more on
+  SSDs. Decoding still uses every CPU core. Override with the `MEMORIA_IO_WORKERS` environment variable.
+- Duplicate hashing reads files folder by folder instead of in size order, so a hard disk streams instead of seeking.
+- Drive detection uses the real volume behind mounted folders, recognises network folders, checks TRIM support when
+  the seek-penalty query is unavailable, and treats unknown drives cautiously instead of as SSDs.
+
 ### Live task status with Pause
 - The task bar now shows files processed of total, data copied/moved of total, percentage and progress bar, speed
   (MB/s and files/s over the last few seconds), time elapsed (pauses excluded) and estimated time left, plus the

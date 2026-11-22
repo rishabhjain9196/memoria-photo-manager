@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QHeaderView, QInputDialog, QLineEdit, QMenu, QSlider,
-                               QSplitter, QTreeWidget, QTreeWidgetItem, QWidget)
+                               QSizePolicy, QSplitter, QTreeWidget, QTreeWidgetItem, QWidget)
 
 from ..motion import Dialog
 from ...engine import albums, batch, catalogue, organisation
@@ -121,8 +121,11 @@ class PhotosPage(Page):
         self.more_menu.addAction("Show in folder", self._show_selected)
         self.b_more.setMenu(self.more_menu)
         self.b_clear = button("Clear", "link", lambda: self.grid.clearSelection())
-        self.sel_bar.setLayout(hbox(self.sel_label, None, self.b_organise, self.b_more, self.b_recycle, self.b_clear,
-                                    spacing=6, margins=(12, 6, 8, 6)))
+        for b in (self.b_organise, self.b_more, self.b_recycle, self.b_clear):
+            b.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)  # never clip button text
+        self.sel_bar.setLayout(vbox(hbox(self.sel_label, None, self.b_clear),
+                                    hbox(self.b_organise, self.b_more, None, self.b_recycle, spacing=6),
+                                    spacing=4, margins=(12, 6, 8, 8)))
         self.sel_bar.hide()
 
         center = QWidget()

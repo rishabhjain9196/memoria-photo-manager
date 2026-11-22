@@ -22,7 +22,8 @@ from .progress import Cancelled
 
 OPERATIONS = frozenset(("index", "reset", "checkup", "undo", "sample", "other", "photos", "people",
                        "duplicates", "similar", "tidy", "organize", "albums", "editor", "story",
-                       "video", "health", "compare", "history", "overview", "insights", "browse_page", "preview"))
+                       "video", "health", "compare", "history", "overview", "insights", "browse_page", "preview",
+                       "ios_import"))
 VIDEO_CODECS = frozenset(("h264", "hevc", "av1", "vp8", "vp9", "mpeg4", "mpeg2video", "mjpeg",
                          "prores", "dnxhd", "wmv3", "vc1", "theora", "rawvideo", "png"))
 AUDIO_CODECS = frozenset(("aac", "mp3", "opus", "vorbis", "flac", "alac", "ac3", "eac3", "dts", "pcm"))

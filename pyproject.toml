@@ -9,7 +9,7 @@ description = "A private, offline, easy-to-trust photo and video manager for Win
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Rishabh Jain" }]
-license = { text = "Proprietary — all rights reserved" }
+license = { text = "MIT" }
 classifiers = [
     "Private :: Do Not Upload",
     "Environment :: Win32 (MS Windows)",

@@ -346,7 +346,9 @@ class HistoryPage(Page):
         try:
             return self.lib.display_path(self.lib.rel(p, resolve=False))
         except ValueError:
-            return str(p)
+            # Outside the library (e.g. an export folder): the end of the path is what identifies it;
+            # the full path stays in the tooltip.
+            return f"…\\{p.parent.name}\\{p.name}" if p.parent.name else str(p)
 
     def _reveal(self, item, _column):
         op = item.data(0, Qt.ItemDataRole.UserRole)

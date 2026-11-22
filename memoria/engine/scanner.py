@@ -4,7 +4,9 @@ Scanning never modifies anything outside ``.memoria``.
 """
 from __future__ import annotations
 
+import contextlib
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from dataclasses import dataclass
@@ -12,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Optional
 
-from . import config, ffmpeg, media, roots
+from . import activity, config, disk_speed, ffmpeg, hashing, media, roots
 from .db import DERIVED, METADATA_VERSION, Library, LibraryUnavailable
 from .progress import Progress
 
@@ -182,19 +184,44 @@ def _scan_root(lib: Library, source: dict, progress: Progress) -> ScanResult:
     return res
 
 
-def _analyze_one(path: Path, kind: str, name: str, mtime: float) -> dict:
+def _read_original(path: Path, size: int) -> Optional[bytes]:
+    """Whole file in one sequential read, or None when it is too big to hold or changed since the scan."""
+    if size > config.IN_MEMORY_READ_LIMIT:
+        return None
+    with open(config.longpath(path), "rb", buffering=0) as f:
+        data = f.read()
+    return data if len(data) == size else None
+
+
+def _analyze_one(path: Path, kind: str, name: str, mtime: float, size: int = -1,
+                 gate: Optional[threading.Semaphore] = None) -> dict:
+    """Analyse one file. Disk reads happen inside ``gate``; decoding and hashing run outside it.
+
+    Photos are read once: the same bytes give the content hashes (so finding duplicates never
+    reads them again) and the decoded preview/metadata.
+    """
+    gate = gate or contextlib.nullcontext()
     out: dict = {}
+    hashes: dict = {}
     try:
         if kind == "image":
-            out = media.analyze_image(path)
+            with gate:
+                data = _read_original(path, size)
+            if data is not None:
+                hashes["qhash"], hashes["chash"] = hashing.hashes_of_bytes(data)
+                out = media.analyze_image(path, data)
+            else:
+                with gate:
+                    out = media.analyze_image(path)
         else:
-            info = ffmpeg.probe(path)
+            with gate:
+                info = ffmpeg.probe(path)
+                frame = ffmpeg.video_frame(path, at=min(1.0, info.duration / 2), max_side=config.ANALYSIS_SIZE)
             out = {"width": info.width, "height": info.height, "duration": info.duration,
                    "fps": info.fps if info.fps > 0 else None, "video_codec": info.vcodec,
                    "audio_codec": info.acodec}
             if info.creation_time:
                 out["taken_at"], out["date_source"] = info.creation_time, "metadata"
-            frame = ffmpeg.video_frame(path, at=min(1.0, info.duration / 2), max_side=config.ANALYSIS_SIZE)
             if frame:
                 import io
                 from PIL import Image
@@ -203,6 +230,7 @@ def _analyze_one(path: Path, kind: str, name: str, mtime: float) -> dict:
                 out["dhash"] = media.dhash(img.convert("L"))
     except Exception as e:  # unreadable/corrupt files are recorded, never fatal
         out = {"error": f"{type(e).__name__}: {e}"[:300]}
+    out.update(hashes)
     if "taken_at" not in out:
         dt = media.date_from_filename(name)
         if dt:
@@ -220,7 +248,7 @@ _COLS = ("width", "height", "taken_at", "date_source", "camera", "lat", "lon", "
 def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = config.WORKERS) -> AnalyzeResult:
     """Analyse every un-analysed image and video. Resumable: results are committed in batches."""
     progress = progress or Progress()
-    rows = lib.db.execute("SELECT id, rel_path, kind, name, mtime FROM files "
+    rows = lib.db.execute("SELECT id, rel_path, kind, name, mtime, size, root_id FROM files "
                           "WHERE (analyzed=0 OR COALESCE(metadata_version,0)<?) AND kind!='other' "
                           "AND root_id IN (SELECT id FROM library_roots WHERE online=1) "
                           "ORDER BY kind, rel_path", (METADATA_VERSION,)).fetchall()
@@ -252,6 +280,8 @@ def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = co
                     vals.append(v.isoformat(sep=" ") if isinstance(v, datetime) else v)
                 db.execute(f"UPDATE files SET {', '.join(c + '=?' for c in _COLS)}, analyzed=1, metadata_version=? WHERE id=?",
                            (*vals, METADATA_VERSION, fid))
+                if out.get("chash"):
+                    db.execute("UPDATE files SET qhash=?, chash=? WHERE id=?", (out["qhash"], out["chash"], fid))
         thumbs = [(fid, out["thumb"]) for fid, out in pending if out.get("thumb")]
         if thumbs:
             t = lib.thumbs_db
@@ -262,12 +292,17 @@ def analyze(lib: Library, progress: Optional[Progress] = None, workers: int = co
         last_flush = time.monotonic()
 
     video_workers = max(1, min(4, workers // 2))
+    # Decoding uses every CPU worker; reads of originals are rationed per drive (one at a time on
+    # a USB hard disk) so the disk streams files instead of seeking between them.
+    gates = disk_speed.root_gates(lib)
+
     def analyze_one(row):
         path = lib.abspath(row["rel_path"])
         lib.check_path(path)
-        return _analyze_one(path, row["kind"], row["name"], row["mtime"])
+        return _analyze_one(path, row["kind"], row["name"], row["mtime"], row["size"], gates.get(row["root_id"]))
 
-    with ThreadPoolExecutor(max_workers=workers) as pool, ThreadPoolExecutor(max_workers=video_workers) as vpool:
+    with activity.pool("Photo decoders", workers), activity.pool("Video readers", video_workers), \
+            ThreadPoolExecutor(max_workers=workers) as pool, ThreadPoolExecutor(max_workers=video_workers) as vpool:
         futures = {}
         remaining = iter(rows)
 

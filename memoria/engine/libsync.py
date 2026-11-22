@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
-from . import assets, config
+from . import activity, assets, config
 from .actions import Action
 from .db import SCHEMA_VERSION, Library, LibraryUnavailable
 from .hashing import full_hash
@@ -567,7 +567,8 @@ def _fingerprint(todo: list[Entry], progress: Progress) -> None:
         entry.hash = full_hash(entry.path)
         return entry
 
-    with ThreadPoolExecutor(max_workers=max(2, config.WORKERS // 2)) as pool:
+    with activity.pool("Fingerprinting", max(2, config.WORKERS // 2)), \
+            ThreadPoolExecutor(max_workers=max(2, config.WORKERS // 2)) as pool:
         for number, _ in enumerate(pool.map(work, todo), 1):
             progress.update(number, total, f"Fingerprinting files that could match... {number:,} of {total:,}")
 

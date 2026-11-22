@@ -14,7 +14,7 @@ from typing import Optional
 
 import numpy as np
 
-from . import config, media
+from . import activity, config, media
 from .actions import Action
 from .db import Library
 from .progress import Progress
@@ -86,7 +86,7 @@ def similar_pairs(hashes: np.ndarray, times: np.ndarray, threshold: int, burst_s
         return out_i, out_j
 
     starts = list(range(0, n, BLOCK))
-    with ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
+    with activity.pool("Comparing", config.WORKERS), ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
         for k, (out_i, out_j) in enumerate(pool.map(block, starts), 1):
             if progress:
                 progress.update(k, len(starts), f"Comparing photos… {min(k * BLOCK, n):,} of {n:,}")
@@ -166,7 +166,7 @@ def _ensure_faces(lib: Library, rows: list[dict], progress: Progress) -> None:
         return r["id"], media.count_faces(lib.abspath(r["rel_path"]))
 
     updates = []
-    with ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
+    with activity.pool("Face counting", config.WORKERS), ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
         for i, (fid, n) in enumerate(pool.map(work, todo), 1):
             progress.update(i, len(todo), f"Looking for faces… {i:,} of {len(todo):,}")
             updates.append((n if n is not None else -1, fid))

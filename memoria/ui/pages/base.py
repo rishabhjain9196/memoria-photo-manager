@@ -10,7 +10,8 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 from ...engine import actions
 from ...engine.actions import Action
 from ...engine.progress import Progress
-from ..widgets import AppContext, MessageDialog, confirm, fmt_n, fmt_size, hbox, label, vbox
+from .. import nav
+from ..widgets import AppContext, MessageDialog, confirm, fmt_n, fmt_size, hbox, icon_chip, label, vbox
 
 
 class Page(QWidget):
@@ -28,6 +29,14 @@ class Page(QWidget):
         head = vbox(label(self.title, "pageTitle"), label(self.subtitle, "pageSubtitle", wrap=True), spacing=2)
         top = hbox(head, 24, self.header_actions)
         top.setStretch(0, 1)
+        found = nav.identity(self.title)
+        if found:
+            chip = icon_chip(found[1], nav.color(self.title), 20, 40)
+            top.insertWidget(0, chip)
+            top.insertSpacing(1, 6)
+            top.setStretch(0, 0)
+            top.setStretch(2, 1)
+            top.setAlignment(chip, Qt.AlignmentFlag.AlignTop)
         top.setAlignment(self.header_actions, Qt.AlignmentFlag.AlignTop)
         self.body = QVBoxLayout()
         self.body.setSpacing(12)

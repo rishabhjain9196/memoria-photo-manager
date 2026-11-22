@@ -41,10 +41,12 @@ not erase previously written reports or git history.
 
 ## Share deliberately
 
-From the repository root, after reviewing the reports:
+Reports are ignored by git (they describe your own collection and computer), so a report is only ever
+committed on purpose. This repository may be public: share reports another way (or in a private fork)
+unless you are happy for them to be visible. From the repository root, after reviewing the report:
 
 ```powershell
-git add diagnostics\reports
+git add -f diagnostics\reports\report-<id>.json
 git diff --cached -- diagnostics\reports
 git commit -m "Add reviewed library diagnostics"
 git push

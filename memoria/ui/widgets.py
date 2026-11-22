@@ -102,6 +102,18 @@ def glyph_label(glyph: str, size: int = 16, color: str = theme.TEXT) -> QLabel:
     return lab
 
 
+def icon_chip(glyph: str, color: str, size: int = 16, box: int = 30) -> QLabel:
+    """A rounded, softly tinted square holding a coloured icon — the visual cue for a section or status."""
+    lab = glyph_label(glyph, size, color)
+    lab.setObjectName("iconChip")
+    lab.setFixedSize(box, box)
+    lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    lab.setStyleSheet(f"color: {color}; background: {theme.soft(color)}; border-radius: {box // 3}px;")
+    if not icon_family():
+        lab.hide()
+    return lab
+
+
 # ------------------------------------------------------------------------------ OS helpers
 def show_in_explorer(path: str | Path) -> None:
     path = str(path)
@@ -190,8 +202,49 @@ class Banner(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
 
+def trust_note(short: str, full: str = "") -> QLabel:
+    """A one-line green reassurance shown beside an action button; the full explanation is the tooltip."""
+    lab = QLabel(f"✓  {short}")
+    lab.setObjectName("trustNote")
+    lab.setToolTip(full or short)
+    return lab
+
+
+class HelpToggle(QWidget):
+    """A small "How it works" link that reveals an explanation only when the user asks for it."""
+
+    def __init__(self, text: str, title: str = "How it works", kind: str = "info"):
+        super().__init__()
+        self.title = title
+        self.link = button("", "link", self.toggle)
+        self.link.setToolTip("Show or hide the explanation")
+        self.banner = Banner(text, kind)
+        self.banner.hide()
+        lay = vbox(hbox(self.link, None), self.banner, spacing=4)
+        self.setLayout(lay)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        self._label()
+
+    def _label(self) -> None:
+        self.link.setText(f"ⓘ  {self.title}  {'▾' if self.expanded else '▸'}")
+
+    @property
+    def expanded(self) -> bool:
+        return not self.banner.isHidden()
+
+    def toggle(self) -> None:
+        self.banner.setVisible(not self.expanded)
+        self._label()
+
+    def setText(self, text: str) -> None:
+        self.banner.setText(text)
+
+    def text(self) -> str:
+        return self.banner.text()
+
+
 class Tile(QFrame):
-    def __init__(self, value: str = "—", text: str = "", sub: str = ""):
+    def __init__(self, value: str = "—", text: str = "", sub: str = "", glyph: str = "", color: str = ""):
         super().__init__()
         self.setObjectName("tile")
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
@@ -200,12 +253,22 @@ class Tile(QFrame):
         self.sub = label(sub or " ", "small")
         lay = vbox(self.text, self.value, self.sub, spacing=2)
         lay.setContentsMargins(14, 10, 14, 10)
-        self.setLayout(lay)
+        if glyph:
+            chip = icon_chip(glyph, color or theme.ACCENT, 15, 28)
+            outer = hbox(lay, None, chip, spacing=8)
+            outer.setAlignment(chip, Qt.AlignmentFlag.AlignTop)
+            lay.setContentsMargins(0, 0, 0, 0)
+            outer.setContentsMargins(14, 10, 12, 10)
+            self.setLayout(outer)
+        else:
+            self.setLayout(lay)
         self.setMinimumWidth(130)
 
     def set(self, value: str, sub: str = "", color: Optional[str] = None) -> None:
+        """``color`` marks the tile's status: the number and a stripe on the left edge use it."""
         self.value.setText(value)
         self.value.setStyleSheet(f"color: {color};" if color else "")
+        self.setStyleSheet(f"#tile {{ border-left: 4px solid {color}; }}" if color else "")
         self.sub.setText(sub or " ")
 
 

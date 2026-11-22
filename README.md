@@ -90,6 +90,13 @@ the rendered page).
   Multi-group cleanup protects saved Keep choices and unchecked copies you reviewed. It retains a verified copy
   per content set even if every copy was checked individually. Strict cleanup keeps unique/unmatched linked parts.
   System leftovers and folders are left alone. A fully excluded plan is explained visibly, with the reasons.
+- **Import from iPhone backup** (*Library ▾ → Import from iPhone backup…*): finds unencrypted iTunes / Apple Devices
+  backups on this PC (or any folder you pick) and either adds the photos and videos the library doesn't already hold
+  (same content is skipped) into `iPhone backups\<device> <date>`, or copies a readable, folderised copy of the
+  backup (Camera Roll, edited versions, WhatsApp, Messages attachments, voice memos, app documents, app and system
+  data) to any folder. The backup is opened read-only; copies keep each file's original date; files are written to
+  `.part` and renamed only when complete; existing files are never replaced (clashes get " (2)"); an interrupted
+  import resumes. Encrypted and unfinished backups are flagged. Also available as `tools/extract_ios_backup.py`.
 - **Compare & sync up to three libraries**: this library is **A**; add a phone backup, laptop folder or drive as
   **B** and optionally **C**. A compatible Memoria catalogue in B/C is reused read-only (an incompatible or newer
   one is ignored); other fingerprints are cached in a comparison index stored in the **master** library you choose,
@@ -301,6 +308,8 @@ memoria-photo-manager/
 │   │   ├── catalogue.py · geography.py · storage.py  filters/aggregates, offline map, selective reset
 │   │   ├── diagnostics.py      allowlisted aggregate reports and bounded performance metrics
 │   │   ├── scanner.py          incremental scan + parallel analysis
+│   │   ├── disk_speed.py · activity.py  per-drive read limits (HDD/SSD detection) · live task activity
+│   │   ├── iosbackup.py        read-only iPhone/iPad backup reader and safe, resumable extractor
 │   │   ├── media.py · ffmpeg.py · hashing.py · config.py · progress.py
 │   │   ├── duplicates.py · similar.py · videosim.py · organize.py · tidy.py · health.py · compare.py · libsync.py
 │   │   ├── faces.py · albums.py · places.py
@@ -308,14 +317,14 @@ memoria-photo-manager/
 │   │   └── batch.py · checkup.py · photoedit.py · videoedit.py · story.py · videotools.py
 │   ├── ui/                     PySide6 desktop app
 │   │   ├── app.py · main_window.py · tasks.py · widgets.py · theme.py · assets/
-│   │   ├── insight_charts.py · library_filters.py · storage_dialog.py
+│   │   ├── insight_charts.py · library_filters.py · storage_dialog.py · ios_import.py
 │   │   ├── diagnostics.py      per-device/library consent, preview and local report recording
 │   │   └── pages/              one module per sidebar page (+ base.py)
 │   ├── samplelib.py            generator for the sample / test library (with expected.json)
 │   ├── sample_faces/           public-domain portraits used by the sample library (CREDITS.txt)
 │   └── __main__.py             python -m memoria
 ├── tests/                      pytest suite (engine ground truth, story, video, UI end-to-end)
-├── tools/                      make_test_library · ui_screenshots · benchmark · make_reports · make_icon · verify_build
+├── tools/                      make_test_library · ui_screenshots · benchmark · make_reports · make_icon · verify_build · extract_ios_backup
 ├── docs/                       index · design · features · technical · report (HTML) + images/
 ├── Memoria.pyw                 windowed launcher
 ├── run.ps1 · build.ps1         start (sets up .venv) · build standalone app
@@ -684,7 +693,7 @@ See also the [CHANGELOG](CHANGELOG.md).
 
 ## Licence
 
-Proprietary — © 2026 Rishabh Jain. All rights reserved. See [LICENSE](LICENSE). Third-party dependencies keep their own
+MIT — © 2026 Rishabh Jain. See [LICENSE](LICENSE). Third-party dependencies keep their own
 licences; see the [Technical document](docs/technical.html#deps). Bundled data: YuNet face detector (MIT) and SFace
 face recogniser (Apache 2.0) from the OpenCV model zoo; town names from [GeoNames](https://www.geonames.org) (CC BY 4.0);
 public-domain test portraits from Wikimedia Commons (`memoria/sample_faces/CREDITS.txt`); public-domain country

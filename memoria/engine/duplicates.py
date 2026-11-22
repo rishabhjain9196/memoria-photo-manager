@@ -9,6 +9,7 @@ are reported at the highest folder level, so a copied tree shows up once, as its
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import hashlib
@@ -19,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePath
 from typing import Iterable, Optional
 
-from . import config, roots
+from . import activity, config, disk_speed, roots
 from .actions import Action
 from .db import Library
 from .hashing import full_hash, quick_hash
@@ -45,17 +46,23 @@ class DuplicateGroup:
 def _hash_pass(lib: Library, rows: list, fn, column: str, progress: Progress, label: str,
                done_offset: int, total: int) -> dict[int, Optional[str]]:
     out: dict[int, Optional[str]] = {}
-    todo = [r for r in rows if not r[column]]
+    # Disk order (folder by folder) instead of size order keeps a hard disk streaming.
+    todo = sorted((r for r in rows if not r[column]), key=lambda r: r["rel_path"].lower())
     for r in rows:
         if r[column]:
             out[r["id"]] = r[column]
     if todo:
+        gates = disk_speed.root_gates(lib)
+        sources = {roots.split_key(r["rel_path"])[0] for r in todo}
+
         def work(r):
             p = lib.abspath(r["rel_path"])
             lib.check_path(p)
-            return r["id"], (fn(p, r["size"]) if column == "qhash" else fn(p))
+            with gates.get(roots.split_key(r["rel_path"])[0]) or contextlib.nullcontext():
+                return r["id"], (fn(p, r["size"]) if column == "qhash" else fn(p))
         updates = []
-        with ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
+        workers = min(config.WORKERS, disk_speed.read_workers(lib, sources))
+        with activity.pool("Hashing", workers), ThreadPoolExecutor(max_workers=workers) as pool:
             for i, (fid, h) in enumerate(pool.map(work, todo), 1):
                 out[fid] = h
                 if h:
@@ -75,12 +82,21 @@ def confirm_identical(lib: Library, rows: list, progress: Optional[Progress] = N
             by_size[r["size"]].append(r)
     cands = [r for g in by_size.values() if len(g) > 1 for r in g]
     total = len(cands) * 2 or 1
-    q = _hash_pass(lib, cands, quick_hash, "qhash", progress, label, 0, total)
+    # Files whose full hash is already catalogued (photos hashed while indexing) need no reads;
+    # only the rest get the sampled pre-filter.
+    known = [r for r in cands if r["chash"]]
+    unknown = [r for r in cands if not r["chash"]]
+    q = _hash_pass(lib, unknown, quick_hash, "qhash", progress, label, 0, total)
     by_q = defaultdict(list)
-    for r in cands:
+    for r in unknown:
         if q.get(r["id"]):
             by_q[(r["size"], q[r["id"]])].append(r)
-    cands2 = [r for g in by_q.values() if len(g) > 1 for r in g]
+    for r in known:
+        if r["qhash"]:
+            by_q[(r["size"], r["qhash"])].append(r)
+    sizes_unsampled = {r["size"] for r in known if not r["qhash"]}
+    cands2 = known + [r for r in unknown if q.get(r["id"]) and
+                      (len(by_q[(r["size"], q[r["id"]])]) > 1 or r["size"] in sizes_unsampled)]
     c = _hash_pass(lib, cands2, full_hash, "chash", progress, label, len(cands), total)
     by_c = defaultdict(list)
     for r in cands2:

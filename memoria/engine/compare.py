@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from . import config, roots
+from . import activity, config, roots
 from .actions import Action
 from .db import Library, LibraryUnavailable
 from .hashing import full_hash
@@ -110,7 +110,7 @@ def _hash_ours(lib: Library, rows: list[dict], progress: Progress, total: int) -
         return r, full_hash(lib.abspath(r["rel_path"]))
 
     updates = []
-    with ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
+    with activity.pool("Hashing library", config.WORKERS), ThreadPoolExecutor(max_workers=config.WORKERS) as pool:
         for i, (r, h) in enumerate(pool.map(work, todo), 1):
             r["chash"] = h
             if h:
@@ -124,7 +124,8 @@ def _hash_theirs(root: Path, files: list[OtherFile], progress: Progress, offset:
         t.hash = full_hash(root / t.rel_path)
         return t
 
-    with ThreadPoolExecutor(max_workers=max(2, config.WORKERS // 2)) as pool:
+    with activity.pool("Reading other folder", max(2, config.WORKERS // 2)), \
+            ThreadPoolExecutor(max_workers=max(2, config.WORKERS // 2)) as pool:
         for i, _ in enumerate(pool.map(work, files), 1):
             progress.update(offset + i, total, f"Reading files in the other folder… {i:,} of {len(files):,}")
 

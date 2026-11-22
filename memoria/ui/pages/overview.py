@@ -5,9 +5,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QGridLayout, QWidget
 
 from ...engine import actions, health, organize, recovery, similar, tidy
-from .. import theme
+from .. import nav, theme
 from ..tasks import LatestCall
-from ..widgets import Banner, Tile, button, fmt_date, fmt_n, fmt_size, glyph_label, hbox, label, scroll, vbox
+from ..widgets import Banner, Tile, button, fmt_date, fmt_n, fmt_size, hbox, icon_chip, label, scroll, vbox
 from .base import Page
 
 
@@ -17,7 +17,7 @@ class ToolCard(QFrame):
         self.setObjectName("card")
         self.status = label("", "muted", wrap=True)
         self.btn = button("Open", on_click=lambda: ctx.navigate.emit(key))
-        lay = vbox(hbox(glyph_label(glyph, 20, theme.ACCENT), label(title, "h2"), None), self.status, None,
+        lay = vbox(hbox(icon_chip(glyph, nav.color(key), 17, 34), label(title, "h2"), None), self.status, None,
                    hbox(None, self.btn), spacing=6, margins=(16, 14, 16, 12))
         self.setLayout(lay)
         self.setMinimumHeight(130)
@@ -45,8 +45,11 @@ class OverviewPage(Page):
             self.header_actions.addWidget(w)
         ctx.people_changed.connect(self._mark_stale)
         ctx.albums_changed.connect(self._mark_stale)
-        self.t_photos, self.t_videos, self.t_size, self.t_span = Tile(text="Photos"), Tile(text="Videos"), \
-            Tile(text="Library size"), Tile(text="Covers")
+        lib_color = theme.section_color("LIBRARY")
+        self.t_photos = Tile(text="Photos", glyph="\uE91B", color=lib_color)
+        self.t_videos = Tile(text="Videos", glyph="\uE714", color=lib_color)
+        self.t_size = Tile(text="Library size", glyph="\uEDA2", color=lib_color)
+        self.t_span = Tile(text="Covers", glyph="\uE787", color=lib_color)
         tiles = hbox(self.t_photos, self.t_videos, self.t_size, self.t_span, spacing=12)
         self.trust = Banner("", "info")
         self.pending = Banner("", "info")

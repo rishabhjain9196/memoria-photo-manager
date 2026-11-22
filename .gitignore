@@ -26,7 +26,9 @@ Memoria Exports/
 *.zip
 *.log
 
-# Atomic diagnostic-report staging files; reviewed aggregate .json reports may be committed.
+# Diagnostic reports describe a personal library and computer: never committed by default.
+# To share one deliberately, review it and use `git add -f` (see diagnostics/README.md).
+diagnostics/reports/*.json
 diagnostics/reports/.*.tmp
 
 # Editors and OS

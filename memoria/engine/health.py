@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-from . import config
+from . import activity, config
 from .db import Library
 from .hashing import full_hash
 from .progress import Progress
@@ -86,7 +86,8 @@ def run_health(lib: Library, progress: Optional[Progress] = None, decode_images:
 
     now = datetime.now().isoformat(sep=" ", timespec="seconds")
     updates, done_bytes = [], 0
-    with ThreadPoolExecutor(max_workers=max(2, config.WORKERS // 2)) as pool:
+    with activity.pool("Health readers", max(2, config.WORKERS // 2)), \
+            ThreadPoolExecutor(max_workers=max(2, config.WORKERS // 2)) as pool:
         for i, (r, status, detail, h) in enumerate(pool.map(check, rows), 1):
             done_bytes += r["size"]
             rep.counts[status] += 1

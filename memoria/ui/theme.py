@@ -32,6 +32,9 @@ PALETTES: dict[str, dict[str, str]] = {
         "TOAST_LINK": "#AFC0FF", "SCROLL": "#CDD2DA", "SCROLL_HOVER": "#AEB5C0", "PLACEHOLDER": "#EDEFF2",
         "PREVIEW_BG": "#F2F4F7", "SEGMENT_BG": "#EEF0F3", "SEGMENT_BORDER": "#D6DAE1", "SUBTLE": "#EEF0F3",
         "SELECTION_TEXT": "#161B26", "SHADOW": "#2E101828", "CHECK_BORDER": "#7F8896",
+        # One colour per sidebar section, used for icons and accents so each area is recognisable.
+        "SEC_LIBRARY": "#3557D6", "SEC_CLEANUP": "#C2410C", "SEC_ORGANISE": "#7C3AED",
+        "SEC_CREATE": "#C026D3", "SEC_PROTECT": "#0F7B4F",
     },
     "dark": {
         "ACCENT": "#5476EE", "ACCENT_HOVER": "#6887F1", "ACCENT_PRESSED": "#4766DA", "ACCENT_SOFT": "#1C2440",
@@ -48,6 +51,8 @@ PALETTES: dict[str, dict[str, str]] = {
         "TOAST_LINK": "#9DB2FF", "SCROLL": "#3A3F48", "SCROLL_HOVER": "#4C525C", "PLACEHOLDER": "#23272E",
         "PREVIEW_BG": "#1F2228", "SEGMENT_BG": "#1F2228", "SEGMENT_BORDER": "#3A3F48", "SUBTLE": "#1F2228",
         "SELECTION_TEXT": "#E8EAEE", "SHADOW": "#80000000", "CHECK_BORDER": "#8C94A1",
+        "SEC_LIBRARY": "#7D97F2", "SEC_CLEANUP": "#F59E5B", "SEC_ORGANISE": "#A78BFA",
+        "SEC_CREATE": "#E879F9", "SEC_PROTECT": "#4CC38A",
     },
 }
 
@@ -72,6 +77,22 @@ TEXT = MUTED = BORDER = INPUT_BORDER = BG = CARD = SIDEBAR = NAV_HOVER = HOVER =
 DISABLED_TEXT = DISABLED_BG = PRIMARY_DISABLED = PRIMARY_DISABLED_TEXT = DANGER_DISABLED = ""
 HEADER_BG = TRACK = TOAST_BG = TOAST_TEXT = TOAST_LINK = SCROLL = SCROLL_HOVER = PLACEHOLDER = ""
 PREVIEW_BG = SEGMENT_BG = SEGMENT_BORDER = SUBTLE = SELECTION_TEXT = CHECK_BORDER = ""
+SEC_LIBRARY = SEC_CLEANUP = SEC_ORGANISE = SEC_CREATE = SEC_PROTECT = ""
+
+_SECTIONS = {"LIBRARY": "SEC_LIBRARY", "CLEAN UP": "SEC_CLEANUP", "ORGANISE": "SEC_ORGANISE",
+             "CREATE": "SEC_CREATE", "PROTECT": "SEC_PROTECT"}
+
+
+def section_color(heading: str) -> str:
+    """Colour of a sidebar section (LIBRARY, CLEAN UP, …) in the active theme."""
+    return globals().get(_SECTIONS.get(heading, ""), "") or ACCENT
+
+
+def soft(color: str, alpha: float = 0.13) -> str:
+    """``color`` as a translucent rgba() fill, for tinted chips that work on light and dark cards."""
+    c = color.lstrip("#")[-6:]
+    r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    return f"rgba({r}, {g}, {b}, {alpha})"
 
 
 def _asset(name: str) -> str:
@@ -148,6 +169,7 @@ QPushButton#sideMenu::menu-indicator {{ image: none; width: 0; }}
 #tileValue {{ font-size: 18pt; font-weight: 600; }}
 #tileLabel {{ color: {MUTED}; font-size: 9pt; }}
 #trust {{ background: {OK_SOFT}; border: 1px solid {OK_BORDER}; border-radius: 10px; color: {OK}; padding: 9px 13px; }}
+#trustNote {{ color: {OK}; font-size: 9pt; }}
 #warnBox {{ background: {WARN_SOFT}; border: 1px solid {WARN_BORDER}; border-radius: 10px; color: {WARN}; padding: 9px 13px; }}
 #dangerBox {{ background: {DANGER_SOFT}; border: 1px solid {DANGER_BORDER}; border-radius: 10px; color: {DANGER}; padding: 9px 13px; }}
 #infoBox {{ background: {ACCENT_SOFT}; border: 1px solid {ACCENT_BORDER}; border-radius: 10px; color: {INFO_TEXT}; padding: 9px 13px; }}
